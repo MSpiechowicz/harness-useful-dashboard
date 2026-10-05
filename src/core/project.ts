@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface ProjectEnv {
   home: string;
@@ -13,7 +13,7 @@ export function defaultProjectEnv(): ProjectEnv {
   return { home: homedir(), temps: [tmpdir(), "/tmp", "/var/folders", "/private/var/folders"] };
 }
 
-const slashes = (p: string) => p.split(sep).join("/").replace(/\/+$/, "");
+const slashes = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
 const under = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
 
 /**
@@ -49,12 +49,14 @@ function repoRoot(dir: string, git: string): string {
 export function resolveProject(cwd: string | null | undefined, env: ProjectEnv = defaultProjectEnv()): string | null {
   if (!cwd) return null;
   if (!isAbsolute(cwd)) return cwd;
-  const dir = resolve(cwd);
-  const home = resolve(env.home);
-  if (dir === home || isScratch(dir, env)) return null;
+  // The path is walked as it was recorded, never resolved: on Windows that would rewrite a path recorded on another
+  // system ("/work/app" becomes "D:\work\app"). Only a trailing separator goes, unless the path is a root.
+  const dir = /^([\\/]+|[A-Za-z]:[\\/]?)$/.test(cwd) ? cwd : cwd.replace(/[\\/]+$/, "");
+  const home = slashes(env.home);
+  if (slashes(dir) === home || isScratch(dir, env)) return null;
   // Never climb to the home directory or above it: a dotfiles repo in ~ would otherwise swallow everything.
-  const stop = dir.startsWith(home + sep) ? home : null;
-  for (let d = dir; d !== stop && d !== dirname(d); d = dirname(d)) {
+  const stop = under(slashes(dir), home) ? home : null;
+  for (let d = dir; slashes(d) !== stop && d !== dirname(d); d = dirname(d)) {
     const git = join(d, ".git");
     if (existsSync(git)) return repoRoot(d, git);
   }

@@ -188,7 +188,7 @@ describe("palette usage", () => {
     const palette = new Set(MODES.flatMap((m) => [...NAMES.flatMap((f) => familyShades(f, m)), ...OTHER[m]]).map((c) => c.toLowerCase()));
     const hits: string[] = [];
     for (const file of new Bun.Glob("web/src/**/*.{ts,svelte,css}").scanSync(ROOT)) {
-      if (file.endsWith("lib/palette.ts")) continue;
+      if (file.replace(/\\/g, "/").endsWith("lib/palette.ts")) continue;
       for (const hex of readFileSync(join(ROOT, file), "utf8").match(/#[0-9a-fA-F]{6}\b/g) ?? [])
         if (palette.has(hex.toLowerCase())) hits.push(`${file}: ${hex}`);
     }
