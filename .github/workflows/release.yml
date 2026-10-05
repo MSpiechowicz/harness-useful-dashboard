@@ -1,0 +1,49 @@
+name: Release
+
+# Every push to main is analysed by semantic-release. Conventional commits decide the next version:
+#   fix: → patch, feat: → minor, "BREAKING CHANGE:" footer or "feat!:" → major; other types don't release.
+# On a release it bumps package.json, updates CHANGELOG.md, builds all binaries with that version,
+# tags vX.Y.Z and publishes a GitHub release with the binaries + checksums.txt.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # push the release commit + tag, create the release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test
+
+  release:
+    needs: test
+    # macOS can cross-compile every target and natively ad-hoc sign the darwin binaries.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # semantic-release needs the full history and tags
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx --no-install semantic-release
