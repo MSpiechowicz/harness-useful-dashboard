@@ -1,25 +1,26 @@
 <script lang="ts">
   import {
-    Activity, Boxes, Cpu, Database, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
+    Activity, Bot, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
     PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
   import ThemeToggle from "./components/ThemeToggle.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
+  import { network } from "./lib/api.svelte.ts";
   import { relative } from "./lib/format.ts";
   import { t, type MessageKey } from "./lib/i18n.svelte.ts";
   import { live } from "./lib/live.svelte.ts";
   import { store } from "./lib/state.svelte.ts";
   import Breakdown from "./pages/Breakdown.svelte";
   import Cache from "./pages/Cache.svelte";
+  import Files from "./pages/Files.svelte";
   import Overview from "./pages/Overview.svelte";
   import PromptDetail from "./pages/PromptDetail.svelte";
   import Prompts from "./pages/Prompts.svelte";
   import SessionDetail from "./pages/SessionDetail.svelte";
   import Sessions from "./pages/Sessions.svelte";
   import Settings from "./pages/Settings.svelte";
-  import Skills from "./pages/Skills.svelte";
   import Tips from "./pages/Tips.svelte";
   import Tools from "./pages/Tools.svelte";
   import Trends from "./pages/Trends.svelte";
@@ -40,15 +41,20 @@
       { page: "providers", label: "nav.providers", icon: Boxes },
       { page: "users", label: "nav.users", icon: Users },
       { page: "skills", label: "nav.skills", icon: Sparkles },
+      { page: "agents", label: "nav.agents", icon: Bot },
     ] },
     { label: "nav.group.activity", items: [
       { page: "sessions", label: "nav.sessions", icon: Layers },
       { page: "prompts", label: "nav.prompts", icon: MessageSquareText },
       { page: "tools", label: "nav.tools", icon: Wrench },
+      { page: "files", label: "nav.files", icon: FileCode },
     ] },
     { label: "nav.group.optimize", items: [
       { page: "cache", label: "nav.cache", icon: Database },
       { page: "tips", label: "nav.tips", icon: Lightbulb },
+    ] },
+    { label: "nav.group.app", items: [
+      { page: "settings", label: "nav.settings", icon: SettingsIcon },
     ] },
   ];
 
@@ -68,10 +74,25 @@
     return relative(live.lastScanAt);
   });
 
+  // Show the top progress bar only for loads that take a moment, so quick refreshes don't flicker it.
+  let busy = $state(false);
+  $effect(() => {
+    if (network.inflight === 0) {
+      busy = false;
+      return;
+    }
+    const h = setTimeout(() => (busy = true), 150);
+    return () => clearTimeout(h);
+  });
+
   function isActive(p: string): boolean {
     return page === p;
   }
 </script>
+
+{#if busy}
+  <div class="progress-bar" role="progressbar" aria-label={t("common.loading")}></div>
+{/if}
 
 <div class="flex min-h-screen">
   <!-- Sidebar -->
@@ -80,11 +101,8 @@
     class:-translate-x-full={!menuOpen}
   >
     <div class="flex h-14 items-center gap-2.5 px-4">
-      <img src="/favicon.svg" alt="" class="h-7 w-7" />
-      <div class="min-w-0">
-        <div class="truncate text-sm font-semibold">{t("app.name")}</div>
-        <div class="truncate text-[11px] text-muted">{t("app.tagline")}</div>
-      </div>
+      <img src="/favicon.svg" alt="" class="h-7 w-7 shrink-0" />
+      <div class="truncate text-[15px] font-semibold tracking-tight">{t("app.name")}</div>
       <button class="ml-auto lg:hidden" aria-label="Close menu" onclick={() => (menuOpen = false)}><X size={18} /></button>
     </div>
     <nav class="flex-1 overflow-y-auto px-2 py-2">
@@ -102,18 +120,15 @@
         {/each}
       {/each}
     </nav>
-    <div class="flex flex-col gap-3 border-t border-line p-3">
+    <!-- Language and theme, then the live status: lined up with the menu's highlight boxes (the nav's px-2). -->
+    <div class="flex flex-col gap-3 border-t border-line px-2 py-3">
       <UpdateBanner />
-      <a
-        href="#/settings"
-        class="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm {isActive('settings') ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-surface-2'}"
-      ><SettingsIcon size={16} />{t("nav.settings")}</a>
-      <div class="flex items-center justify-between gap-2 px-1">
+      <div class="flex items-center justify-between gap-2">
         <LangPicker />
         <ThemeToggle />
       </div>
       <div class="flex items-center gap-2 px-1 text-[11px] text-muted" title={live.status?.dbPath}>
-        <span class="inline-block h-2 w-2 rounded-full" style:background={live.connected ? "var(--status-good)" : "var(--status-critical)"}></span>
+        <span class="inline-block h-2 w-2 shrink-0 rounded-full" style:background={live.connected ? "var(--status-good)" : "var(--status-critical)"}></span>
         {#if live.scanning}
           <Gauge size={12} class="animate-pulse" />{t("status.scanning", live.scanning)}
         {:else if live.connected}
@@ -149,12 +164,14 @@
         {:else if page === "models"}<Breakdown dim="model" />
         {:else if page === "providers"}<Breakdown dim="provider" />
         {:else if page === "users"}<Breakdown dim="user" />
-        {:else if page === "skills"}<Skills />
+        {:else if page === "skills"}<Breakdown dim="skill" />
+        {:else if page === "agents"}<Breakdown dim="agent" />
         {:else if page === "sessions" && id}<SessionDetail {id} />
         {:else if page === "sessions"}<Sessions />
         {:else if page === "prompts" && id}<PromptDetail {id} />
         {:else if page === "prompts"}<Prompts />
         {:else if page === "tools"}<Tools />
+        {:else if page === "files"}<Files />
         {:else if page === "cache"}<Cache />
         {:else if page === "tips"}<Tips />
         {:else if page === "settings"}<Settings />

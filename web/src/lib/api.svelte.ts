@@ -1,3 +1,4 @@
+import { untrack } from "svelte";
 import { type Filters, store } from "./state.svelte.ts";
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -41,6 +42,14 @@ export async function send<T>(path: string, body?: unknown, method = "POST", con
  * Keeps the previous data while reloading so charts hold their frame.
  * Must be created during component initialisation.
  */
+/** Number of useFetch requests in flight, for the global progress bar. */
+export const network = $state({ inflight: 0 });
+
+/** Whether every request has finished its first round, with data or with an error (so a failure can't hang a view). */
+export function settled(...fetches: { data: unknown; error: string | null }[]): boolean {
+  return fetches.every((f) => f.data != null || f.error != null);
+}
+
 export function useFetch<T>(url: () => string | null) {
   let data = $state<T | null>(null);
   let loading = $state(true);
@@ -53,6 +62,8 @@ export function useFetch<T>(url: () => string | null) {
     if (!u) return;
     const mine = ++seq;
     loading = true;
+    // Untracked: reading the counter here would make every fetch effect re-run whenever any request starts or ends.
+    untrack(() => network.inflight++);
     getJson<T>(u)
       .then((d) => {
         if (mine === seq) {
@@ -64,6 +75,7 @@ export function useFetch<T>(url: () => string | null) {
         if (mine === seq) error = e.message;
       })
       .finally(() => {
+        network.inflight--;
         if (mine === seq) loading = false;
       });
   });
@@ -129,6 +141,18 @@ export interface BreakdownRow extends Totals {
   share: number;
   tokenShare: number;
 }
+/** Usage by the plan or account it was billed through (/api/billing). */
+export interface BillingRow {
+  /** The reported plan ("github-copilot", "openai-codex", …), or the harness when it reports none. */
+  key: string;
+  reported: boolean;
+  calls: number;
+  tokens: number;
+  cost: number;
+  premiumRequests: number;
+  estimated: boolean;
+}
+
 export interface Breakdown {
   total: { tokens: number; cost: number };
   rows: BreakdownRow[];

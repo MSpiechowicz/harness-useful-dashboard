@@ -1,13 +1,19 @@
 <script lang="ts">
-  import { Check, FileUp, Plus, Power, RefreshCw, Trash2 } from "@lucide/svelte";
+  import { Check, Cloud, FileUp, Info, Plus, Power, RefreshCw, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
+  import Dropdown from "../components/Dropdown.svelte";
   import LangPicker from "../components/LangPicker.svelte";
+  import NumberField from "../components/NumberField.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import PathList from "../components/PathList.svelte";
+  import SettingRow from "../components/SettingRow.svelte";
+  import Switch from "../components/Switch.svelte";
   import ThemeToggle from "../components/ThemeToggle.svelte";
   import { getJson, send, type UpdateStatus } from "../lib/api.svelte.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
 
+  type SourceKey = "claude" | "codex" | "omp";
   interface Config {
     dbPath: string;
     journalMode: "auto" | "wal" | "delete";
@@ -16,8 +22,16 @@
     scanIntervalSec: number;
     promptTextLimit: number;
     checkUpdates: boolean;
-    sources: { claudeDirs: string[]; codexDirs: string[]; enabled: { claude: boolean; codex: boolean } };
+    sources: { claudeDirs: string[]; codexDirs: string[]; ompDirs: string[]; enabled: Record<SourceKey, boolean> };
   }
+  interface Settings {
+    config: Config;
+    dbPath: string;
+    defaultDbPath: string;
+    syncFolders: { name: string; path: string }[];
+    sharedFolder: string;
+  }
+  type DbState = "default" | "current" | "existing" | "new" | "missing" | "invalid";
   interface Rule {
     pattern: string;
     input: number;
@@ -28,12 +42,21 @@
     source?: "builtin" | "user";
   }
 
+  const SOURCES: { key: SourceKey; dirs: "claudeDirs" | "codexDirs" | "ompDirs" }[] = [
+    { key: "claude", dirs: "claudeDirs" },
+    { key: "codex", dirs: "codexDirs" },
+    { key: "omp", dirs: "ompDirs" },
+  ];
+
   let cfg = $state<Config | null>(null);
   let currentDb = $state("");
-  let dbPath = $state("");
+  let defaultDb = $state("");
+  let syncFolders = $state<Settings["syncFolders"]>([]);
+  let sharedFolder = $state("");
+  let dbInput = $state("");
+  let target = $state<{ file: string; state: DbState } | null>(null);
   let copyDb = $state(true);
-  let claudeDirs = $state("");
-  let codexDirs = $state("");
+  let dirs = $state<Record<SourceKey, string[]>>({ claude: [""], codex: [""], omp: [""] });
   let saved = $state<string | null>(null);
   let errorMsg = $state<string | null>(null);
   let busy = $state(false);
@@ -43,13 +66,30 @@
   let update = $state<UpdateStatus | null>(null);
   let importMsg = $state<string | null>(null);
 
-  async function load() {
-    const s = await getJson<{ config: Config; dbPath: string }>("/api/settings");
+  /** Join a folder and a name with the separator the folder already uses. */
+  const joinPath = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") && !dir.includes("/") ? "\\" : "/"}${name}`;
+  /** The database setting as the folder it's in, unless the file has a name of its own. */
+  const asFolder = (file: string) => file.replace(/[\\/]usage\.db$/, "");
+  const example = $derived.by(() => {
+    if (syncFolders[0]) return joinPath(syncFolders[0].path, sharedFolder);
+    const os = live.status?.platform ?? "";
+    if (os.startsWith("darwin")) return `~/Library/Mobile Documents/com~apple~CloudDocs/${sharedFolder}`;
+    if (os.startsWith("win")) return `C:\\Users\\you\\Dropbox\\${sharedFolder}`;
+    return `~/Dropbox/${sharedFolder}`;
+  });
+
+  function apply(s: Settings) {
     cfg = s.config;
     currentDb = s.dbPath;
-    dbPath = s.config.dbPath;
-    claudeDirs = s.config.sources.claudeDirs.join("\n");
-    codexDirs = s.config.sources.codexDirs.join("\n");
+    defaultDb = s.defaultDbPath;
+    syncFolders = s.syncFolders;
+    sharedFolder = s.sharedFolder;
+    dbInput = asFolder(s.config.dbPath);
+    for (const src of SOURCES) dirs[src.key] = s.config.sources[src.dirs].length ? [...s.config.sources[src.dirs]] : [""];
+  }
+
+  async function load() {
+    apply(await getJson<Settings>("/api/settings"));
     const rules = await getJson<Rule[]>("/api/pricing");
     userRules = rules.filter((r) => r.source === "user");
     builtinRules = rules.filter((r) => r.source === "builtin");
@@ -68,19 +108,18 @@
     busy = true;
     errorMsg = null;
     try {
-      const lines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
-      const r = await send<{ config: Config; dbPath: string }>("/api/settings", {
+      const clean = (a: string[]) => a.map((x) => x.trim()).filter(Boolean);
+      const r = await send<Settings>("/api/settings", {
         userName: cfg.userName,
         openMode: cfg.openMode,
         scanIntervalSec: Number(cfg.scanIntervalSec),
         promptTextLimit: Number(cfg.promptTextLimit),
         checkUpdates: cfg.checkUpdates,
         journalMode: cfg.journalMode,
-        sources: { claudeDirs: lines(claudeDirs), codexDirs: lines(codexDirs), enabled: cfg.sources.enabled },
+        sources: { claudeDirs: clean(dirs.claude), codexDirs: clean(dirs.codex), ompDirs: clean(dirs.omp), enabled: cfg.sources.enabled },
         ...extra,
       });
-      cfg = r.config;
-      currentDb = r.dbPath;
+      apply(r);
       flash(t("settings.saved"));
     } catch (e) {
       errorMsg = (e as Error).message;
@@ -90,8 +129,35 @@
   }
 
   async function saveDb() {
-    await save({ dbPath, copyDb });
+    await save({ dbPath: dbInput, copyDb });
   }
+
+  // What saving the database folder would do, checked as it's typed. Only the latest answer counts.
+  let asked = 0;
+  $effect(() => {
+    const path = dbInput;
+    void currentDb;
+    const n = ++asked;
+    const timer = setTimeout(() => {
+      getJson<{ file: string; state: DbState }>(`/api/settings/db-target?path=${encodeURIComponent(path)}`)
+        .then((r) => n === asked && (target = r))
+        .catch(() => {});
+    }, 200);
+    return () => clearTimeout(timer);
+  });
+  const canSaveDb = $derived(!!target && (target.state === "default" || target.state === "existing" || target.state === "new"));
+  // The line under the folder. Left empty it shows an example path, never one that could pass for the folder in use.
+  const status = $derived.by(() => {
+    if (!dbInput.trim() && (!target || target.state === "current")) return { icon: Info, tone: "muted", text: t("settings.dbExample", { example }) };
+    if (!target) return null;
+    const text = t(`settings.dbTarget.${target.state}`, { file: target.file, example });
+    if (target.state === "current") return { icon: Check, tone: "good", text };
+    if (target.state === "missing" || target.state === "invalid") return { icon: TriangleAlert, tone: "bad", text };
+    return { icon: target.state === "existing" ? Users : Info, tone: "muted", text };
+  });
+  const updateText = $derived(
+    !update ? "" : update.error ? t("update.failed", { error: update.error }) : update.available ? t("update.available", { v: update.latest }) : t("settings.upToDate"),
+  );
 
   async function rescan(full: boolean) {
     busy = true;
@@ -155,100 +221,136 @@
   }
 </script>
 
-<div class="flex max-w-4xl flex-col gap-5">
-  <PageHeader title={t("settings.title")}>
+<div class="flex flex-col gap-5">
+  <PageHeader title={t("settings.title")} subtitle={t("settings.subtitle")}>
     {#if saved}<span class="inline-flex items-center gap-1 text-xs text-good"><Check size={14} />{saved}</span>{/if}
   </PageHeader>
   {#if errorMsg}<div class="rounded-lg border border-line bg-surface px-4 py-3 text-sm text-bad">{errorMsg}</div>{/if}
 
   {#if cfg}
-    <Card title={t("settings.general")}>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <div class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium text-ink-2">{t("settings.language")}</span>
-          <LangPicker />
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium text-ink-2">{t("settings.theme")}</span>
-          <div><ThemeToggle /></div>
-        </div>
-        <label class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium text-ink-2">{t("settings.userName")}</span>
-          <input class="input" bind:value={cfg.userName} />
-          <span class="text-[11px] text-muted">{t("settings.userNameHint")}</span>
-        </label>
-        <label class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium text-ink-2">{t("settings.openMode")}</span>
-          <select class="input" bind:value={cfg.openMode}>
-            <option value="app">{t("settings.openMode.app")}</option>
-            <option value="browser">{t("settings.openMode.browser")}</option>
-            <option value="none">{t("settings.openMode.none")}</option>
-          </select>
-        </label>
-        <label class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium text-ink-2">{t("settings.scanInterval")}</span>
-          <input class="input" type="number" min="0" bind:value={cfg.scanIntervalSec} />
-        </label>
-        <label class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium text-ink-2">{t("settings.promptLimit")}</span>
-          <input class="input" type="number" min="0" bind:value={cfg.promptTextLimit} />
-        </label>
-      </div>
-      <div class="mt-4"><button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button></div>
-    </Card>
-
-    <Card title={t("settings.database")} subtitle={t("settings.dbPathHint")}>
-      <div class="flex flex-col gap-3">
-        <div class="text-xs text-muted">{t("settings.dbCurrent")}: <span class="font-mono text-ink-2">{currentDb}</span></div>
-        <label class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium text-ink-2">{t("settings.dbPath")}</span>
-          <input class="input font-mono" placeholder="~/Library/Mobile Documents/com~apple~CloudDocs/harness/usage.db" bind:value={dbPath} />
-        </label>
-        <label class="flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" bind:checked={copyDb} />{t("settings.dbCopy")}</label>
-        <label class="flex flex-col gap-1.5 sm:max-w-xs">
-          <span class="text-xs font-medium text-ink-2">{t("settings.journal")}</span>
-          <select class="input" bind:value={cfg.journalMode}>
-            <option value="auto">{t("settings.journal.auto")}</option>
-            <option value="delete">{t("settings.journal.delete")}</option>
-            <option value="wal">{t("settings.journal.wal")}</option>
-          </select>
-          <span class="text-[11px] text-muted">{t("settings.journalHint")}</span>
-        </label>
-        <div><button class="btn btn-primary" onclick={saveDb} disabled={busy}>{t("settings.save")}</button></div>
-      </div>
-    </Card>
-
-    <Card title={t("settings.sources")}>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="flex flex-col gap-1.5">
-          <span class="flex items-center gap-2 text-xs font-medium text-ink-2"><input type="checkbox" bind:checked={cfg.sources.enabled.claude} />{t("settings.claudeDirs")}</span>
-          <textarea class="input !h-20 py-1.5 font-mono text-xs" bind:value={claudeDirs}></textarea>
-          <span class="text-[11px] text-muted">{t("settings.onePerLine")}</span>
-        </label>
-        <label class="flex flex-col gap-1.5">
-          <span class="flex items-center gap-2 text-xs font-medium text-ink-2"><input type="checkbox" bind:checked={cfg.sources.enabled.codex} />{t("settings.codexDirs")}</span>
-          <textarea class="input !h-20 py-1.5 font-mono text-xs" bind:value={codexDirs}></textarea>
-          <span class="text-[11px] text-muted">{t("settings.onePerLine")}</span>
-        </label>
-      </div>
-      <div class="mt-4 flex flex-wrap gap-2">
+    <Card title={t("settings.general")} subtitle={t("settings.generalHint")} divided>
+      <SettingRow label={t("settings.language")} hint={t("settings.languageHint")}><LangPicker wide /></SettingRow>
+      <SettingRow label={t("settings.theme")} hint={t("settings.themeHint")}><ThemeToggle wide /></SettingRow>
+      <SettingRow label={t("settings.userName")} hint={t("settings.userNameHint")}>
+        <input class="input w-full" bind:value={cfg.userName} aria-label={t("settings.userName")} />
+      </SettingRow>
+      <SettingRow label={t("settings.openMode")} hint={t("settings.openModeHint")}>
+        <Dropdown
+          full
+          label={t("settings.openMode")}
+          bind:value={cfg.openMode}
+          options={(["app", "browser", "none"] as const).map((v) => ({ value: v, label: t(`settings.openMode.${v}`) }))}
+        />
+      </SettingRow>
+      <SettingRow label={t("settings.scanInterval")} hint={t("settings.scanIntervalHint")}>
+        <NumberField bind:value={cfg.scanIntervalSec} unit={t("settings.unit.seconds")} label={t("settings.scanInterval")} />
+      </SettingRow>
+      <SettingRow label={t("settings.promptLimit")} hint={t("settings.promptLimitHint")}>
+        <NumberField bind:value={cfg.promptTextLimit} unit={t("settings.unit.characters")} label={t("settings.promptLimit")} />
+      </SettingRow>
+      {#snippet footer()}
         <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
-        <button class="btn" onclick={() => rescan(false)} disabled={busy}><RefreshCw size={14} />{t("settings.rescan")}</button>
-        <button class="btn" onclick={() => rescan(true)} disabled={busy}>{t("settings.fullRescan")}</button>
-      </div>
-      <div class="mt-5 border-t border-line pt-4">
-        <div class="text-sm font-medium">{t("settings.cursor")}</div>
-        <p class="mt-1 text-xs text-muted">{t("settings.cursorHint")}</p>
-        <label class="btn mt-3 w-fit">
-          <FileUp size={14} />{t("settings.cursorImport")}
-          <input type="file" accept=".csv,text/csv" class="hidden" onchange={importCursor} />
-        </label>
-        {#if importMsg}<span class="ml-2 text-xs text-ink-2">{importMsg}</span>{/if}
-      </div>
+      {/snippet}
     </Card>
 
-    <Card title={t("settings.pricing")} subtitle={t("settings.pricingHint")}>
-      <div class="overflow-x-auto">
+    <Card title={t("settings.database")} subtitle={t("settings.dbHint")} divided>
+      <SettingRow label={t("settings.dbInUse")} hint={currentDb}>
+        <span class="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-ink-2">
+          {currentDb === defaultDb ? t("settings.dbDefault") : t("settings.dbCustom")}
+        </span>
+      </SettingRow>
+
+      <div class="mb-4 rounded-lg bg-surface-2 px-4 py-3.5">
+        <div class="text-xs font-medium text-ink-2">{t("settings.share")}</div>
+        <!-- A timeline: the steps side by side joined by a line, or one under the other on a narrow screen. -->
+        <ol class="mt-4 grid sm:grid-cols-3">
+          {#each [1, 2, 3] as const as n (n)}
+            <li class="relative flex gap-3 pb-5 last:pb-0 sm:block sm:pb-0">
+              {#if n < 3}
+                <span
+                  class="absolute top-9 bottom-2 left-[11px] w-0.5 rounded-full bg-linear-to-b from-accent/70 to-accent/15 sm:top-[11px] sm:right-4 sm:bottom-auto sm:left-11 sm:h-0.5 sm:w-auto sm:bg-linear-to-r"
+                  aria-hidden="true"
+                ></span>
+              {/if}
+              <span class="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-white shadow-sm ring-4 ring-accent-wash tabular">{n}</span>
+              <div class="min-w-0 sm:mt-3 sm:pr-8">
+                <div class="text-[13px] font-medium text-ink">{t(`settings.share.step${n}Title`)}</div>
+                <div class="mt-0.5 text-xs leading-relaxed text-muted">{t(`settings.share.step${n}`)}</div>
+              </div>
+            </li>
+          {/each}
+        </ol>
+      </div>
+
+      <SettingRow label={t("settings.dbFolder")} hint={t("settings.share.why")} wide>
+        <div class="flex w-full min-w-0 flex-col gap-2">
+          {#if syncFolders.length}
+            <div class="flex flex-wrap gap-2">
+              {#each syncFolders as f (f.path)}
+                {@const value = joinPath(f.path, sharedFolder)}
+                <button class="btn !h-7 !text-xs" class:pick-on={dbInput === value} title={f.path} onclick={() => (dbInput = value)}><Cloud size={13} />{f.name}</button>
+              {/each}
+            </div>
+          {/if}
+          <input class="input w-full font-mono text-xs placeholder:font-sans" bind:value={dbInput} placeholder={t("settings.dbFolderPlaceholder")} aria-label={t("settings.dbFolder")} spellcheck="false" autocomplete="off" />
+          <span
+            class="flex min-h-4 items-start gap-1.5 text-[11px]"
+            class:text-good={status?.tone === "good"}
+            class:text-bad={status?.tone === "bad"}
+            class:text-muted={status?.tone === "muted"}
+          >
+            {#if status}
+              <status.icon size={12} class="mt-px shrink-0" />
+              <span class="min-w-0 break-all">{status.text}</span>
+            {/if}
+          </span>
+        </div>
+      </SettingRow>
+      <SettingRow label={t("settings.dbCopy")} hint={t("settings.dbCopyHint")}>
+        <Switch bind:checked={copyDb} label={t("settings.dbCopy")} disabled={target?.state !== "new"} />
+      </SettingRow>
+      <SettingRow label={t("settings.journal")} hint={t("settings.journalHint")}>
+        <Dropdown
+          full
+          label={t("settings.journal")}
+          bind:value={cfg.journalMode}
+          options={(["auto", "delete", "wal"] as const).map((v) => ({ value: v, label: t(`settings.journal.${v}`) }))}
+        />
+      </SettingRow>
+      {#snippet footer()}
+        {#if currentDb !== defaultDb}
+          <button class="btn" onclick={() => (dbInput = "")} disabled={busy}>{t("settings.dbUseDefault")}</button>
+        {/if}
+        <button class="btn btn-primary" onclick={saveDb} disabled={busy || !canSaveDb}>{t("settings.save")}</button>
+      {/snippet}
+    </Card>
+
+    <Card title={t("settings.sources")} subtitle={t("settings.sourcesHint")} divided>
+      {#each SOURCES as src (src.key)}
+        <SettingRow label={t(`settings.source.${src.key}`)} hint={t(`settings.source.${src.key}Hint`)} wide>
+          {#snippet lead()}<Switch bind:checked={cfg!.sources.enabled[src.key]} label={t(`settings.source.${src.key}`)} />{/snippet}
+          <PathList bind:paths={dirs[src.key]} disabled={!cfg!.sources.enabled[src.key]} />
+        </SettingRow>
+      {/each}
+      <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} wide>
+        {#snippet lead()}<span class="block w-7"></span>{/snippet}
+        <div class="flex w-full flex-wrap items-center gap-3">
+          <label class="btn w-fit">
+            <FileUp size={14} />{t("settings.cursorImport")}
+            <input type="file" accept=".csv,text/csv" class="hidden" onchange={importCursor} />
+          </label>
+          {#if importMsg}<span class="text-xs text-ink-2">{importMsg}</span>{/if}
+        </div>
+      </SettingRow>
+      {#snippet footer()}
+        <button class="btn" onclick={() => rescan(false)} disabled={busy} title={t("settings.rescanHint")}><RefreshCw size={14} />{t("settings.rescan")}</button>
+        <button class="btn" onclick={() => rescan(true)} disabled={busy} title={t("settings.fullRescanHint")}>{t("settings.fullRescan")}</button>
+        <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
+      {/snippet}
+    </Card>
+
+    <Card title={t("settings.pricing")} subtitle={t("settings.pricingHint")} divided>
+      <div class="card-flush -mx-5 overflow-x-auto">
         <table class="data">
           <thead>
             <tr>
@@ -265,19 +367,16 @@
                 <td class="num"><input class="input w-20 text-right" type="number" step="0.001" bind:value={r.cacheRead} placeholder="auto" /></td>
                 <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite5m} placeholder="auto" /></td>
                 <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite1h} placeholder="auto" /></td>
-                <td><button class="btn !px-2" aria-label={t("common.remove")} onclick={() => (userRules = userRules.filter((_, j) => j !== i))}><Trash2 size={14} /></button></td>
+                <td><button class="btn !w-8 justify-center !px-0" aria-label={t("common.remove")} onclick={() => (userRules = userRules.filter((_, j) => j !== i))}><Trash2 size={14} /></button></td>
               </tr>
+            {:else}
+              <tr><td colspan="7" class="!py-5 text-center text-xs text-muted">{t("settings.noRules")}</td></tr>
             {/each}
           </tbody>
         </table>
       </div>
-      <div class="mt-3 flex flex-wrap gap-2">
-        <button class="btn" onclick={() => (userRules = [...userRules, { pattern: "", input: 0, output: 0 }])}><Plus size={14} />{t("settings.addRule")}</button>
-        <button class="btn btn-primary" onclick={savePricing} disabled={busy}>{t("settings.save")}</button>
-        <button class="btn ml-auto" onclick={() => (showBuiltin = !showBuiltin)}>{t("settings.builtin")} ({builtinRules.length})</button>
-      </div>
       {#if showBuiltin}
-        <div class="mt-3 max-h-80 overflow-auto rounded-lg border border-line">
+        <div class="mb-4 max-h-80 overflow-auto rounded-lg border border-line">
           <table class="data">
             <tbody>
               {#each builtinRules as r (r.pattern)}
@@ -293,31 +392,30 @@
           </table>
         </div>
       {/if}
+      {#snippet footer()}
+        <button class="btn mr-auto" onclick={() => (showBuiltin = !showBuiltin)}>{t("settings.builtin")} ({builtinRules.length})</button>
+        <button class="btn" onclick={() => (userRules = [...userRules, { pattern: "", input: 0, output: 0 }])}><Plus size={14} />{t("settings.addRule")}</button>
+        <button class="btn btn-primary" onclick={savePricing} disabled={busy}>{t("settings.save")}</button>
+      {/snippet}
     </Card>
 
-    <Card title={t("settings.updates")}>
-      <div class="flex flex-col gap-3">
-        <div class="text-sm">{t("settings.version", { v: live.status?.version ?? "" })} <span class="text-xs text-muted">({live.status?.platform})</span></div>
-        <label class="flex items-center gap-2 text-sm text-ink-2">
-          <input type="checkbox" bind:checked={cfg.checkUpdates} onchange={() => save()} />{t("settings.checkUpdates")}
-        </label>
-        <div class="flex items-center gap-3">
-          <button class="btn" onclick={checkUpdate}><RefreshCw size={14} />{t("settings.checkNow")}</button>
-          {#if update}
-            <span class="text-xs text-ink-2">
-              {#if update.error}{t("update.failed", { error: update.error })}{:else if update.available}{t("update.available", { v: update.latest })}{:else}{t("settings.upToDate")}{/if}
-            </span>
-          {/if}
-        </div>
-      </div>
-    </Card>
-
-    <Card title={t("settings.quit")} subtitle={t("settings.quitHint")}>
-      {#if stopped}
-        <p class="text-sm text-ink-2">{t("settings.stopped")}</p>
-      {:else}
-        <button class="btn" onclick={quit}><Power size={14} />{t("settings.quit")}</button>
-      {/if}
+    <Card title={t("settings.app")} subtitle={t("settings.appHint")} divided>
+      <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={update ? updateText : live.status?.platform}>
+        <button class="btn" onclick={checkUpdate}><RefreshCw size={14} />{t("settings.checkNow")}</button>
+      </SettingRow>
+      <SettingRow label={t("settings.checkUpdates")} hint={t("settings.checkUpdatesHint")}>
+        <Switch bind:checked={cfg.checkUpdates} label={t("settings.checkUpdates")} onchange={() => save()} />
+      </SettingRow>
+      <SettingRow label={t("settings.quit")} hint={stopped ? t("settings.stopped") : t("settings.quitHint")}>
+        <button class="btn" onclick={quit} disabled={stopped}><Power size={14} />{t("settings.quit")}</button>
+      </SettingRow>
     </Card>
   {/if}
 </div>
+
+<style>
+  .pick-on {
+    border-color: var(--accent);
+    background: var(--accent-wash);
+  }
+</style>

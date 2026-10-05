@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { UsageRecord } from "../src/core/ingest/types.ts";
 import { DbWriter } from "../src/core/ingest/writer.ts";
 import { PriceBook } from "../src/core/pricing.ts";
-import { fillBuckets, projectLabel, Queries, whereClause } from "../src/core/queries.ts";
+import { fillBuckets, projectLabel, Queries, relativeTo, whereClause } from "../src/core/queries.ts";
 import { generateTips } from "../src/core/tips.ts";
 import { ID, memDb } from "./helpers.ts";
 
@@ -84,7 +84,7 @@ describe("Queries", () => {
     const top1 = q.timeseries({}, "day", "model", "tokens", 1);
     expect(top1.series.map((s) => s.key)).toEqual(["gpt-5", "__other__"]);
     const types = q.timeseries({}, "week", "type", "tokens");
-    expect(types.series.map((s) => s.key)).toEqual(["input", "output", "cacheRead", "cacheWrite"]);
+    expect(types.series.map((s) => s.key)).toEqual(["cacheRead", "cacheWrite", "input", "output"]);
   });
 
   test("sessions and prompts listings with search", () => {
@@ -94,6 +94,17 @@ describe("Queries", () => {
     const prompts = q.prompts({}, { sort: "tokens" });
     expect(prompts.rows[0]!.id).toBe("codex:s2:p2");
     expect(q.prompts({}, { q: "fast" }).total).toBe(1);
+  });
+
+  test("prompt listing counts tool calls per prompt and keeps the sort across pages", () => {
+    const { q } = seed();
+    const byCost = q.prompts({}, { sort: "cost" }).rows as Record<string, unknown>[];
+    expect(Object.fromEntries(byCost.map((r) => [r.id, r.toolCalls]))).toEqual({ "claude:s1:p1": 2, "codex:s2:p2": 0 });
+    const costs = byCost.map((r) => r.cost as number);
+    expect(costs).toEqual([...costs].sort((a, b) => b - a));
+    const page2 = q.prompts({}, { sort: "recent", limit: 1, offset: 1 });
+    expect(page2.rows.map((r) => r.id)).toEqual(["claude:s1:p1"]);
+    expect(page2.total).toBe(2);
   });
 
   test("session and prompt details", () => {
@@ -111,7 +122,25 @@ describe("Queries", () => {
     expect(q.heatmap({}, "tokens").cells.length).toBeGreaterThan(0);
     expect(q.calendar({}).length).toBe(3);
     const tools = q.tools({});
-    expect(tools.files[0]).toMatchObject({ key: "/work/alpha/a.ts", reads: 1, edits: 1 });
+    expect(tools.totals).toEqual({ calls: 2, tools: 2, mcpTools: 0, mcpCalls: 0, prompts: 2 });
+    expect(tools.tools.find((x) => x.key === "Read")?.byProject).toEqual({ "/work/alpha": 1 });
+    expect(tools.sources).toEqual([{ key: "builtin", calls: 2 }]);
+    const files = q.files({});
+    expect(files.totals).toMatchObject({ files: 1, calls: 2, reads: 1, edits: 1 });
+    const list = q.fileList({}, {});
+    expect(list.total).toBe(1);
+    expect(list.rows[0]).toMatchObject({ key: "/work/alpha/a.ts", path: "a.ts", reads: 1, edits: 1, projectLabel: "alpha" });
+    expect(q.fileList({}, { q: "nothing-like-this" }).rows).toEqual([]);
+    expect(files.projects).toEqual([{ key: "/work/alpha", label: "alpha", files: 1, calls: 2 }]);
+    const hot = q.hotspots({ project: "/work/alpha" });
+    expect(hot.folders).toEqual([{ path: ".", files: 1, calls: 2, reads: 1, edits: 1 }]);
+    expect(hot.files.map((x) => x.path)).toEqual(["a.ts"]);
+    // A file the project's session read outside its root folds into one bucket and leaves the file list.
+    const { db: db2, q: q2 } = seed();
+    new DbWriter(db2, new PriceBook(), ID).tool({ id: "t9", usageId: "u1", sessionId: "claude:s1", promptId: "claude:s1:p1", provider: "claude", ts: T0, project: "/work/alpha", tool: "Read", filePath: "/tmp/scratch/x.png", skill: null, agent: "main" });
+    const hot2 = q2.hotspots({ project: "/work/alpha" });
+    expect(hot2.folders.map((g) => g.path).sort()).toEqual([".", "__outside__"]);
+    expect(hot2.files.map((x) => x.path)).toEqual(["a.ts"]);
     const cache = q.cache({}, "day");
     expect(cache.totals.savings).toBeGreaterThan(0);
     const f = q.filters();
@@ -121,10 +150,17 @@ describe("Queries", () => {
 });
 
 describe("helpers", () => {
+  test("relativeTo strips the project root only for files inside it", () => {
+    expect(relativeTo("/work/alpha/src/a.ts", "/work/alpha")).toBe("src/a.ts");
+    expect(relativeTo("/work/alpha-two/a.ts", "/work/alpha")).toBe("/work/alpha-two/a.ts");
+    expect(relativeTo("/tmp/x.ts", "/work/alpha", "/home/me")).toBe("/tmp/x.ts");
+    expect(relativeTo("/work/alpha/a.ts", null, "/home/me")).toBe("/work/alpha/a.ts");
+    expect(relativeTo("/home/me/other/b.ts", "/work/alpha", "/home/me")).toBe("~/other/b.ts");
+  });
   test("projectLabel", () => {
     expect(projectLabel("/home/me/code/app")).toBe("app");
     expect(projectLabel("C:\\Users\\me\\app")).toBe("app");
-    expect(projectLabel(null)).toBe("(unknown)");
+    expect(projectLabel(null)).toBe("(none)");
   });
   test("fillBuckets fills daily gaps only", () => {
     const from = new Date(2026, 8, 1).getTime();

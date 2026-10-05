@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Languages } from "@lucide/svelte";
   import { i18n, LANGS, t } from "../lib/i18n.svelte.ts";
+
+  /** `wide` fills a form column and names each language in full. */
+  let { wide = false }: { wide?: boolean } = $props();
 </script>
 
-<div class="flex items-center gap-2">
-  <Languages size={15} class="shrink-0 text-muted" aria-hidden="true" />
-  <div class="seg" role="radiogroup" aria-label={t("settings.language")}>
+<div class="flex items-center" class:w-full={wide}>
+  <div class="seg" class:wide role="radiogroup" aria-label={t("settings.language")}>
     {#each LANGS as l (l.code)}
       <button
         role="radio"
@@ -13,7 +14,7 @@
         title={l.label}
         onclick={() => i18n.set(l.code)}
       >
-        {l.code.toUpperCase()}
+        {wide ? l.label : l.code.toUpperCase()}
       </button>
     {/each}
   </div>

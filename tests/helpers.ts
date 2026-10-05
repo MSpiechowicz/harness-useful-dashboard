@@ -23,7 +23,12 @@ export function testConfig(root: string, patch: Partial<AppConfig> = {}): AppCon
   const base = defaultConfig();
   return {
     ...base,
-    sources: { claudeDirs: [join(root, "claude", "projects")], codexDirs: [join(root, "codex")], enabled: { claude: true, codex: true } },
+    sources: {
+      claudeDirs: [join(root, "claude", "projects")],
+      codexDirs: [join(root, "codex")],
+      ompDirs: [join(root, "omp", "sessions")],
+      enabled: { claude: true, codex: true, omp: true },
+    },
     ...patch,
   };
 }

@@ -1,7 +1,7 @@
 # Harness Dashboard
 
 **Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the transcripts that
-Claude Code and Codex already write to disk, plus Cursor usage exports. It stores everything in a
+Claude Code, Codex and omp (oh-my-pi) already write to disk, plus Cursor usage exports. It stores everything in a
 local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
@@ -9,7 +9,8 @@ local SQLite database and shows clear, interactive charts of where your tokens a
 - **Trends**: hourly/daily/weekly/monthly series, a 7-day moving average, cumulative spend, peak day and a 30-day projection
 - **Per-prompt cost analytics**: what each request really consumed, call by call, including the subagents it spawned
 - **Tool and file heatmaps**: tools × projects, tools × hour of day, and the files that get read or edited most
-- **Subagent attribution**: Claude Code subagents and Codex spawned/guardian threads are tied back to the spawning prompt or parent session
+- **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads and omp subagents are tied back to the spawning prompt or parent session
+- **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
 - **Cache analytics**: hit rate over time, money saved by caching, and what cache writes cost
 - **Rule-based tips**: low cache hit rate, context bloat, premium models on small prompts, tool loops, spikes, and more
 - **Live**: new usage shows up within seconds while you work
@@ -88,6 +89,7 @@ Starting it again while it's running just opens another window. Use **Settings �
 |---|---|---|
 | Claude Code | `~/.claude/projects/**/*.jsonl` (or `$CLAUDE_CONFIG_DIR`) | per-message usage, prompts, tools, skills, subagent transcripts |
 | Codex | `~/.codex/sessions/**` and `archived_sessions/**` (or `$CODEX_HOME`) | per-response records or cumulative token counts, spawned and guardian threads, thread titles |
+| omp (oh-my-pi) | `~/.omp/agent/sessions/**/*.jsonl` (or `$PI_CODING_AGENT_DIR/sessions`) | per-message usage with the plan or account it was billed through (ChatGPT plan, GitHub Copilot, API keys), Copilot premium requests, prompts, tools, `skill://` reads, subagent transcripts |
 | Cursor | CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side; import the CSV in **Settings** or with `import-cursor` |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
@@ -95,8 +97,14 @@ bytes appended since the last one, so rescans take milliseconds.
 
 ### Shared database (iCloud, Dropbox, network share)
 
-Set **Settings → Database → Database file** (or `--db`, or `HARNESS_DASHBOARD_DB`) to a path in a synced folder.
-Tick *Copy current data* to take your history with you. Each machine ingests its own logs into the shared file,
+In **Settings → Database**, pick one of the synced folders found on the machine (iCloud Drive, Dropbox, OneDrive, Google
+Drive, Box, Nextcloud, Syncthing) or type the path of any synced folder or network share. The dashboard keeps `usage.db`
+in it (a path ending in `.db` names the file itself), and says before you save whether that starts a new database or joins
+one another machine already keeps there. It's a folder path, not a URL: sync apps keep a local copy of the folder on
+every machine. `--db` and `HARNESS_DASHBOARD_DB` take a file path too.
+
+Leave *Copy the history of this machine* on for a new database to keep usage whose transcripts are already gone. Then
+choose the same folder on every other machine. Each machine ingests its own logs into the shared file,
 tagged with your user name and host name, so **Users** shows everyone side by side. Ingest bookkeeping is kept per host, and
 usage rows are deduplicated by message id, so machines never double count.
 
@@ -108,19 +116,39 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
 
 - **Tokens.** Claude Code writes one line per content block, repeating the same message id, so rows are deduplicated by
   message id, keeping the largest counts seen. Codex input tokens include cached tokens. The dashboard stores them as
-  *uncached input* plus *cache read*, so the token types add up the same way for every provider.
+  *uncached input* plus *cache read*, so the token types add up the same way for every provider. omp reports them
+  that way already.
 - **Cost** is the *API-equivalent* list price: what the tokens would cost on the provider's API.
   Subscription plans (Claude Max, ChatGPT Pro, Cursor Pro) don't bill this way, but it is the fairest way to compare.
   Cache writes are priced at 1.25× input (5-minute TTL) or 2× input (1-hour TTL), and cache reads use the model's read price.
-  Claude fast mode is priced at 2×. Cursor rows use the cost from the export when present.
+  Claude fast mode is priced at 2×. Cursor rows use the cost from the export when present. Model ids are priced as the
+  model they name, whatever router they came through: `github-copilot/claude-opus-5.5` is `claude-opus-5-5`.
+  GitHub Copilot doesn't bill per token either. Its calls keep their premium-request count, shown per plan or account
+  under **Providers → Billed via**.
   Models without a known list price get a fallback rate and are marked **estimated**. Add their prices under
   **Settings → Pricing**, which re-prices your whole history.
+- **Projects.** A session counts toward the git repository it ran in, even when it started in a subfolder. Linked
+  worktrees count toward their main repository, and folders outside git are their own project. Temp folders, Codex app
+  chats (`~/Documents/Codex/<date>/…`) and Claude desktop scratch workspaces are grouped as **No project**.
 - **Prompts.** Each human prompt starts a turn. Every model call until the next prompt, including the subagents it
   spawned, is attributed to it.
 - **Skills.** From the moment a skill is invoked (Claude `Skill` tool or `/skill` command; Codex `$skill`, an injected
-  `<skill>` block or a `SKILL.md` read) until the next prompt, calls count toward that skill.
+  `<skill>` block or a `SKILL.md` read; omp reading `skill://<name>`) until the next prompt, calls count toward that skill.
 - **Users.** The name in **Settings → Your name** (defaults to your OS user name), stored with every row this machine
   ingests.
+
+### Colors
+
+Every data color comes from one palette (`web/src/lib/palette.ts`), and each color means one thing:
+
+- **Reserved.** Each provider has its own color. Models wear their maker's color whichever harness or plan they ran
+  under (a Claude model through omp or Copilot is still Claude orange), with shades generated from it so models of
+  one maker stay apart in a stacked chart. The four token types have their own set (teal, olive, lilac, purple).
+- **General pool.** Projects, users, skills, agents and sources take the top values' colors by hue first (green, sky,
+  violet, pink), then a strong variant of each, then *Other*.
+
+`tests/palette.test.ts` fails the build when a color is used twice, when a general color comes close to a reserved one,
+or when colors shown together get too similar, also for colour-blind readers.
 
 ## Privacy
 
@@ -154,7 +182,8 @@ src/
     config.ts paths.ts   per-OS config + data locations
     db.ts                schema + migrations
     pricing.ts           price book (built-in list prices + user overrides)
-    ingest/              incremental JSONL scanner, Claude/Codex parsers, Cursor CSV importer
+    models.ts            model id normalization and makers, shared with the UI
+    ingest/              incremental JSONL scanner, Claude/Codex/omp parsers, Cursor CSV importer
     queries.ts           all aggregations behind the API
     tips.ts              rule-based tips engine
   server/

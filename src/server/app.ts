@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { type AppConfig, loadConfig, resolveDbPath, saveConfig } from "../core/config.ts";
 import { getMeta, openDb } from "../core/db.ts";
 import { type ScanResult, scan } from "../core/ingest/index.ts";
@@ -120,6 +121,7 @@ export class App {
   async switchDatabase(newPath: string, copy: boolean): Promise<void> {
     if (this.scanning) await this.scanning.catch(() => {});
     if (copy && newPath && !existsSync(newPath)) {
+      mkdirSync(dirname(newPath), { recursive: true });
       this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
       this.db.query("VACUUM INTO ?").run(newPath);
     }

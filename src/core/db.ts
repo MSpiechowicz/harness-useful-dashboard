@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 3;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -112,6 +112,17 @@ const MIGRATIONS: Record<number, string> = {
       cache_write_5m  REAL,
       cache_write_1h  REAL
     );
+  `,
+  // Per-prompt tool counts (prompt list, session detail, prompt detail) looked tool calls up by prompt_id
+  // with a full table scan per prompt.
+  2: /* sql */ `
+    CREATE INDEX IF NOT EXISTS idx_tools_prompt ON tool_calls(prompt_id);
+  `,
+  // What a call was billed through when the harness reports it (omp: "openai-codex", "github-copilot", …),
+  // and GitHub Copilot's premium-request count for it.
+  3: /* sql */ `
+    ALTER TABLE usage ADD COLUMN billing TEXT;
+    ALTER TABLE usage ADD COLUMN premium_requests REAL NOT NULL DEFAULT 0;
   `,
 };
 

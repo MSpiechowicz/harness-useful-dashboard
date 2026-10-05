@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { normalizeModel } from "./models.ts";
+
+export { normalizeModel };
 
 /** USD per 1M tokens. Missing cache rates are derived from `input` with the provider's usual multipliers. */
 export interface Price {
@@ -70,16 +73,6 @@ const FALLBACKS: { test: RegExp; price: Price }[] = [
 ];
 const DEFAULT_FALLBACK: Price = { input: 3, output: 15 };
 
-export function normalizeModel(model: string | null | undefined): string {
-  if (!model) return "unknown";
-  let m = model.trim().toLowerCase();
-  m = m.replace(/\[[^\]]*\]$/, ""); // "claude-opus-4-6[1m]"
-  m = m.replace(/^(us|eu|apac|global)\.(?=anthropic\.)/, "");
-  m = m.replace(/^anthropic[./]/, "").replace(/^openai\//, "").replace(/^models\//, "");
-  m = m.replace(/@\d{8}$/, "").replace(/-v\d+(:\d+)?$/, "");
-  m = m.replace(/-(\d{8})$/, ""); // date-suffixed snapshot ids
-  return m || "unknown";
-}
 
 function matches(pattern: string, model: string): boolean {
   if (pattern.endsWith("*")) return model.startsWith(pattern.slice(0, -1));

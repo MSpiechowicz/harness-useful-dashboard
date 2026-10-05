@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { modelMaker } from "../src/core/models.ts";
 import { normalizeModel, PriceBook } from "../src/core/pricing.ts";
 
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 };
@@ -12,10 +13,30 @@ describe("normalizeModel", () => {
     ["anthropic/claude-opus-5-5", "claude-opus-5-5"],
     ["claude-opus-4-5@20251101", "claude-opus-4-5"],
     ["GPT-5", "gpt-5"],
+    // Routers: Copilot and OpenRouter prefixes go, Claude's dotted versions fold to Anthropic's dashes.
+    ["github-copilot/claude-opus-5.5", "claude-opus-5-5"],
+    ["claude-haiku-4.5", "claude-haiku-4-5"],
+    ["openrouter/anthropic/claude-sonnet-4.5", "claude-sonnet-4-5"],
+    ["openai-codex/gpt-6-sol", "gpt-6-sol"],
+    ["models/gemini-2.5-pro", "gemini-2.5-pro"],
     ["", "unknown"],
     [null, "unknown"],
   ])("%p → %p", (input, expected) => {
     expect(normalizeModel(input as string | null)).toBe(expected);
+  });
+});
+
+describe("modelMaker", () => {
+  test.each([
+    ["claude-opus-5-5", "anthropic"],
+    ["github-copilot/claude-sonnet-4.5", "anthropic"],
+    ["gpt-6-sol", "openai"],
+    ["o3", "openai"],
+    ["codex-auto-review", "openai"],
+    ["gemini-2.5-pro", null],
+    [null, null],
+  ])("%p → %p", (input, expected) => {
+    expect(modelMaker(input as string | null)).toBe(expected as "anthropic" | "openai" | null);
   });
 });
 

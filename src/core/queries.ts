@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { homedir } from "node:os";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
 
 export interface Filters {
@@ -49,6 +50,15 @@ function and(where: string, cond: string): string {
   return where ? `${where} AND ${cond}` : `WHERE ${cond}`;
 }
 
+/** Tools that read or change a file, across harnesses (Claude Code, Codex, omp). */
+export const READ_TOOLS = "'Read','NotebookRead','read'";
+const EDIT_TOOLS = "'Edit','MultiEdit','Write','NotebookEdit','apply_patch','edit','write'";
+
+/** Per-file tool call counts, split into reads and edits by the tool that touched the file. */
+const FILE_COUNTS = `COUNT(*) AS calls,
+  SUM(CASE WHEN t.tool IN (${READ_TOOLS}) THEN 1 ELSE 0 END) AS reads,
+  SUM(CASE WHEN t.tool IN (${EDIT_TOOLS}) THEN 1 ELSE 0 END) AS edits`;
+
 const TOKEN_SUMS = `
   COALESCE(SUM(u.total_tokens), 0)          AS tokens,
   COALESCE(SUM(u.input_tokens), 0)          AS input,
@@ -70,8 +80,19 @@ export interface Totals {
   messages: number;
 }
 
+/**
+ * A file path relative to its project root when it lies inside it. Files elsewhere keep their absolute
+ * path, with the home directory shortened to "~".
+ */
+export function relativeTo(file: string, project: string | null, home = homedir()): string {
+  const inside = (root: string) => file.length > root.length + 1 && file.startsWith(root) && /[\\/]/.test(file[root.length]!);
+  const root = project?.replace(/[\\/]+$/, "");
+  if (root && inside(root)) return file.slice(root.length + 1);
+  return home && inside(home) ? `~${file.slice(home.length)}` : file;
+}
+
 export function projectLabel(path: string | null): string {
-  if (!path) return "(unknown)";
+  if (!path) return "(none)";
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
@@ -151,7 +172,8 @@ export class Queries {
     };
   }
 
-  timeseries(f: Filters, bucket: Bucket, group: SeriesGroup, metric: Metric, top = 8) {
+  /** `top` matches the five hues non-provider dimensions get; the rest folds into "Other". */
+  timeseries(f: Filters, bucket: Bucket, group: SeriesGroup, metric: Metric, top = 5) {
     const w = whereClause(f);
     const b = bucketExpr(bucket);
     const value = metric === "cost" ? "SUM(u.cost_usd)" : "SUM(u.total_tokens)";
@@ -166,7 +188,8 @@ export class Queries {
       );
       const buckets = fillBuckets(rows.map((r) => r.bucket), bucket, f);
       const idx = new Map(rows.map((r) => [r.bucket, r]));
-      const series = (["input", "output", "cacheRead", "cacheWrite"] as const).map((k) => ({
+      // Bottom-up stacking order: the bulk (cache reads) forms the base, output sits on top.
+      const series = (["cacheRead", "cacheWrite", "input", "output"] as const).map((k) => ({
         key: k,
         name: k,
         data: buckets.map((bk) => idx.get(bk)?.[k] ?? 0),
@@ -231,6 +254,23 @@ export class Queries {
         tokenShare: total.tokens ? r.tokens / total.tokens : 0,
       })),
     };
+  }
+
+  /**
+   * Usage by what it was billed through: the plan or account the harness reports per call (omp: "openai-codex",
+   * "github-copilot", …), else the harness's own account. Cost stays API-equivalent; Copilot counts premium
+   * requests instead, so those are summed alongside.
+   */
+  billing(f: Filters) {
+    const w = whereClause(f);
+    return this.all<{ key: string; reported: number; calls: number; tokens: number; cost: number; premiumRequests: number; estimated: number }>(
+      `SELECT COALESCE(u.billing, u.provider) AS key, MAX(u.billing IS NOT NULL) AS reported, COUNT(*) AS calls,
+              COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost,
+              COALESCE(SUM(u.premium_requests), 0) AS premiumRequests, MAX(u.cost_estimated) AS estimated
+       FROM usage u ${w.sql}
+       GROUP BY key ORDER BY cost DESC`,
+      w.params,
+    ).map((r) => ({ ...r, reported: !!r.reported, estimated: !!r.estimated }));
   }
 
   /** Day-of-week (0 = Monday) × hour activity matrix. */
@@ -325,6 +365,16 @@ export class Queries {
     return { session, totals, prompts, timeline, models, agents, tools, files, children };
   }
 
+  /** Every prompt's cost, tokens and provider in the range: the prompts page's cost distribution and Pareto curve. */
+  promptCosts(f: Filters) {
+    const w = whereClause(f);
+    return this.all<{ cost: number; tokens: number; provider: string }>(
+      `SELECT SUM(u.cost_usd) AS cost, SUM(u.total_tokens) AS tokens, MIN(u.provider) AS provider
+       FROM usage u ${and(w.sql, "u.prompt_id IS NOT NULL")} GROUP BY u.prompt_id`,
+      w.params,
+    );
+  }
+
   prompts(f: Filters, opts: { sort?: string; limit?: number; offset?: number; q?: string }) {
     const w = whereClause(f);
     const where = and(w.sql, "u.prompt_id IS NOT NULL");
@@ -335,21 +385,23 @@ export class Queries {
       params.q = `%${opts.q}%`;
     }
     const sortCol = { cost: "cost", tokens: "tokens", recent: "ts", messages: "messages" }[opts.sort ?? "cost"] ?? "cost";
+    // Tool calls are counted in the outer query, so only the returned page pays for the lookup.
     const rows = this.all<Record<string, unknown> & { id: string }>(
-      `SELECT p.id, p.ts, p.text, p.skill, p.is_command AS isCommand, p.session_id AS sessionId, p.provider,
-              s.project, s.title AS sessionTitle,
-              agg.tokens, agg.cost, agg.messages, agg.input, agg.output, agg.cacheRead, agg.cacheWrite, agg.models, agg.subagentCost,
-              (SELECT COUNT(*) FROM tool_calls t WHERE t.prompt_id = p.id) AS toolCalls
-       FROM (SELECT u.prompt_id, SUM(u.total_tokens) AS tokens, SUM(u.cost_usd) AS cost, COUNT(*) AS messages,
-                    SUM(u.input_tokens) AS input, SUM(u.output_tokens) AS output, SUM(u.cache_read_tokens) AS cacheRead,
-                    SUM(u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite,
-                    GROUP_CONCAT(DISTINCT u.model) AS models,
-                    SUM(CASE WHEN u.is_subagent = 1 THEN u.cost_usd ELSE 0 END) AS subagentCost
-             FROM usage u ${where} GROUP BY u.prompt_id) agg
-       JOIN prompts p ON p.id = agg.prompt_id
-       LEFT JOIN sessions s ON s.id = p.session_id
-       WHERE 1 = 1 ${qcond}
-       ORDER BY ${sortCol} DESC LIMIT $limit OFFSET $offset`,
+      `SELECT page.*, (SELECT COUNT(*) FROM tool_calls t WHERE t.prompt_id = page.id) AS toolCalls
+       FROM (SELECT p.id, p.ts, p.text, p.skill, p.is_command AS isCommand, p.session_id AS sessionId, p.provider,
+                    s.project, s.title AS sessionTitle,
+                    agg.tokens, agg.cost, agg.messages, agg.input, agg.output, agg.cacheRead, agg.cacheWrite, agg.models, agg.subagentCost
+             FROM (SELECT u.prompt_id, SUM(u.total_tokens) AS tokens, SUM(u.cost_usd) AS cost, COUNT(*) AS messages,
+                          SUM(u.input_tokens) AS input, SUM(u.output_tokens) AS output, SUM(u.cache_read_tokens) AS cacheRead,
+                          SUM(u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite,
+                          GROUP_CONCAT(DISTINCT u.model) AS models,
+                          SUM(CASE WHEN u.is_subagent = 1 THEN u.cost_usd ELSE 0 END) AS subagentCost
+                   FROM usage u ${where} GROUP BY u.prompt_id) agg
+             JOIN prompts p ON p.id = agg.prompt_id
+             LEFT JOIN sessions s ON s.id = p.session_id
+             WHERE 1 = 1 ${qcond}
+             ORDER BY ${sortCol} DESC LIMIT $limit OFFSET $offset) page
+       ORDER BY ${sortCol} DESC`,
       params,
     );
     const total = this.get<{ n: number }>(
@@ -385,44 +437,132 @@ export class Queries {
     // tool_calls has no model column: drop the model filter for tool-level stats.
     const { model: _model, ...rest } = f;
     const wt = whereClause(rest, "t");
+    const counts = this.get<{ calls: number; tools: number; mcpTools: number; mcpCalls: number }>(
+      `SELECT COUNT(*) AS calls, COUNT(DISTINCT t.tool) AS tools,
+              COUNT(DISTINCT CASE WHEN substr(t.tool, 1, 5) = 'mcp__' THEN t.tool END) AS mcpTools,
+              COALESCE(SUM(CASE WHEN substr(t.tool, 1, 5) = 'mcp__' THEN 1 ELSE 0 END), 0) AS mcpCalls
+       FROM tool_calls t ${wt.sql}`,
+      wt.params,
+    )!;
+    // All prompts in range, not just those that used tools, so "calls per prompt" isn't inflated.
+    const w = whereClause(rest);
+    const prompts = this.get<{ n: number }>(`SELECT COUNT(DISTINCT u.prompt_id) AS n FROM usage u ${w.sql}`, w.params)!.n;
+    const totals = { ...counts, prompts };
     const tools = this.all<{ key: string; calls: number; sessions: number }>(
       `SELECT t.tool AS key, COUNT(*) AS calls, COUNT(DISTINCT t.session_id) AS sessions
-       FROM tool_calls t ${wt.sql} GROUP BY t.tool ORDER BY calls DESC LIMIT 40`,
+       FROM tool_calls t ${wt.sql} GROUP BY t.tool ORDER BY calls DESC LIMIT 20`,
       wt.params,
     );
-    const files = this.all<{ key: string; calls: number; reads: number; edits: number; sessions: number; project: string | null }>(
-      `SELECT t.file_path AS key, COUNT(*) AS calls,
-              SUM(CASE WHEN t.tool IN ('Read','NotebookRead') THEN 1 ELSE 0 END) AS reads,
-              SUM(CASE WHEN t.tool IN ('Edit','MultiEdit','Write','NotebookEdit','apply_patch') THEN 1 ELSE 0 END) AS edits,
-              COUNT(DISTINCT t.session_id) AS sessions, MAX(t.project) AS project
-       FROM tool_calls t ${and(wt.sql, "t.file_path IS NOT NULL")}
-       GROUP BY t.file_path ORDER BY calls DESC LIMIT 50`,
+    // Each listed tool's calls split by project: the busiest projects by name, the rest folded into "other".
+    const projectKeys = this.all<{ key: string | null }>(
+      `SELECT t.project AS key FROM tool_calls t ${wt.sql} GROUP BY t.project ORDER BY COUNT(*) DESC LIMIT 6`,
       wt.params,
-    );
-    const topTools = tools.slice(0, 12).map((t) => t.key);
-    const topProjects = this.all<{ key: string | null }>(
-      `SELECT t.project AS key FROM tool_calls t ${wt.sql} GROUP BY t.project ORDER BY COUNT(*) DESC LIMIT 10`,
-      wt.params,
-    ).map((r) => r.key);
-    const matrix = this.all<{ tool: string; project: string | null; calls: number }>(
+    ).map((r) => r.key ?? "(none)");
+    const listed = new Set(tools.map((x) => x.key));
+    const split = new Map<string, Record<string, number>>();
+    for (const r of this.all<{ tool: string; project: string | null; calls: number }>(
       `SELECT t.tool, t.project, COUNT(*) AS calls FROM tool_calls t ${wt.sql} GROUP BY t.tool, t.project`,
       wt.params,
-    ).filter((r) => topTools.includes(r.tool) && topProjects.includes(r.project));
-    const byHour = this.all<{ tool: string; hour: number; calls: number }>(
-      `SELECT t.tool, CAST(strftime('%H', t.ts / 1000, ${LOCAL}) AS INTEGER) AS hour, COUNT(*) AS calls
-       FROM tool_calls t ${wt.sql} GROUP BY t.tool, hour`,
+    )) {
+      if (!listed.has(r.tool)) continue;
+      const key = projectKeys.includes(r.project ?? "(none)") ? (r.project ?? "(none)") : "__other__";
+      const row = split.get(r.tool) ?? {};
+      row[key] = (row[key] ?? 0) + r.calls;
+      split.set(r.tool, row);
+    }
+    // MCP tools are named mcp__<server>__<tool>; everything else is built into the harness.
+    const sources = new Map<string, number>();
+    const perTool: { key: string; calls: number; sessions: number }[] = [];
+    for (const r of this.all<{ tool: string; calls: number; sessions: number }>(
+      `SELECT t.tool, COUNT(*) AS calls, COUNT(DISTINCT t.session_id) AS sessions FROM tool_calls t ${wt.sql} GROUP BY t.tool`,
       wt.params,
-    ).filter((r) => topTools.includes(r.tool));
+    )) {
+      const server = /^mcp__(.+?)__/.exec(r.tool)?.[1] ?? "builtin";
+      sources.set(server, (sources.get(server) ?? 0) + r.calls);
+      perTool.push({ key: r.tool, calls: r.calls, sessions: r.sessions });
+    }
     return {
-      tools,
-      files: files.map((r) => ({ ...r, projectLabel: projectLabel(r.project) })),
-      matrix: {
-        tools: topTools,
-        projects: topProjects.map((p) => ({ key: p ?? "(none)", label: projectLabel(p) })),
-        cells: matrix.map((m) => [topTools.indexOf(m.tool), topProjects.indexOf(m.project), m.calls] as const),
-      },
-      byHour: { tools: topTools, cells: byHour.map((r) => [r.hour, topTools.indexOf(r.tool), r.calls] as const) },
+      totals,
+      tools: tools.map((x) => ({ ...x, byProject: split.get(x.key) ?? {} })),
+      projects: projectKeys.map((k) => ({ key: k, label: projectLabel(k === "(none)" ? null : k) })),
+      sources: [...sources].map(([key, calls]) => ({ key, calls })).sort((a, b) => b.calls - a.calls),
+      /** Every tool with its calls and sessions: the kinds of work and the full table. */
+      counts: perTool,
     };
+  }
+
+  /** Totals and the projects with file activity, busiest first (the hotspot picker's options). */
+  files(f: Filters) {
+    const { model: _model, ...rest } = f;
+    const wt = whereClause(rest, "t");
+    const where = and(wt.sql, "t.file_path IS NOT NULL");
+    const totals = this.get<{ files: number; calls: number; reads: number; edits: number }>(
+      `SELECT COUNT(DISTINCT t.file_path) AS files, ${FILE_COUNTS} FROM tool_calls t ${where}`,
+      wt.params,
+    )!;
+    const projects = this.all<{ key: string | null; files: number; calls: number }>(
+      `SELECT t.project AS key, COUNT(DISTINCT t.file_path) AS files, COUNT(*) AS calls
+       FROM tool_calls t ${where} GROUP BY t.project ORDER BY calls DESC LIMIT 30`,
+      wt.params,
+    ).map((r) => ({ ...r, key: r.key ?? "(none)", label: projectLabel(r.key) }));
+    return { totals, projects };
+  }
+
+  /**
+   * Where the work concentrates within the filtered scope (normally one project): the busiest folders,
+   * relative to the project root, and the busiest files.
+   */
+  hotspots(f: Filters, limit = 8) {
+    const { model: _model, ...rest } = f;
+    const wt = whereClause(rest, "t");
+    const rows = this.all<{ key: string; project: string | null; calls: number; reads: number; edits: number }>(
+      `SELECT t.file_path AS key, MAX(t.project) AS project, ${FILE_COUNTS}
+       FROM tool_calls t ${and(wt.sql, "t.file_path IS NOT NULL")} GROUP BY t.file_path`,
+      wt.params,
+    ).map((r) => ({ ...r, path: relativeTo(r.key, r.project), projectLabel: projectLabel(r.project) }));
+    // Files a project's sessions touched outside its root (temp files, sibling repos) are not part of the
+    // project: they fold into one "__outside__" folder and stay out of the file list.
+    const outside = (r: { project: string | null; path: string }) => r.project != null && /^(~|\/|[A-Za-z]:[\\/])/.test(r.path);
+    const folders = new Map<string, { path: string; files: number; calls: number; reads: number; edits: number }>();
+    for (const r of rows) {
+      const cut = Math.max(r.path.lastIndexOf("/"), r.path.lastIndexOf("\\"));
+      const path = outside(r) ? "__outside__" : cut > 0 ? r.path.slice(0, cut) : ".";
+      const g = folders.get(path) ?? { path, files: 0, calls: 0, reads: 0, edits: 0 };
+      g.files++;
+      g.calls += r.calls;
+      g.reads += r.reads;
+      g.edits += r.edits;
+      folders.set(path, g);
+    }
+    const byCalls = <T extends { calls: number }>(a: T, b: T) => b.calls - a.calls;
+    return {
+      // The outside bucket is context, not a hotspot: it always comes last.
+      folders: [...folders.values()]
+        .sort((a, b) => Number(a.path === "__outside__") - Number(b.path === "__outside__") || b.calls - a.calls)
+        .slice(0, limit),
+      files: rows.filter((r) => !outside(r)).sort(byCalls).slice(0, limit),
+    };
+  }
+
+  /** Paged, searchable list of files across projects (search matches the path). */
+  fileList(f: Filters, opts: { sort?: string; limit?: number; offset?: number; q?: string }) {
+    const { model: _model, ...rest } = f;
+    const wt = whereClause(rest, "t");
+    let where = and(wt.sql, "t.file_path IS NOT NULL");
+    const params: Params = { ...wt.params };
+    if (opts.q) {
+      where = and(where, "t.file_path LIKE $q");
+      params.q = `%${opts.q}%`;
+    }
+    const sortCol = { calls: "calls", edits: "edits", reads: "reads", recent: "lastTs" }[opts.sort ?? "calls"] ?? "calls";
+    const rows = this.all<{ key: string; project: string | null; calls: number; reads: number; edits: number; sessions: number; lastTs: number }>(
+      `SELECT t.file_path AS key, MAX(t.project) AS project, ${FILE_COUNTS},
+              COUNT(DISTINCT t.session_id) AS sessions, MAX(t.ts) AS lastTs
+       FROM tool_calls t ${where} GROUP BY t.file_path ORDER BY ${sortCol} DESC, key LIMIT $limit OFFSET $offset`,
+      { ...params, limit: opts.limit ?? 50, offset: opts.offset ?? 0 },
+    );
+    const total = this.get<{ n: number }>(`SELECT COUNT(DISTINCT t.file_path) AS n FROM tool_calls t ${where}`, params)!.n;
+    return { total, rows: rows.map((r) => ({ ...r, path: relativeTo(r.key, r.project), projectLabel: projectLabel(r.project) })) };
   }
 
   cache(f: Filters, bucket: Bucket) {

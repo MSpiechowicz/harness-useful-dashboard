@@ -1,11 +1,17 @@
 <script lang="ts">
+  import ValueBar from "../components/ValueBar.svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
+  import DonutList from "../components/DonutList.svelte";
   import Empty from "../components/Empty.svelte";
   import Kpi from "../components/Kpi.svelte";
+  import MixByWeek from "../components/MixByWeek.svelte";
+  import TableCard from "../components/TableCard.svelte";
   import PageHeader from "../components/PageHeader.svelte";
-  import { apiUrl, useFetch } from "../lib/api.svelte.ts";
-  import { percentLine, timeSeriesChart } from "../lib/charts.ts";
+  import ViewGate from "../components/ViewGate.svelte";
+  import { apiUrl, settled, useFetch, type TimeSeries } from "../lib/api.svelte.ts";
+  import { percentLine } from "../lib/charts.ts";
+  import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
@@ -18,62 +24,130 @@
   }
 
   const d = useFetch<CacheData>(() => apiUrl("/api/cache", { bucket: store.bucket }));
+  // Prompt tokens by type, day by day, for the weekly mix under the composition donut (output isn't a prompt token).
+  const types = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: "day", group: "type", metric: "tokens" }));
+  const promptTypes = $derived(types.data ? { ...types.data, series: types.data.series.filter((s) => s.key !== "output") } : null);
+
+  // The per-model table: the standard table card, sorted here, paged by the card.
+  type ModelRow = CacheData["models"][number];
+  type ModelSort = "cost" | "hitRate" | "savings" | "cacheRead" | "input" | "cacheWrite" | "writeCost" | "key";
+  let modelSort = $state<ModelSort>("cost");
+  let modelAsc = $state(false);
+  const MODEL_SORTS = $derived<{ value: ModelSort; label: string; asc?: boolean }[]>([
+    { value: "cost", label: t("col.cost") },
+    { value: "hitRate", label: t("col.hitRate") },
+    { value: "savings", label: t("col.savings") },
+    { value: "cacheRead", label: t("tok.cacheRead") },
+    { value: "input", label: t("tok.input") },
+    { value: "key", label: t("col.model"), asc: true },
+  ]);
+  const models = $derived.by(() => {
+    const dir = modelAsc ? 1 : -1;
+    return [...(d.data?.models ?? [])].sort((a: ModelRow, b: ModelRow) => {
+      const x = a[modelSort];
+      const y = b[modelSort];
+      return dir * (typeof x === "string" ? x.localeCompare(y as string) : (x as number) - (y as number));
+    });
+  });
+  function sortModels(k: ModelSort) {
+    if (modelSort === k) modelAsc = !modelAsc;
+    else {
+      modelSort = k;
+      modelAsc = k === "key";
+    }
+  }
+  const arrow = (k: ModelSort) => (modelSort === k ? (modelAsc ? " ↑" : " ↓") : "");
 
   const hitOption = $derived.by(() => (void store.dark, d.data ? percentLine(d.data.buckets, d.data.series.map((s) => s.hitRate), store.bucket, t("cache.hitRate")) : null));
-  const compositionOption = $derived.by(() => {
-    void store.dark;
-    if (!d.data) return null;
-    const keys = ["input", "cacheWrite", "cacheRead"] as const;
-    return timeSeriesChart(
-      { buckets: d.data.buckets, series: keys.map((k) => ({ key: k, name: k, data: d.data!.series.map((s) => s[k]) })) },
-      { dim: "type", metric: "tokens", bucket: store.bucket, valueKind: "tokens" },
-    );
+  // Where prompt tokens came from over the whole range: fresh input, cache writes, or cache reads.
+  const mix = $derived.by(() => {
+    if (!d.data) return [];
+    const tot = d.data.totals;
+    const parts = [
+      { key: "cacheRead", value: tot.cacheRead },
+      { key: "cacheWrite", value: tot.cacheWrite + tot.cacheWrite1h },
+      { key: "input", value: tot.input },
+    ];
+    return parts.map((p) => ({ ...p, label: t(`tok.${p.key}` as "tok.input") }));
   });
 </script>
 
 <div class="flex flex-col gap-5">
   <PageHeader title={t("cache.title")} subtitle={t("cache.subtitle")} />
+  <ViewGate ready={settled(d, types)}>
 
-  {#if d.data && d.data.totals.input + d.data.totals.cacheRead === 0}
-    <div class="card"><Empty /></div>
-  {:else if d.data}
-    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <Kpi hero label={t("cache.hitRate")} value={percent(d.data.totals.hitRate, 1)} />
-      <Kpi label={t("cache.savings")} value={usd(d.data.totals.savings)} hint={t("cache.savingsHint")} />
-      <Kpi label={t("cache.writeCost")} value={usd(d.data.totals.writeCost)} hint={`${compact(d.data.totals.cacheWrite + d.data.totals.cacheWrite1h)} ${t("metric.tokens")}`} />
-      <Kpi label={t("cache.readCost")} value={usd(d.data.totals.readCost)} hint={`${compact(d.data.totals.cacheRead)} ${t("metric.tokens")}`} />
-    </div>
-
-    <div class="grid gap-5 xl:grid-cols-2">
-      <Card title={t("cache.hitRateOverTime")}>{#if hitOption}<Chart option={hitOption} height={280} dim={d.loading} />{/if}</Card>
-      <Card title={t("cache.composition")} subtitle={t("metric.tokens")}>{#if compositionOption}<Chart option={compositionOption} height={280} dim={d.loading} />{/if}</Card>
-    </div>
-
-    <Card title={t("cache.perModel")} pad={false}>
-      <div class="mt-2 overflow-x-auto">
-        <table class="data">
-          <thead><tr><th>{t("col.model")}</th><th class="num">{t("col.hitRate")}</th><th class="num">{t("tok.input")}</th><th class="num">{t("tok.cacheRead")}</th><th class="num">{t("tok.cacheWrite")}</th><th class="num">{t("col.savings")}</th><th class="num">{t("col.writeCost")}</th><th class="num">{t("col.cost")}</th></tr></thead>
-          <tbody>
-            {#each d.data.models as m (m.key)}
-              <tr>
-                <td>{m.key}</td>
-                <td class="num">
-                  <div class="flex items-center justify-end gap-2">
-                    <div class="h-1.5 w-16 overflow-hidden rounded-full bg-surface-2"><div class="h-full rounded-full" style:width="{m.hitRate * 100}%" style:background="var(--series-3)"></div></div>
-                    {percent(m.hitRate, 1)}
-                  </div>
-                </td>
-                <td class="num text-ink-2">{compact(m.input)}</td>
-                <td class="num text-ink-2">{compact(m.cacheRead)}</td>
-                <td class="num text-ink-2">{compact(m.cacheWrite)}</td>
-                <td class="num text-good">{usd(m.savings)}</td>
-                <td class="num text-ink-2">{usd(m.writeCost)}</td>
-                <td class="num font-medium">{usd(m.cost)}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+    {#if d.data && d.data.totals.input + d.data.totals.cacheRead === 0}
+      <div class="card"><Empty /></div>
+    {:else if d.data}
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi hero label={t("cache.hitRate")} value={percent(d.data.totals.hitRate, 1)} />
+        <Kpi label={t("cache.savings")} value={usd(d.data.totals.savings)} hint={t("cache.savingsHint")} />
+        <Kpi label={t("cache.writeCost")} value={usd(d.data.totals.writeCost)} hint={`${compact(d.data.totals.cacheWrite + d.data.totals.cacheWrite1h)} ${t("metric.tokens")}`} />
+        <Kpi label={t("cache.readCost")} value={usd(d.data.totals.readCost)} hint={`${compact(d.data.totals.cacheRead)} ${t("metric.tokens")}`} />
       </div>
-    </Card>
-  {/if}
+
+      <div class="grid gap-5 xl:grid-cols-2">
+        <Card title={t("cache.hitRateOverTime")} subtitle={t("cache.hitRateHint")}>
+          {#if hitOption}<Chart option={hitOption} height={280} fill dim={d.loading} />{/if}
+        </Card>
+        <Card title={t("cache.composition")} subtitle={t("metric.tokens")}>
+          <div class="flex flex-col gap-6">
+            <DonutList items={mix} dim="type" format={compact} loading={d.loading} />
+            {#if promptTypes}<MixByWeek ts={promptTypes} dim="type" metric="tokens" />{/if}
+          </div>
+        </Card>
+      </div>
+
+      <TableCard
+        title={t("cache.perModel")}
+        subtitle={t("cache.perModelHint")}
+        rows={models}
+        searchText={(m) => m.key}
+        sorts={MODEL_SORTS}
+        bind:sortKey={modelSort}
+        bind:asc={modelAsc}
+      >
+        {#snippet children(view)}
+          <table class="data fixed-cols">
+            <colgroup>
+              <col />
+              <col class="w-44" />
+              <col class="w-28" />
+              <col class="w-28" />
+              <col class="w-28" />
+              <col class="w-28" />
+              <col class="w-28" />
+              <col class="w-28" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th><button onclick={() => sortModels("key")}>{t("col.model")}{arrow("key")}</button></th>
+                <th class="num"><button onclick={() => sortModels("hitRate")}>{t("col.hitRate")}{arrow("hitRate")}</button></th>
+                <th class="num"><button onclick={() => sortModels("input")}>{t("tok.input")}{arrow("input")}</button></th>
+                <th class="num"><button onclick={() => sortModels("cacheRead")}>{t("tok.cacheRead")}{arrow("cacheRead")}</button></th>
+                <th class="num"><button onclick={() => sortModels("cacheWrite")}>{t("tok.cacheWrite")}{arrow("cacheWrite")}</button></th>
+                <th class="num"><button onclick={() => sortModels("savings")}>{t("col.savings")}{arrow("savings")}</button></th>
+                <th class="num"><button onclick={() => sortModels("writeCost")}>{t("col.writeCost")}{arrow("writeCost")}</button></th>
+                <th class="num"><button onclick={() => sortModels("cost")}>{t("col.cost")}{arrow("cost")}</button></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each view.rows.slice(view.offset, view.offset + (view.limit ?? view.rows.length)) as m (m.key)}
+                <tr>
+                  <td class="text-ink">{m.key}</td>
+                  <td class="num"><ValueBar label={percent(m.hitRate, 1)} fraction={m.hitRate} color={colorFor("type", "cacheRead")} /></td>
+                  <td class="num text-ink-2">{compact(m.input)}</td>
+                  <td class="num text-ink-2">{compact(m.cacheRead)}</td>
+                  <td class="num text-ink-2">{compact(m.cacheWrite)}</td>
+                  <td class="num text-good">{usd(m.savings)}</td>
+                  <td class="num text-ink-2">{usd(m.writeCost)}</td>
+                  <td class="num font-medium">{usd(m.cost)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/snippet}
+      </TableCard>
+    {/if}
+  </ViewGate>
 </div>

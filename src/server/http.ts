@@ -2,8 +2,9 @@ import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { importCursorCsv } from "../core/ingest/cursor.ts";
 import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
-import { expandHome } from "../core/paths.ts";
+import { defaultDbPath } from "../core/paths.ts";
 import type { Bucket, Dimension, Filters, Metric, SeriesGroup } from "../core/queries.ts";
+import { SHARED_FOLDER, dbTarget, findSyncFolders } from "../core/syncFolders.ts";
 import { generateTips } from "../core/tips.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
@@ -146,9 +147,11 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
         case "/api/summary":
           return json(q.summary(f));
         case "/api/timeseries":
-          return json(q.timeseries(f, pick(sp.get("bucket"), BUCKETS, "day"), pick(sp.get("group"), GROUPS, "type"), pick<Metric>(sp.get("metric"), ["tokens", "cost"], "tokens"), Number(sp.get("top") ?? 8)));
+          return json(q.timeseries(f, pick(sp.get("bucket"), BUCKETS, "day"), pick(sp.get("group"), GROUPS, "type"), pick<Metric>(sp.get("metric"), ["tokens", "cost"], "tokens"), Number(sp.get("top") ?? 5)));
         case "/api/breakdown":
           return json(q.breakdown(f, pick(sp.get("dim"), DIMENSIONS, "project"), Math.min(500, Number(sp.get("limit") ?? 50)), pick(sp.get("sort"), ["tokens", "cost"] as const, "cost")));
+        case "/api/billing":
+          return json(q.billing(f));
         case "/api/heatmap":
           return json(q.heatmap(f, pick<Metric>(sp.get("metric"), ["tokens", "cost"], "tokens")));
         case "/api/calendar":
@@ -159,10 +162,18 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           return json(q.sessionDetail(sp.get("id") ?? ""));
         case "/api/prompts":
           return json(q.prompts(f, { sort: sp.get("sort") ?? undefined, limit: Math.min(200, Number(sp.get("limit") ?? 50)), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
+        case "/api/prompts/costs":
+          return json(q.promptCosts(f));
         case "/api/prompt":
           return json(q.promptDetail(sp.get("id") ?? ""));
         case "/api/tools":
           return json(q.tools(f));
+        case "/api/files":
+          return json(q.files(f));
+        case "/api/files/hotspots":
+          return json(q.hotspots(f));
+        case "/api/files/list":
+          return json(q.fileList(f, { sort: sp.get("sort") ?? undefined, limit: Math.min(200, Number(sp.get("limit") ?? 50)), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
         case "/api/cache":
           return json(q.cache(f, pick(sp.get("bucket"), BUCKETS, "day")));
         case "/api/tips":
@@ -170,7 +181,9 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
         case "/api/filters":
           return json(q.filters(f));
         case "/api/settings":
-          return json({ config: app.cfg, dbPath: app.dbPath });
+          return json({ config: app.cfg, dbPath: app.dbPath, defaultDbPath: defaultDbPath(), syncFolders: findSyncFolders(), sharedFolder: SHARED_FOLDER });
+        case "/api/settings/db-target":
+          return json(dbTarget(sp.get("path") ?? "", app.dbPath, defaultDbPath()));
         case "/api/pricing":
           return json(app.priceBook().allRules());
         case "/api/update":
@@ -205,8 +218,10 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           if (body.sources) patch.sources = body.sources;
           app.updateConfig(patch);
           if (typeof body.dbPath === "string") {
-            const target = body.dbPath.trim() ? expandHome(body.dbPath.trim()) : "";
-            if (target !== app.cfg.dbPath) await app.switchDatabase(target, body.copyDb === true);
+            const target = dbTarget(body.dbPath, app.dbPath, defaultDbPath());
+            if (target.state === "missing" || target.state === "invalid") return error(`Can't use ${target.file}: ${target.state === "missing" ? "its folder doesn't exist" : "the path isn't absolute"}`);
+            const file = target.state === "default" ? "" : target.file;
+            if (target.state !== "current" && file !== app.cfg.dbPath) await app.switchDatabase(file, body.copyDb === true);
           }
           if (body.sources) app.scanNow().catch(() => {});
           return json({ config: app.cfg, dbPath: app.dbPath });

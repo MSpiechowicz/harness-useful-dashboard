@@ -43,12 +43,14 @@ describe("HTTP API", () => {
   const prevHome = process.env.HARNESS_DASHBOARD_HOME;
   const prevClaude = process.env.CLAUDE_CONFIG_DIR;
   const prevCodex = process.env.CODEX_HOME;
+  const prevOmp = process.env.PI_CODING_AGENT_DIR;
 
   beforeAll(async () => {
     const root = tempDir();
     process.env.HARNESS_DASHBOARD_HOME = join(root, "home");
     process.env.CLAUDE_CONFIG_DIR = join(root, "claude");
     process.env.CODEX_HOME = join(root, "codex");
+    process.env.PI_CODING_AGENT_DIR = join(root, "omp");
     writeJsonl(join(root, "claude", "projects", "-work-alpha", `${CLAUDE_SESSION}.jsonl`), [
       claudeUser("hello", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }),
       claudeAssistant({ id: "m1", ts: "2026-09-01T10:00:01.000Z" }),
@@ -65,12 +67,14 @@ describe("HTTP API", () => {
     else process.env.CLAUDE_CONFIG_DIR = prevClaude;
     if (prevCodex === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodex;
+    if (prevOmp === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = prevOmp;
   });
 
   const get = (path: string, host = "localhost:4317") => handle(new Request(`http://${host}${path}`, { headers: { host } }));
 
   test("serves JSON endpoints", async () => {
-    for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/cache", "/api/tips", "/api/filters", "/api/settings", "/api/pricing"]) {
+    for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/files", "/api/files/hotspots?project=%2Fwork%2Falpha", "/api/files/list?q=a", "/api/cache", "/api/tips", "/api/filters", "/api/settings", "/api/pricing"]) {
       const res = await get(path);
       expect(res.status, path).toBe(200);
       expect(res.headers.get("content-type")).toContain("application/json");

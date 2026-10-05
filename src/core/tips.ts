@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
-import { type Filters, projectLabel, whereClause } from "./queries.ts";
+import { type Filters, projectLabel, READ_TOOLS, whereClause } from "./queries.ts";
 
 export type Severity = "info" | "warn" | "critical";
 
@@ -88,13 +88,13 @@ export function generateTips(db: Database, f: Filters, prices: PriceBook): Tip[]
 
   // 6. Subagent share
   if (t.cost > 1 && t.subCost / t.cost > 0.3) {
-    tips.push({ id: "subagent-share", severity: "info", params: { share: pct(t.subCost / t.cost) }, link: "#/skills", impact: monthly(t.subCost * 0.2) });
+    tips.push({ id: "subagent-share", severity: "info", params: { share: pct(t.subCost / t.cost) }, link: "#/agents", impact: monthly(t.subCost * 0.2) });
   }
 
   // 7. Codex guardian / auto-review overhead
   const guardian = one<{ cost: number }>(`SELECT COALESCE(SUM(cost_usd),0) AS cost FROM usage u ${and("agent = 'guardian'")}`)!.cost;
   if (t.cost > 1 && guardian / t.cost > 0.08) {
-    tips.push({ id: "guardian-overhead", severity: "info", params: { share: pct(guardian / t.cost), cost: round2(guardian) }, link: "#/skills", impact: monthly(guardian * 0.5) });
+    tips.push({ id: "guardian-overhead", severity: "info", params: { share: pct(guardian / t.cost), cost: round2(guardian) }, link: "#/agents", impact: monthly(guardian * 0.5) });
   }
 
   // 8. Spike: most recent day vs trailing 7-day average
@@ -138,7 +138,7 @@ export function generateTips(db: Database, f: Filters, prices: PriceBook): Tip[]
   // 11. Same file read over and over in one session
   const reread = db
     .query<{ file_path: string; session_id: string; n: number }, any>(
-      `SELECT file_path, session_id, COUNT(*) AS n FROM tool_calls t ${tw.sql ? tw.sql + " AND" : "WHERE"} tool IN ('Read', 'NotebookRead') AND file_path IS NOT NULL
+      `SELECT file_path, session_id, COUNT(*) AS n FROM tool_calls t ${tw.sql ? tw.sql + " AND" : "WHERE"} tool IN (${READ_TOOLS}) AND file_path IS NOT NULL
        GROUP BY session_id, file_path HAVING n >= 8 ORDER BY n DESC LIMIT 1`,
     )
     .get(tw.params);

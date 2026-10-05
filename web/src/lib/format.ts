@@ -1,4 +1,4 @@
-import { i18n } from "./i18n.svelte.ts";
+import { i18n, t } from "./i18n.svelte.ts";
 
 const cache = new Map<string, Intl.NumberFormat>();
 function nf(opts: Intl.NumberFormatOptions): Intl.NumberFormat {
@@ -16,6 +16,12 @@ export function compact(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "–";
   if (Math.abs(n) < 10_000) return nf({ maximumFractionDigits: 0 }).format(n);
   return nf({ notation: "compact", maximumFractionDigits: 1 }).format(n);
+}
+
+/** A plain number with a fixed count of decimals, in the UI locale (19.9 / 19,9). */
+export function decimal(n: number | null | undefined, digits = 1): string {
+  if (n == null || !Number.isFinite(n)) return "–";
+  return nf({ minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 }
 
 export function integer(n: number | null | undefined): string {
@@ -84,4 +90,12 @@ export function shortPath(p: string | null | undefined, keep = 2): string {
   if (!p) return "–";
   const parts = p.split(/[\\/]/).filter(Boolean);
   return parts.length <= keep ? p : "…/" + parts.slice(-keep).join("/");
+}
+
+/** Display name for a dimension value: localizes the "other" bucket, token types and missing values. */
+export function entityLabel(dim: string, key: string | null, label: string): string {
+  if (key === "__other__") return t("chart.other");
+  if (dim === "type") return t(`tok.${key}` as "tok.input");
+  if (key == null || key === "(none)") return dim === "project" ? t("common.noProject") : t("common.none");
+  return label;
 }

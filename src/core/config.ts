@@ -11,7 +11,9 @@ export interface SourceConfig {
   claudeDirs: string[];
   /** Codex home directories (contain sessions/ and archived_sessions/). */
   codexDirs: string[];
-  enabled: { claude: boolean; codex: boolean };
+  /** omp (oh-my-pi) session roots (contain per-project folders of *.jsonl). */
+  ompDirs: string[];
+  enabled: { claude: boolean; codex: boolean; omp: boolean };
 }
 
 export interface AppConfig {
@@ -35,6 +37,7 @@ export function defaultConfig(): AppConfig {
   const home = homedir();
   const claudeRoot = process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude");
   const codexRoot = process.env.CODEX_HOME ?? join(home, ".codex");
+  const ompAgent = process.env.PI_CODING_AGENT_DIR ?? join(home, ".omp", "agent"); // omp's own override
   return {
     dbPath: "",
     journalMode: "auto",
@@ -47,7 +50,8 @@ export function defaultConfig(): AppConfig {
     sources: {
       claudeDirs: [join(claudeRoot, "projects")],
       codexDirs: [codexRoot],
-      enabled: { claude: true, codex: true },
+      ompDirs: [join(ompAgent, "sessions")],
+      enabled: { claude: true, codex: true, omp: true },
     },
   };
 }

@@ -36,22 +36,17 @@
   <button class="btn" aria-haspopup="listbox" aria-expanded={open} onclick={() => (open = !open)}>
     <Calendar size={14} class="text-muted" />
     <span>{label}</span>
-    <ChevronDown size={14} class="text-muted" />
+    <ChevronDown size={14} class="text-muted transition-transform {open ? 'rotate-180' : ''}" />
   </button>
   {#if open}
-    <div class="card absolute left-0 z-30 mt-1 w-64 p-1" role="listbox">
+    <div class="popover left-0 w-64" role="listbox">
       {#each presets as p (p)}
-        <button
-          role="option"
-          aria-selected={store.range === p}
-          class="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-left text-sm hover:bg-surface-2"
-          onclick={() => choose(p)}
-        >
-          <span>{t(`range.${p}` as "range.7d")}</span>
-          {#if store.range === p}<Check size={16} strokeWidth={3} class="text-accent" />{/if}
+        <button role="option" aria-selected={store.range === p} class="popover-item" onclick={() => choose(p)}>
+          <span class="flex-1">{t(`range.${p}` as "range.7d")}</span>
+          <Check size={14} strokeWidth={2.5} class="shrink-0 text-accent {store.range === p ? '' : 'invisible'}" />
         </button>
       {/each}
-      <div class="mt-1 border-t border-line px-3 pt-2 pb-2">
+      <div class="-mx-1 mt-1 border-t border-line px-3.5 pt-2 pb-2">
         <div class="mb-2 text-xs font-medium text-muted">{t("range.custom")}</div>
         <div class="flex flex-col gap-2">
           <label class="flex items-center justify-between gap-2 text-xs text-ink-2">

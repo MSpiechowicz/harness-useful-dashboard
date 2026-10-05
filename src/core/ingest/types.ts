@@ -1,4 +1,4 @@
-export type Provider = "claude" | "codex" | "cursor";
+export type Provider = "claude" | "codex" | "cursor" | "omp";
 
 export interface SessionRecord {
   id: string;
@@ -46,6 +46,10 @@ export interface UsageRecord {
   speed?: string | null;
   /** Provider-reported cost; when set it is used instead of the price book. */
   costUsd?: number | null;
+  /** The account or plan the call was billed through, when the harness says (e.g. "github-copilot"). */
+  billing?: string | null;
+  /** GitHub Copilot premium requests the call counted for. */
+  premiumRequests?: number;
   /** Overrides the ingesting machine's identity (e.g. team CSV exports). */
   user?: string | null;
 }

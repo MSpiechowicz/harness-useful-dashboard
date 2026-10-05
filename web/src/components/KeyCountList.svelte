@@ -7,7 +7,7 @@
     cost?: number;
     tokens?: number;
   }
-  let { items, value = "calls", mono = false, color = "var(--accent)" }: { items: Item[]; value?: "calls" | "cost"; mono?: boolean; color?: string } = $props();
+  let { items, value = "calls", mono = false, color = "var(--data)" }: { items: Item[]; value?: "calls" | "cost"; mono?: boolean; color?: string } = $props();
   const max = $derived(Math.max(1e-9, ...items.map((i) => (value === "cost" ? i.cost ?? 0 : i.calls ?? 0))));
 </script>
 

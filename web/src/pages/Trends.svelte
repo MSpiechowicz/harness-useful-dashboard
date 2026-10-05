@@ -2,12 +2,14 @@
   import { ChartArea, ChartColumn } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
+  import Dropdown from "../components/Dropdown.svelte";
   import Empty from "../components/Empty.svelte";
   import Kpi from "../components/Kpi.svelte";
   import PageHeader from "../components/PageHeader.svelte";
-  import { apiUrl, useFetch, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
-  import { cumulativeLine, seriesLabel, timeSeriesChart } from "../lib/charts.ts";
-  import { cssVar } from "../lib/colors.svelte.ts";
+  import ViewGate from "../components/ViewGate.svelte";
+  import UsageChart from "../components/UsageChart.svelte";
+  import { apiUrl, settled, useFetch, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
+  import { cumulativeChart, seriesLabel } from "../lib/charts.ts";
   import { bucketLabel, metricValue } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
@@ -17,6 +19,7 @@
   let group = $state<Group>("provider");
   let bucket = $state<Bucket | "auto">("auto");
   let kind = $state<"bar" | "area">("bar");
+  const buckets = ["auto", "hour", "day", "week", "month"] as const;
 
   const effBucket = $derived(bucket === "auto" ? store.bucket : bucket);
   const valueKind = $derived(group === "type" ? "tokens" : store.metric);
@@ -27,23 +30,13 @@
 
   const totalsPerBucket = $derived(series.data ? series.data.buckets.map((_, i) => series.data!.series.reduce((a, s) => a + (s.data[i] ?? 0), 0)) : []);
 
-  const mainOption = $derived.by(() => {
-    void store.dark;
-    const d = series.data;
-    if (!d) return null;
-    const opt = timeSeriesChart(d, { dim: group, metric: store.metric, bucket: effBucket, kind, valueKind }) as Record<string, any>;
-    // 7-bucket moving average of the total, drawn as a thin ink line on the same axis.
-    if (effBucket === "day" && d.buckets.length >= 14) {
-      const avg = totalsPerBucket.map((_, i) => {
-        const win = totalsPerBucket.slice(Math.max(0, i - 6), i + 1);
-        return win.reduce((a, b) => a + b, 0) / win.length;
-      });
-      opt.series.push({ name: t("chart.movingAvg"), type: "line", data: avg, showSymbol: false, smooth: 0.3, lineStyle: { width: 2, color: cssVar("--ink-2") }, color: cssVar("--ink-2"), z: 10, tooltip: { show: false } });
-      if (opt.legend) opt.legend.data = [...opt.legend.data, t("chart.movingAvg")];
-    }
-    return opt;
-  });
-  const cumOption = $derived.by(() => (void store.dark, daily.data ? cumulativeLine(daily.data, store.metric, "day") : null));
+  // Daily views of two weeks or more get a 7-day moving average of the total as a trend line.
+  const average = $derived(series.data && effBucket === "day" && series.data.buckets.length >= 14 ? { window: 7, label: t("chart.movingAvg") } : undefined);
+  // The running total is split by the chosen grouping; "Total" splits it by provider, so it always shows who it came from.
+  const cumGroup = $derived(group === "none" ? "provider" : group);
+  const cumulative = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: "day", group: cumGroup, metric: valueKind }));
+  const cumTotal = $derived(cumulative.data ? cumulative.data.series.reduce((a, s) => a + s.data.reduce((x, y) => x + (y ?? 0), 0), 0) : null);
+  const cumOption = $derived.by(() => (void store.dark, cumulative.data ? cumulativeChart(cumulative.data, { dim: cumGroup, metric: valueKind, bucket: "day" }) : null));
 
   const stats = $derived.by(() => {
     const d = daily.data?.series[0]?.data ?? [];
@@ -67,59 +60,60 @@
 </script>
 
 <div class="flex flex-col gap-5">
-  <PageHeader title={t("trends.title")} />
+  <PageHeader title={t("trends.title")} subtitle={t("trends.subtitle")} />
+  <ViewGate ready={settled(series, daily, summary, cumulative)}>
 
-  {#if summary.data && summary.data.messages === 0}
-    <div class="card"><Empty /></div>
-  {:else}
-    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <Kpi
-        label={t("trends.change")}
-        value={summary.data ? metricValue(store.metric === "cost" ? summary.data.cost : summary.data.tokens, store.metric) : "…"}
-        current={summary.data ? (store.metric === "cost" ? summary.data.cost : summary.data.tokens) : undefined}
-        previous={summary.data?.previous ? (store.metric === "cost" ? summary.data.previous.cost : summary.data.previous.tokens) : null}
-      />
-      <Kpi label={t("trends.peakDay")} value={stats ? metricValue(stats.peakValue, store.metric) : "…"} hint={stats ? bucketLabel(stats.peakDay, "day") : undefined} />
-      <Kpi label={t("trends.avgPerDay")} value={stats ? metricValue(stats.avg, store.metric) : "…"} hint={summary.data ? t("common.days", { n: summary.data.activeDays }) : undefined} />
-      <Kpi label={t("trends.projection")} value={stats ? metricValue(stats.projection, store.metric) : "…"} />
-    </div>
+    {#if summary.data && summary.data.messages === 0}
+      <div class="card"><Empty /></div>
+    {:else}
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi
+          label={t("trends.change")}
+          value={summary.data ? metricValue(store.metric === "cost" ? summary.data.cost : summary.data.tokens, store.metric) : "…"}
+          current={summary.data ? (store.metric === "cost" ? summary.data.cost : summary.data.tokens) : undefined}
+          previous={summary.data?.previous ? (store.metric === "cost" ? summary.data.previous.cost : summary.data.previous.tokens) : null}
+        />
+        <Kpi label={t("trends.peakDay")} value={stats ? metricValue(stats.peakValue, store.metric) : "…"} hint={stats ? bucketLabel(stats.peakDay, "day") : undefined} />
+        <Kpi label={t("trends.avgPerDay")} value={stats ? metricValue(stats.avg, store.metric) : "…"} hint={summary.data ? t("common.days", { n: summary.data.activeDays }) : undefined} />
+        <Kpi label={t("trends.projection")} value={stats ? metricValue(stats.projection, store.metric) : "…"} hint={t("trends.projectionHint")} />
+      </div>
 
-    <Card title={t("chart.usageOverTime")} subtitle={t(`metric.${valueKind}`)}>
-      {#snippet actions()}
-        <select class="input" bind:value={group} aria-label={t("trends.groupBy")}>
-          {#each groups as g (g)}<option value={g}>{t("trends.groupBy")}: {groupLabel(g)}</option>{/each}
-        </select>
-        <div class="seg" role="group">
-          {#each ["auto", "hour", "day", "week", "month"] as b (b)}
-            <button aria-pressed={bucket === b} onclick={() => (bucket = b as Bucket | "auto")}>{t(`bucket.${b}` as "bucket.day")}</button>
-          {/each}
-        </div>
-        <div class="seg" role="group">
-          <button aria-pressed={kind === "bar"} aria-label="Bars" onclick={() => (kind = "bar")}><ChartColumn size={13} /></button>
-          <button aria-pressed={kind === "area"} aria-label="Area" onclick={() => (kind = "area")}><ChartArea size={13} /></button>
-        </div>
-      {/snippet}
-      {#snippet table()}
+      <Card title={t("chart.usageOverTime")} subtitle={t(`metric.${valueKind}`)}>
+        {#snippet actions()}
+          <Dropdown prefix label={t("trends.groupBy")} bind:value={group} options={groups.map((g) => ({ value: g, label: groupLabel(g) }))} />
+          <Dropdown prefix label={t("trends.interval")} bind:value={bucket} options={buckets.map((b) => ({ value: b, label: b === "auto" ? `${t("bucket.auto")} (${t(`bucket.${store.bucket}`)})` : t(`bucket.${b}`) }))} />
+          <div class="seg" role="group">
+            <button aria-pressed={kind === "bar"} aria-label="Bars" onclick={() => (kind = "bar")}><ChartColumn size={13} /></button>
+            <button aria-pressed={kind === "area"} aria-label="Area" onclick={() => (kind = "area")}><ChartArea size={13} /></button>
+          </div>
+        {/snippet}
+        {#snippet table()}
+          {#if series.data}
+            <table class="data">
+              <thead><tr><th>{t("col.time")}</th>{#each series.data.series as se (se.key)}<th class="num">{seriesLabel(group, se)}</th>{/each}<th class="num">{t("common.total")}</th></tr></thead>
+              <tbody>
+                {#each series.data.buckets as b, i (b)}
+                  <tr>
+                    <td>{bucketLabel(b, effBucket)}</td>
+                    {#each series.data.series as se (se.key)}<td class="num">{metricValue(se.data[i] ?? 0, valueKind, false)}</td>{/each}
+                    <td class="num font-medium">{metricValue(totalsPerBucket[i] ?? 0, valueKind, false)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+        {/snippet}
         {#if series.data}
-          <table class="data">
-            <thead><tr><th>{t("col.time")}</th>{#each series.data.series as se (se.key)}<th class="num">{seriesLabel(group, se)}</th>{/each}<th class="num">{t("common.total")}</th></tr></thead>
-            <tbody>
-              {#each series.data.buckets as b, i (b)}
-                <tr>
-                  <td>{bucketLabel(b, effBucket)}</td>
-                  {#each series.data.series as se (se.key)}<td class="num">{metricValue(se.data[i] ?? 0, valueKind, false)}</td>{/each}
-                  <td class="num font-medium">{metricValue(totalsPerBucket[i] ?? 0, valueKind, false)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+          <UsageChart ts={series.data} dim={group} bucket={effBucket} metric={store.metric} {valueKind} {kind} {average} height={380} loading={series.loading} />
         {/if}
-      {/snippet}
-      {#if mainOption}<Chart option={mainOption} height={380} dim={series.loading} />{/if}
-    </Card>
+      </Card>
 
-    <Card title={t("chart.cumulative")} subtitle={t(`metric.${store.metric}`)}>
-      {#if cumOption}<Chart option={cumOption} height={240} dim={daily.loading} />{/if}
-    </Card>
-  {/if}
+      <Card title={t("chart.cumulative")} subtitle={t(`metric.${valueKind}`)}>
+        {#snippet actions()}
+          {#if cumTotal != null}<span class="text-2xl font-semibold tracking-tight text-ink tabular">{metricValue(cumTotal, valueKind)}</span>{/if}
+        {/snippet}
+        {#if cumOption}<Chart option={cumOption} height={300} dim={cumulative.loading} />{/if}
+      </Card>
+    {/if}
+  </ViewGate>
 </div>

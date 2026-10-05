@@ -8,9 +8,12 @@
     { value: "light", icon: Sun },
     { value: "dark", icon: Moon },
   ];
+
+  /** `wide` fills a form column and names each choice beside its icon. */
+  let { wide = false }: { wide?: boolean } = $props();
 </script>
 
-<div class="seg" role="radiogroup" aria-label={t("settings.theme")}>
+<div class="seg" class:wide role="radiogroup" aria-label={t("settings.theme")}>
   {#each options as o (o.value)}
     <button
       role="radio"
@@ -20,6 +23,7 @@
       onclick={() => store.setTheme(o.value)}
     >
       <o.icon size={13} />
+      {#if wide}{t(`settings.theme.${o.value}` as "settings.theme.system")}{/if}
     </button>
   {/each}
 </div>

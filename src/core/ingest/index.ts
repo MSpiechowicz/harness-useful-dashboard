@@ -5,8 +5,10 @@ import type { AppConfig } from "../config.ts";
 import { setMeta } from "../db.ts";
 import { expandHome } from "../paths.ts";
 import { PriceBook } from "../pricing.ts";
+import { normalizeProjects } from "../project.ts";
 import { claudeParser } from "./claude.ts";
 import { codexParser } from "./codex.ts";
+import { ompParser } from "./omp.ts";
 import type { LineParser } from "./types.ts";
 import { DbWriter, resolveSpawnRefs } from "./writer.ts";
 
@@ -48,6 +50,11 @@ export async function discoverFiles(cfg: AppConfig): Promise<SourceFile[]> {
       for (const path of await listFiles(root, ["sessions/**/*.jsonl", "archived_sessions/**/*.jsonl"])) {
         files.push({ path, parser: codexParser });
       }
+    }
+  }
+  if (cfg.sources.enabled.omp) {
+    for (const dir of cfg.sources.ompDirs) {
+      for (const path of await listFiles(expandHome(dir), ["**/*.jsonl"])) files.push({ path, parser: ompParser });
     }
   }
   // Parse main transcripts before subagent transcripts so spawn refs resolve in one pass.
@@ -142,6 +149,7 @@ export async function scan(
   }
 
   resolveSpawnRefs(db);
+  normalizeProjects(db, identity.host, writer.project);
   applyCodexTitles(db, cfg);
   result.usageRows = writer.stats.usage;
   result.prompts = writer.stats.prompts;

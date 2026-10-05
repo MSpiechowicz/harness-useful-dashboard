@@ -1,5 +1,6 @@
 import type { Database, Statement } from "bun:sqlite";
 import type { PriceBook } from "../pricing.ts";
+import { projectResolver } from "../project.ts";
 import type { IngestSink, PromptRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
 
 export interface WriterStats {
@@ -11,6 +12,8 @@ export interface WriterStats {
 /** IngestSink that upserts into SQLite. Callers wrap usage in a transaction. */
 export class DbWriter implements IngestSink {
   readonly stats: WriterStats = { usage: 0, prompts: 0, tools: 0 };
+  /** Maps each record's working directory to its project (repo root), cached for the writer's lifetime. */
+  readonly project = projectResolver();
   private sSession: Statement;
   private sPrompt: Statement;
   private sUsage: Statement;
@@ -45,10 +48,11 @@ export class DbWriter implements IngestSink {
     this.sUsage = db.prepare(`
       INSERT INTO usage (id, provider, session_id, prompt_id, ts, project, user, host, model, skill, agent, is_subagent,
                          spawn_ref, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                         cache_write_1h_tokens, reasoning_tokens, total_tokens, cost_usd, cost_estimated, speed)
+                         cache_write_1h_tokens, reasoning_tokens, total_tokens, cost_usd, cost_estimated, speed,
+                         billing, premium_requests)
       VALUES ($id, $provider, $sessionId, $promptId, $ts, $project, $user, $host, $model, $skill, $agent, $isSubagent,
               $spawnRef, $input, $output, $cacheRead, $cacheWrite, $cacheWrite1h, $reasoning, $total, $cost,
-              $estimated, $speed)
+              $estimated, $speed, $billing, $premiumRequests)
       ON CONFLICT(id) DO UPDATE SET
         -- Streaming transcripts can repeat a message with growing counts: keep the largest.
         input_tokens          = MAX(usage.input_tokens, excluded.input_tokens),
@@ -60,7 +64,9 @@ export class DbWriter implements IngestSink {
         total_tokens          = MAX(usage.total_tokens, excluded.total_tokens),
         cost_usd              = MAX(usage.cost_usd, excluded.cost_usd),
         prompt_id             = COALESCE(usage.prompt_id, excluded.prompt_id),
-        skill                 = COALESCE(usage.skill, excluded.skill)
+        skill                 = COALESCE(usage.skill, excluded.skill),
+        billing               = COALESCE(usage.billing, excluded.billing),
+        premium_requests      = MAX(usage.premium_requests, excluded.premium_requests)
     `);
     this.sTool = db.prepare(`
       INSERT OR IGNORE INTO tool_calls (id, usage_id, session_id, prompt_id, provider, ts, project, user, tool,
@@ -75,7 +81,7 @@ export class DbWriter implements IngestSink {
       id: s.id,
       provider: s.provider,
       nativeId: s.nativeId,
-      project: s.project ?? null,
+      project: this.project(s.project),
       user: this.identity.user,
       host: this.identity.host,
       title: s.title ?? null,
@@ -117,7 +123,7 @@ export class DbWriter implements IngestSink {
       sessionId: u.sessionId,
       promptId: u.promptId,
       ts: u.ts,
-      project: u.project,
+      project: this.project(u.project),
       user: u.user ?? this.identity.user,
       host: this.identity.host,
       model: u.model,
@@ -135,6 +141,8 @@ export class DbWriter implements IngestSink {
       cost: hasReported ? u.costUsd! : priced.usd,
       estimated: hasReported ? 0 : priced.estimated ? 1 : 0,
       speed: u.speed ?? null,
+      billing: u.billing ?? null,
+      premiumRequests: u.premiumRequests ?? 0,
     });
     this.stats.usage++;
   }
@@ -147,7 +155,7 @@ export class DbWriter implements IngestSink {
       promptId: t.promptId,
       provider: t.provider,
       ts: t.ts,
-      project: t.project,
+      project: this.project(t.project),
       user: this.identity.user,
       tool: t.tool,
       filePath: t.filePath,

@@ -1,8 +1,10 @@
 <script lang="ts">
   import { SlidersHorizontal, X } from "@lucide/svelte";
   import { filterParams, qs, useFetch, type FilterOptions } from "../lib/api.svelte.ts";
+  import { entityLabel } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { FILTER_KEYS, store, type FilterKey } from "../lib/state.svelte.ts";
+  import Dropdown from "./Dropdown.svelte";
   import RangePicker from "./RangePicker.svelte";
 
   // Options come from the selected time range only, so every value stays selectable.
@@ -35,30 +37,36 @@
   </button>
   <div class="w-full flex-wrap gap-2 sm:contents {expanded ? 'flex' : 'hidden'}">
   {#each visible as k (k)}
-    <label class="relative">
-      <span class="sr-only">{labelFor(k)}</span>
-      <select
-        class="input max-w-44 cursor-pointer"
-        class:!border-accent={store[k] !== ""}
-        class:!bg-accent-wash={store[k] !== ""}
-        value={store[k]}
-        onchange={(e) => store.setFilter(k, (e.currentTarget as HTMLSelectElement).value)}
-      >
-        <option value="">{labelFor(k)}: {t("filter.all")}</option>
-        {#each opts.data?.[k] ?? [] as o (o.value)}
-          <option value={o.value}>{o.label}</option>
-        {/each}
-        {#if store[k] && !(opts.data?.[k] ?? []).some((o) => o.value === store[k])}
-          <option value={store[k]}>{store[k]}</option>
-        {/if}
-      </select>
-    </label>
+    {@const list = opts.data?.[k] ?? []}
+    <!-- All filters share one width, whatever their values: symmetric, and nothing shifts when one is chosen. -->
+    <Dropdown
+      prefix
+      stretch
+      label={labelFor(k)}
+      value={store[k]}
+      active={store[k] !== ""}
+      class="max-w-52"
+      options={[
+        { value: "", label: t("filter.all") },
+        ...list.map((o) => ({ value: o.value, label: entityLabel(k, o.value, o.label) })),
+        // Keep a selection that has no usage in the current range visible.
+        ...(store[k] && !list.some((o) => o.value === store[k]) ? [{ value: store[k], label: store[k] }] : []),
+      ]}
+      onchange={(v) => store.setFilter(k, v)}
+    />
   {/each}
-  {#if store.activeFilterCount > 0}
-    <button class="btn !px-2 text-ink-2" onclick={() => store.clearFilters()}>
-      <X size={14} />{t("filter.clear")}
-    </button>
-  {/if}
+  <!-- Always laid out, only hidden while nothing is filtered: choosing the first filter doesn't squeeze the others. -->
+  <button
+    class="btn !px-2 text-ink-2"
+    class:invisible={store.activeFilterCount === 0}
+    tabindex={store.activeFilterCount === 0 ? -1 : undefined}
+    aria-hidden={store.activeFilterCount === 0}
+    title={t("filter.clear")}
+    aria-label={t("filter.clear")}
+    onclick={() => store.clearFilters()}
+  >
+    <X size={14} />
+  </button>
   </div>
   <div class="seg ml-auto" role="group" aria-label={t("metric.cost") + " / " + t("metric.tokens")}>
     <button aria-pressed={store.metric === "cost"} onclick={() => store.setMetric("cost")}>{t("metric.cost")}</button>

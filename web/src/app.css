@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-/* Theme tokens. Values follow the validated reference palette (light and dark are separately stepped). */
+/* Theme tokens. Values follow the validated reference palette (light and dark are separately stepped).
+   Data colors (series, providers, token types) live in lib/palette.ts, not here. */
 :root {
   color-scheme: light;
   --page: #f4f4f1;
@@ -16,19 +17,15 @@
   --accent: #2a78d6;
   --accent-ink: #1c5cab;
   --accent-wash: rgba(42, 120, 214, 0.1);
+  /* Neutral ink for single-measure marks (totals, inline bars): color in charts always means identity. */
+  --data: #76756f;
   --good-ink: #006300;
   --bad-ink: #b42323;
   --shadow: 0 1px 2px rgba(11, 11, 11, 0.04), 0 4px 16px rgba(11, 11, 11, 0.04);
+  --popover: #fcfcfb;
+  --popover-hover: #f3f3f0;
+  --shadow-pop: 0 2px 6px rgba(11, 11, 11, 0.06), 0 12px 32px rgba(11, 11, 11, 0.12);
 
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-  --series-5: #e87ba4;
-  --series-6: #008300;
-  --series-7: #4a3aa7;
-  --series-8: #e34948;
-  --series-other: #b5b3ab;
 
   --seq-0: #f0efec;
   --seq-1: #cde2fb;
@@ -61,18 +58,13 @@
     --accent: #3987e5;
     --accent-ink: #86b6ef;
     --accent-wash: rgba(57, 135, 229, 0.16);
+    --data: #a3a29a;
     --good-ink: #0ca30c;
     --bad-ink: #e66767;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
-    --series-other: #5f5e59;
+    --popover: #232321;
+    --popover-hover: #2f2f2d;
+    --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
     --seq-0: #232321;
     --seq-1: #104281;
     --seq-2: #184f95;
@@ -99,18 +91,13 @@
   --accent: #3987e5;
   --accent-ink: #86b6ef;
   --accent-wash: rgba(57, 135, 229, 0.16);
+  --data: #a3a29a;
   --good-ink: #0ca30c;
   --bad-ink: #e66767;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  --series-5: #d55181;
-  --series-6: #008300;
-  --series-7: #9085e9;
-  --series-8: #e66767;
-  --series-other: #5f5e59;
+  --popover: #232321;
+  --popover-hover: #2f2f2d;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
   --seq-0: #232321;
   --seq-1: #104281;
   --seq-2: #184f95;
@@ -134,10 +121,16 @@
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-accent-wash: var(--accent-wash);
+  --color-data: var(--data);
   --color-good: var(--good-ink);
   --color-bad: var(--bad-ink);
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+html {
+  /* Reserve the scrollbar's space so pages of different heights don't shift sideways. */
+  scrollbar-gutter: stable;
 }
 
 html,
@@ -206,6 +199,84 @@ body {
   font-size: 0.8125rem;
   min-width: 0;
 }
+.popover {
+  position: absolute;
+  z-index: 30;
+  margin-top: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-pop);
+}
+.popover-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.popover-item:hover,
+.popover-item:focus-visible {
+  background: var(--popover-hover);
+  color: var(--ink);
+  outline: none;
+}
+.popover-item[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* An on/off switch. The knob is white on the accent track in both themes, like a system switch. */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 1.75rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition: background 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: var(--ink-2);
+  transition:
+    transform 0.15s,
+    background 0.15s;
+}
+.switch.on {
+  background: var(--accent);
+  box-shadow: none;
+}
+.switch.on::after {
+  transform: translateX(0.75rem);
+  background: white;
+}
+button.switch {
+  cursor: pointer;
+}
+button.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .input:focus,
 .btn:focus-visible {
   outline: 2px solid var(--accent);
@@ -220,6 +291,7 @@ body {
   border: 1px solid var(--border);
 }
 .seg button {
+  white-space: nowrap;
   height: 1.6rem;
   padding: 0 0.6rem;
   border-radius: 7px;
@@ -227,6 +299,23 @@ body {
   font-weight: 500;
   color: var(--ink-2);
   cursor: pointer;
+}
+/* In a form the control fills its column, the same 2rem high as the inputs beside it. */
+.seg.wide {
+  display: flex;
+  width: 100%;
+}
+.seg.wide button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 1.625rem;
+}
+.input:focus-within:not(:focus) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .seg button[aria-pressed="true"],
 .seg button[aria-checked="true"] {
@@ -239,6 +328,17 @@ table.data {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.8125rem;
+}
+/* Paged tables keep their column widths (set by a <colgroup>) from page to page, so the columns don't jump; the
+   first column takes what's left, and narrow screens scroll sideways rather than squeeze it. */
+table.data.fixed-cols {
+  table-layout: fixed;
+  min-width: 64rem;
+}
+table.data.fixed-cols td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 table.data th {
   text-align: left;
@@ -265,6 +365,27 @@ table.data td {
 table.data tbody tr:hover {
   background: var(--surface-2);
 }
+/* Edge-to-edge tables line their outer columns up with the card's 20px header padding,
+   and the card border closes the table, so the last row needs no rule of its own. */
+.card-flush table.data :is(th, td):first-child {
+  padding-left: 1.25rem;
+}
+.card-flush table.data :is(th, td):last-child {
+  padding-right: 1.25rem;
+}
+.card-flush table.data tbody tr:last-child td {
+  border-bottom: 0;
+}
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--grid);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
 table.data td.num,
 table.data th.num {
   text-align: right;
@@ -276,6 +397,40 @@ table.data th.num {
   opacity: 0.55;
   transition: opacity 0.2s;
 }
+}
+
+/* Indeterminate top-of-window bar shown while data loads. */
+.progress-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 60;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.progress-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: progress-slide 1.1s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar::before {
+    width: 100%;
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 ::-webkit-scrollbar {

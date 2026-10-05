@@ -1,13 +1,17 @@
 <script lang="ts">
-  import { Search, Sparkles } from "@lucide/svelte";
+  import ValueBar from "../components/ValueBar.svelte";
+  import ViewGate from "../components/ViewGate.svelte";
+  import TableCard from "../components/TableCard.svelte";
+  import { Sparkles } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
-  import Empty from "../components/Empty.svelte";
+  import Chart from "../components/Chart.svelte";
   import PageHeader from "../components/PageHeader.svelte";
-  import { apiUrl, useFetch } from "../lib/api.svelte.ts";
+  import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
+  import { paretoChart, percentile, promptHistogram, topShare, type PromptCost } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
-  import { compact, dateTime, usd } from "../lib/format.ts";
+  import { compact, dateTime, entityLabel, metricValue, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
-  import { navigate } from "../lib/state.svelte.ts";
+  import { navigate, store } from "../lib/state.svelte.ts";
 
   interface PromptRow {
     id: string;
@@ -26,43 +30,88 @@
     models: string | null;
   }
 
-  let sort = $state<"cost" | "tokens" | "recent" | "messages">("cost");
+  type Sort = "cost" | "tokens" | "recent" | "messages";
+  let sort = $state<Sort>("cost");
+  const SORTS = $derived((["cost", "tokens", "recent", "messages"] as const).map((value) => ({ value: value as Sort, label: t(`sort.${value}`) })));
   let query = $state("");
   let debounced = $state("");
-  let limit = $state(50);
+  // The table pages 10 rows at a time (the table card starts again on page 1 after a new search or sort).
+  const PAGE = 10;
+  let page = $state(1);
   $effect(() => {
     const q = query;
     const h = setTimeout(() => {
       debounced = q;
-      limit = 50;
+      page = 1;
     }, 250);
     return () => clearTimeout(h);
   });
 
-  const data = useFetch<{ total: number; rows: PromptRow[] }>(() => apiUrl("/api/prompts", { sort, q: debounced, limit }));
+  const data = useFetch<{ total: number; rows: PromptRow[] }>(() => apiUrl("/api/prompts", { sort, q: debounced, limit: PAGE, offset: (page - 1) * PAGE }));
   const maxCost = $derived(Math.max(1e-9, ...(data.data?.rows ?? []).map((r) => r.cost)));
+
+  // Every prompt in the range, for how the spend spreads across them.
+  const costs = useFetch<PromptCost[]>(() => apiUrl("/api/prompts/costs"));
+  const values = $derived((costs.data ?? []).map((r) => (store.metric === "cost" ? r.cost : r.tokens)));
+  const metricWord = $derived(t(`prompts.metricWord.${store.metric}`));
+  const histogram = $derived.by(() => (void store.dark, costs.data?.length ? promptHistogram(costs.data, store.metric) : null));
+  const pareto = $derived.by(() => (void store.dark, values.length ? paretoChart(values, store.metric) : null));
 </script>
 
 <div class="flex flex-col gap-5">
-  <PageHeader title={t("prompts.title")} subtitle={t("prompts.subtitle")}>
-    <label class="relative">
-      <Search size={14} class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
-      <input class="input w-56 pl-8" placeholder={t("filter.search")} bind:value={query} />
-    </label>
-    <select class="input" bind:value={sort}>
-      {#each ["cost", "tokens", "recent", "messages"] as s (s)}<option value={s}>{t(`sort.${s}` as "sort.cost")}</option>{/each}
-    </select>
-  </PageHeader>
+  <PageHeader title={t("prompts.title")} subtitle={t("prompts.subtitle")} />
+  <ViewGate ready={settled(data, costs)}>
+    {#if histogram && pareto}
+      <div class="grid gap-5 xl:grid-cols-5">
+        <Card title={t("prompts.dist", { metric: t(`metric.${store.metric}`) })} subtitle={t("prompts.distHint")} class="xl:col-span-3">
+          {#snippet actions()}
+            <div class="flex gap-5 text-right">
+              <div><div class="text-[11px] text-muted">{t("prompts.median")}</div><div class="text-sm font-semibold text-ink tabular">{metricValue(percentile(values, 0.5), store.metric)}</div></div>
+              <div><div class="text-[11px] text-muted">{t("prompts.p90")}</div><div class="text-sm font-semibold text-ink tabular">{metricValue(percentile(values, 0.9), store.metric)}</div></div>
+            </div>
+          {/snippet}
+          <Chart option={histogram} height={260} fill dim={costs.loading} />
+        </Card>
+        <Card title={t("prompts.pareto")} subtitle={t("prompts.paretoHint", { metric: metricWord })} class="xl:col-span-2">
+          <!-- The headline number, then the curve it comes from in the rest of the card. -->
+          <div class="flex h-full flex-col">
+            <div class="mb-1 flex items-baseline gap-2">
+              <span class="text-2xl font-semibold tracking-tight text-ink tabular">{percent(topShare(values, 0.1), 0)}</span>
+              <span class="text-xs text-muted">{t("prompts.top10", { metric: metricWord })}</span>
+            </div>
+            <Chart option={pareto} height={220} fill dim={costs.loading} />
+          </div>
+        </Card>
+      </div>
+    {/if}
 
-  <Card pad={false}>
-    {#if data.data && data.data.rows.length === 0}
-      <Empty compact />
-    {:else}
-      <div class="overflow-x-auto" class:loading-dim={data.loading}>
-        <table class="data">
+    <TableCard
+      title={t("prompts.tableTitle")}
+      subtitle={t("prompts.tableHint")}
+      rows={data.data?.rows ?? []}
+      total={data.data?.total ?? 0}
+      sorts={SORTS}
+      bind:sortKey={sort}
+      bind:query
+      bind:page
+      loading={data.loading}
+    >
+      {#snippet children(view)}
+        <table class="data fixed-cols">
+          <colgroup>
+            <col />
+            <col class="w-40" />
+            <col class="w-44" />
+            <col class="w-[4.5rem]" />
+            <col class="w-24" />
+            <col class="w-24" />
+            <col class="w-44" />
+            <col class="w-44" />
+          </colgroup>
           <thead>
             <tr>
               <th>{t("col.prompt")}</th>
+              <th>{t("col.skill")}</th>
               <th>{t("col.project")}</th>
               <th class="num">{t("col.messages")}</th>
               <th class="num">{t("col.tools")}</th>
@@ -72,41 +121,29 @@
             </tr>
           </thead>
           <tbody>
-            {#each data.data?.rows ?? [] as r (r.id)}
+            {#each view.rows as r (r.id)}
               <tr class="cursor-pointer" onclick={() => navigate("prompts", r.id)}>
-                <td class="max-w-xl">
-                  <div class="flex items-start gap-2">
-                    <span class="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
-                    <div class="min-w-0">
-                      <div class="line-clamp-2 text-ink">{r.text ?? t("prompts.noText")}</div>
-                      {#if r.skill}<div class="mt-0.5 inline-flex items-center gap-1 text-[11px] text-accent-ink"><Sparkles size={10} />{r.skill}</div>{/if}
-                    </div>
+                <!-- One line per row: the prompt truncates (the tooltip has it whole), the skill has its own column. -->
+                <td class="max-w-xl" title={r.text ?? undefined}>
+                  <div class="flex items-center gap-2">
+                    <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
+                    <span class="truncate text-ink">{r.text ?? t("prompts.noText")}</span>
                   </div>
                 </td>
-                <td class="max-w-40 truncate text-ink-2" title={r.project}>{r.projectLabel}</td>
+                <td class="max-w-40 text-xs" title={r.skill ?? undefined}>
+                  {#if r.skill}<span class="flex items-center gap-1 text-accent-ink"><Sparkles size={11} class="shrink-0" /><span class="truncate">{r.skill}</span></span>{:else}<span class="text-muted">–</span>{/if}
+                </td>
+                <td class="max-w-40 truncate text-ink-2" title={r.project}>{entityLabel("project", r.project, r.projectLabel)}</td>
                 <td class="num text-ink-2">{compact(r.messages)}</td>
                 <td class="num text-ink-2">{compact(r.toolCalls)}</td>
                 <td class="num text-ink-2">{compact(r.tokens)}</td>
-                <td class="num">
-                  <div class="flex items-center justify-end gap-2">
-                    <div class="h-1.5 w-16 overflow-hidden rounded-full bg-surface-2">
-                      <div class="h-full rounded-full bg-accent" style:width="{(r.cost / maxCost) * 100}%"></div>
-                    </div>
-                    <span class="font-medium">{usd(r.cost)}</span>
-                  </div>
-                </td>
+                <td class="num font-medium"><ValueBar label={usd(r.cost)} fraction={r.cost / maxCost} /></td>
                 <td class="num text-xs text-muted">{dateTime(r.ts)}</td>
               </tr>
             {/each}
           </tbody>
         </table>
-      </div>
-      {#if data.data}
-        <div class="flex items-center justify-between px-5 py-3 text-xs text-muted">
-          <span>{t("common.showing", { n: data.data.rows.length, total: data.data.total })}</span>
-          {#if data.data.rows.length < data.data.total}<button class="btn" onclick={() => (limit += 50)}>{t("common.more")}</button>{/if}
-        </div>
-      {/if}
-    {/if}
-  </Card>
+      {/snippet}
+    </TableCard>
+  </ViewGate>
 </div>

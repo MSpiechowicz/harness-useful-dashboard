@@ -59,6 +59,8 @@ class Store {
   skill = $state("");
   agent = $state("");
   metric = $state<Metric>(load("hd.metric", ["tokens", "cost"] as const, "cost"));
+  /** Whether project views list the work done outside any project ("No project"). */
+  showNoProject = $state<boolean>(load("hd.showNoProject", ["true", "false"] as const, "true") === "true");
   theme = $state<ThemePref>(load("hd.theme", ["system", "light", "dark"] as const, "system"));
   systemDark = $state(typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
   /** Bumped whenever new data was ingested; data hooks refetch on change. */
@@ -89,6 +91,11 @@ class Store {
   setRange(r: RangePreset): void {
     this.range = r;
     save("hd.range", r);
+  }
+
+  setShowNoProject(show: boolean): void {
+    this.showNoProject = show;
+    save("hd.showNoProject", String(show));
   }
 
   setMetric(m: Metric): void {
