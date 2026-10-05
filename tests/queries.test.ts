@@ -188,4 +188,33 @@ describe("tips", () => {
     expect(ids).toContain("subagent-share");
     expect(ids).toContain("estimated-pricing");
   });
+
+  test("flags cache expiry, model switches, output-heavy spend, repeats, edit churn, rising prompt cost and Copilot pace", () => {
+    const db = memDb();
+    const w = new DbWriter(db, new PriceBook(), ID);
+    const MIN = 60_000;
+    // Ten days of prompts, one session a day: later prompts cost more, a pause before every call lets the cache expire,
+    // the model flips every other call, and the same prompt comes back each day.
+    for (let d = 0; d < 10; d++) {
+      const sessionId = `claude:d${d}`;
+      for (let i = 0; i < 4; i++) {
+        const promptId = `${sessionId}:p${i}`;
+        const ts = T0 + d * DAY + i * 10 * MIN;
+        w.prompt({ id: promptId, sessionId, provider: "claude", ts, text: i === 0 ? "Run the release checklist for the web app" : `task ${d}.${i}`, skill: null, isCommand: false });
+        w.usage(usage({
+          id: `${promptId}:u`, sessionId, promptId, ts, model: i % 2 ? "claude-opus-5-5" : "claude-sonnet-5-5",
+          input: 500, cacheRead: 10_000, cacheWrite: 40_000, output: d < 5 ? 20_000 : 60_000,
+          billing: "github-copilot", premiumRequests: 10,
+        }));
+      }
+    }
+    for (let i = 0; i < 16; i++) {
+      w.tool({ id: `edit${i}`, usageId: "claude:d0:p0:u", sessionId: "claude:d0", promptId: "claude:d0:p0", provider: "claude", ts: T0 + i, project: "/work/alpha", tool: "Edit", filePath: "/work/alpha/src/app.ts", skill: null, agent: "main" });
+    }
+    const tips = generateTips(db, {}, new PriceBook());
+    const ids = tips.map((t) => t.id);
+    for (const id of ["cache-expired", "model-switch", "output-heavy", "prompt-cost-rising", "repeated-prompt", "edit-churn", "copilot-premium-pace"]) expect(ids).toContain(id);
+    expect(tips.find((t) => t.id === "repeated-prompt")!.params).toMatchObject({ count: 10 });
+    expect(tips.find((t) => t.id === "edit-churn")!.params).toMatchObject({ file: "app.ts", count: 16 });
+  });
 });

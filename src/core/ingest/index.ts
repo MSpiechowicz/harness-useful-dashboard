@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { AppConfig } from "../config.ts";
 import { setMeta } from "../db.ts";
 import { expandHome } from "../paths.ts";
@@ -8,7 +8,8 @@ import { PriceBook } from "../pricing.ts";
 import { normalizeProjects } from "../project.ts";
 import { claudeParser } from "./claude.ts";
 import { codexParser } from "./codex.ts";
-import { ompParser } from "./omp.ts";
+import { ompParser, piParser } from "./omp.ts";
+import { ingestOpencode, opencodeDatabases, opencodeStamp } from "./opencode.ts";
 import type { LineParser } from "./types.ts";
 import { DbWriter, resolveSpawnRefs } from "./writer.ts";
 
@@ -52,9 +53,16 @@ export async function discoverFiles(cfg: AppConfig): Promise<SourceFile[]> {
       }
     }
   }
-  if (cfg.sources.enabled.omp) {
-    for (const dir of cfg.sources.ompDirs) {
-      for (const path of await listFiles(expandHome(dir), ["**/*.jsonl"])) files.push({ path, parser: ompParser });
+  const ompRoots = cfg.sources.enabled.omp ? cfg.sources.ompDirs.map((d) => resolve(expandHome(d))) : [];
+  for (const root of ompRoots) {
+    for (const path of await listFiles(root, ["**/*.jsonl"])) files.push({ path, parser: ompParser });
+  }
+  if (cfg.sources.enabled.pi) {
+    // pi and omp share a format and an environment variable: a folder set up for both is read once, as omp's.
+    for (const dir of cfg.sources.piDirs ?? []) {
+      const root = resolve(expandHome(dir));
+      if (ompRoots.includes(root)) continue;
+      for (const path of await listFiles(root, ["**/*.jsonl"])) files.push({ path, parser: piParser });
     }
   }
   // Parse main transcripts before subagent transcripts so spawn refs resolve in one pass.
@@ -146,6 +154,28 @@ export async function scan(
       result.errors.push({ path: file.path, error: (err as Error).message });
     }
     opts.onProgress?.(done, files.length);
+  }
+
+  // OpenCode keeps a database rather than log files: read what changed since the last scan, when it changed at all.
+  if (cfg.sources.enabled.opencode) {
+    for (const dir of cfg.sources.opencodeDirs ?? []) {
+      for (const path of opencodeDatabases(expandHome(dir))) {
+        result.filesSeen++;
+        try {
+          const stamp = opencodeStamp(path);
+          const prev = getState.get(identity.host, path);
+          if (prev && prev.size === stamp.size && prev.mtime === stamp.mtime) continue;
+          let latest = 0;
+          db.transaction(() => {
+            latest = ingestOpencode(path, writer, { since: prev?.offset ?? 0, promptTextLimit: cfg.promptTextLimit });
+          })();
+          putState.run(identity.host, path, stamp.size, stamp.mtime, latest, null);
+          result.filesParsed++;
+        } catch (err) {
+          result.errors.push({ path, error: (err as Error).message });
+        }
+      }
+    }
   }
 
   resolveSpawnRefs(db);

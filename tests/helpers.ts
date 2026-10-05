@@ -27,7 +27,9 @@ export function testConfig(root: string, patch: Partial<AppConfig> = {}): AppCon
       claudeDirs: [join(root, "claude", "projects")],
       codexDirs: [join(root, "codex")],
       ompDirs: [join(root, "omp", "sessions")],
-      enabled: { claude: true, codex: true, omp: true },
+      piDirs: [join(root, "pi", "sessions")],
+      opencodeDirs: [join(root, "opencode")],
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true },
     },
     ...patch,
   };

@@ -44,6 +44,7 @@
       {#if delta != null}
         <div
           class="mt-1 flex h-4 items-center gap-1 text-xs whitespace-nowrap"
+          title={t("kpi.vsPrevHint")}
           class:text-good={tone === "good"}
           class:text-bad={tone === "bad"}
           class:text-ink-2={tone === "neutral"}

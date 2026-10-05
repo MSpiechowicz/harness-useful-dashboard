@@ -10,7 +10,7 @@
   import UsageChart from "../components/UsageChart.svelte";
   import { apiUrl, settled, useFetch, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
   import { cumulativeChart, seriesLabel } from "../lib/charts.ts";
-  import { bucketLabel, metricValue } from "../lib/format.ts";
+  import { bucketLabel, days, metricValue } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -74,7 +74,7 @@
           previous={summary.data?.previous ? (store.metric === "cost" ? summary.data.previous.cost : summary.data.previous.tokens) : null}
         />
         <Kpi label={t("trends.peakDay")} value={stats ? metricValue(stats.peakValue, store.metric) : "…"} hint={stats ? bucketLabel(stats.peakDay, "day") : undefined} />
-        <Kpi label={t("trends.avgPerDay")} value={stats ? metricValue(stats.avg, store.metric) : "…"} hint={summary.data ? t("common.days", { n: summary.data.activeDays }) : undefined} />
+        <Kpi label={t("trends.avgPerDay")} value={stats ? metricValue(stats.avg, store.metric) : "…"} hint={summary.data ? days(summary.data.activeDays) : undefined} />
         <Kpi label={t("trends.projection")} value={stats ? metricValue(stats.projection, store.metric) : "…"} hint={t("trends.projectionHint")} />
       </div>
 

@@ -2,15 +2,17 @@
   import { ArrowRight, CircleAlert, Info, TriangleAlert } from "@lucide/svelte";
   import type { Tip } from "../lib/api.svelte.ts";
   import { compact, integer, usd } from "../lib/format.ts";
-  import { t, tMaybe } from "../lib/i18n.svelte.ts";
+  import { i18n, t, tMaybe } from "../lib/i18n.svelte.ts";
 
   let { tip }: { tip: Tip } = $props();
 
   // Localize numeric params before interpolation.
   const params = $derived.by(() => {
     const p: Record<string, string | number | null> = { ...tip.params };
-    for (const k of ["cost"]) if (typeof p[k] === "number") p[k] = usd(p[k] as number);
-    for (const k of ["avg", "count", "max", "messages"]) if (typeof p[k] === "number") p[k] = k === "avg" ? compact(p[k] as number) : integer(p[k] as number);
+    for (const k of ["cost", "before", "after"]) if (typeof p[k] === "number") p[k] = usd(p[k] as number);
+    for (const k of ["avg", "count", "max", "messages", "pace", "used"]) if (typeof p[k] === "number") p[k] = k === "avg" ? compact(p[k] as number) : integer(p[k] as number);
+    // Ratios and shares with the language's decimal mark: 3.2 in English, 3,2 in German, French and Polish.
+    for (const k of ["ratio", "share", "rate"]) if (typeof p[k] === "number") p[k] = new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: 1 }).format(p[k] as number);
     return p;
   });
   const title = $derived(tMaybe(`tip.${tip.id}.title`, params) ?? tip.id);

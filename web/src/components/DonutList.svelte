@@ -7,8 +7,10 @@
   import Chart from "./Chart.svelte";
 
   interface Item extends ShareItem {
-    /** Secondary line under the name, e.g. the other metric and session count. */
+    /** Secondary line under the name, e.g. the other metric. */
     detail?: string;
+    /** More for that line where the card is wide enough, e.g. the session count. */
+    detailMore?: string;
   }
   interface Props {
     items: Item[];
@@ -34,7 +36,7 @@
     <span class="h-2.5 w-2.5 shrink-0 rounded-full" style:background={colorFor(dim, it.key)}></span>
     <span class="min-w-0">
       <span class="block truncate text-[13px] font-medium text-ink">{it.label}</span>
-      {#if it.detail}<span class="block truncate text-xs text-muted">{it.detail}</span>{/if}
+      {#if it.detail}<span class="block truncate text-xs text-muted">{it.detail}{#if it.detailMore}<span class="hidden @md:inline"> · {it.detailMore}</span>{/if}</span>{/if}
     </span>
   </span>
   <span class="text-right">

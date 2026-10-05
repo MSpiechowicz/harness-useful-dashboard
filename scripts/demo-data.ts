@@ -88,18 +88,22 @@ const TOOLS = [
 
 /** Who works where, with what: each person has their own tools and habits. */
 const PEOPLE = [
-  { user: "alex", host: "alex-mbp", weight: 5, harness: [["claude", 6], ["codex", 2], ["omp", 2]] as [Provider, number][] },
-  { user: "sam", host: "sam-desktop", weight: 3, harness: [["codex", 5], ["claude", 2]] as [Provider, number][] },
-  { user: "priya", host: "priya-laptop", weight: 2, harness: [["omp", 4], ["claude", 3]] as [Provider, number][] },
+  { user: "alex", host: "alex-mbp", weight: 5, harness: [["claude", 6], ["codex", 2], ["omp", 1], ["pi", 1]] as [Provider, number][] },
+  { user: "sam", host: "sam-desktop", weight: 3, harness: [["codex", 5], ["claude", 2], ["opencode", 1]] as [Provider, number][] },
+  { user: "priya", host: "priya-laptop", weight: 2, harness: [["omp", 3], ["opencode", 2], ["claude", 2]] as [Provider, number][] },
 ];
 const MODELS: Record<Provider, [string, number][]> = {
   claude: [["claude-opus-5-5", 5], ["claude-sonnet-5-5", 4], ["claude-haiku-4-5", 1]],
   codex: [["gpt-5-codex", 6], ["gpt-5", 3], ["gpt-5-mini", 1]],
   omp: [["claude-sonnet-5-5", 4], ["gpt-5", 3], ["claude-opus-5-5", 2]],
+  pi: [["claude-sonnet-5-5", 3], ["gpt-5", 2]],
+  opencode: [["claude-sonnet-5-5", 3], ["gpt-5-codex", 2]],
   cursor: [["claude-sonnet-5-5", 1]],
 };
 const BILLING: Record<string, [string, number][]> = {
   omp: [["github-copilot", 5], ["anthropic", 3], ["openai-codex", 2]],
+  pi: [["anthropic", 3], ["openai-codex", 1]],
+  opencode: [["anthropic", 2], ["github-copilot", 2], ["openai", 1]],
 };
 
 rmSync(out, { force: true });

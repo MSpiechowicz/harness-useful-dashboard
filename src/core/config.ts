@@ -13,7 +13,11 @@ export interface SourceConfig {
   codexDirs: string[];
   /** omp (oh-my-pi) session roots (contain per-project folders of *.jsonl). */
   ompDirs: string[];
-  enabled: { claude: boolean; codex: boolean; omp: boolean };
+  /** pi session roots, in the same format as omp's. */
+  piDirs: string[];
+  /** OpenCode data directories (contain storage/ or opencode.db). */
+  opencodeDirs: string[];
+  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean };
 }
 
 export interface AppConfig {
@@ -32,7 +36,7 @@ export interface AppConfig {
   checkUpdates: boolean;
   sources: SourceConfig;
   /** Where the Live view reads how much of each plan limit is left (see limits.ts). */
-  limits: { claude: boolean; omp: boolean; codex: boolean };
+  limits: { claude: boolean; omp: boolean; codex: boolean; pi: boolean; opencode: boolean };
 }
 
 export function defaultConfig(): AppConfig {
@@ -40,6 +44,8 @@ export function defaultConfig(): AppConfig {
   const claudeRoot = process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude");
   const codexRoot = process.env.CODEX_HOME ?? join(home, ".codex");
   const ompAgent = process.env.PI_CODING_AGENT_DIR ?? join(home, ".omp", "agent"); // omp's own override
+  // pi reads PI_CODING_AGENT_DIR too: that override already goes to omp, so pi keeps its default folder.
+  const piAgent = join(home, ".pi", "agent");
   return {
     dbPath: "",
     journalMode: "auto",
@@ -53,10 +59,17 @@ export function defaultConfig(): AppConfig {
       claudeDirs: [join(claudeRoot, "projects")],
       codexDirs: [codexRoot],
       ompDirs: [join(ompAgent, "sessions")],
-      enabled: { claude: true, codex: true, omp: true },
+      piDirs: [join(piAgent, "sessions")],
+      opencodeDirs: [opencodeDataDir(home)],
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true },
     },
-    limits: { claude: true, omp: true, codex: true },
+    limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
   };
+}
+
+/** Where OpenCode keeps its data: the XDG data directory on every OS, as it uses xdg-basedir. */
+function opencodeDataDir(home: string): string {
+  return join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "opencode");
 }
 
 function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {

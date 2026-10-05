@@ -25,7 +25,8 @@
 <section class="card flex min-w-0 flex-col {cls}">
   {#if hasHeader}
     <header class="flex flex-wrap items-start justify-between gap-2 px-5 pt-4 {divided ? 'border-b border-line pb-4' : ''}">
-      <div class="min-w-0">
+      <!-- A long description wraps beside the buttons, rather than pushing them onto a line of their own. -->
+      <div class="min-w-0 flex-1 basis-56">
         {#if title}<h2 class="font-semibold text-ink {divided ? 'text-[15px]' : 'text-sm'}">{title}</h2>{/if}
         {#if subtitle}<p class="mt-0.5 text-xs text-muted">{subtitle}</p>{/if}
       </div>

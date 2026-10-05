@@ -23,8 +23,12 @@
     stretch?: boolean;
     /** Fill the width of its container, like the other controls of a form. */
     full?: boolean;
+    /** Open above the trigger, for a control at the bottom of the screen (the sidebar's footer). */
+    up?: boolean;
+    /** With `prefix`, an empty value (no filter) shows just the label, not "Label: All": it fits in every language. */
+    labelWhenEmpty?: boolean;
   }
-  let { value = $bindable(), options, label, prefix = false, active = false, searchAt = 9, class: cls = "", onchange, stretch = false, full = false }: Props = $props();
+  let { value = $bindable(), options, label, prefix = false, active = false, searchAt = 9, class: cls = "", onchange, stretch = false, full = false, up = false, labelWhenEmpty = false }: Props = $props();
 
   let open = $state(false);
   let query = $state("");
@@ -153,6 +157,8 @@
     onkeydown={onTriggerKey}
   >
     <span class="min-w-0 truncate">
+      {#if prefix && labelWhenEmpty && value === ""}<span class="text-ink-2">{label}</span>
+      {:else}
       {#if prefix}<span class="text-muted">{label}:</span>{/if}
       {#if !searchable && !stretch && selected}
         <!-- Short lists stack every option in one cell, only the chosen one visible: the button keeps the widest
@@ -166,11 +172,12 @@
       {:else}
         <span class={active ? "text-accent-ink" : ""}>{selected?.label ?? value}</span>
       {/if}
+      {/if}
     </span>
     <ChevronDown size={14} class="shrink-0 text-muted transition-transform {open ? 'rotate-180' : ''}" />
   </button>
   {#if open}
-    <div class="popover w-max max-w-72 min-w-full {alignRight ? 'right-0' : 'left-0'}">
+    <div class="popover w-max max-w-72 min-w-full {alignRight ? 'right-0' : 'left-0'} {up ? 'bottom-full !mt-0 mb-1' : ''}">
       {#if searchable}
         <div class="relative mb-1">
           <Search size={13} class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />

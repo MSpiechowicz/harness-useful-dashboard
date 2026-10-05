@@ -558,21 +558,56 @@ export function cumulativeChart(ts: TimeSeries, opts: { dim: string; metric: "to
   };
 }
 
+export type RateKind = "area" | "bars" | "lines" | "dots" | "steps" | "total";
+
 /**
- * Tokens per minute over the last minutes, live: a band per provider over a soft gradient, a neutral line along the
- * total, and a pulsing point on the latest minute. Minutes without use are zero, so quiet stretches drop to the floor.
+ * Tokens per minute over the last minutes, live, drawn six ways:
+ *  - "area": a band per provider stacked over a soft gradient, under a neutral line along the total
+ *  - "bars": a stacked column per minute
+ *  - "lines": each provider on its own line
+ *  - "dots": a dot per provider and minute with use, like a dotted trace
+ *  - "steps": stacked steps that hold each minute's value flat, as it was counted
+ *  - "total": the running total over the window, stacked by provider
+ * A pulsing point marks the latest minute. Minutes without use are zero, so quiet stretches drop to the floor.
  */
-export function rateChart(series: { key: string; data: number[] }[], from: number): EChartsOption {
+export function rateChart(series: { key: string; data: number[] }[], from: number, kind: RateKind = "area"): EChartsOption {
   const c = chrome();
   const minutes = series[0]?.data.length ?? 0;
   const time = new Intl.DateTimeFormat(i18n.locale, { hour: "numeric", minute: "2-digit" });
   const labels = Array.from({ length: minutes }, (_, i) => time.format(from + i * 60_000));
+  // The running total adds each minute to the ones before: the same stacks, counted up.
+  const values = (data: number[]) => {
+    if (kind !== "total") return data;
+    let run = 0;
+    return data.map((v) => (run += v));
+  };
   const shown = series
-    .map((s) => ({ ...s, label: entityLabel("provider", s.key, s.key), color: colorFor("provider", s.key), sum: s.data.reduce((a, v) => a + v, 0) }))
+    .map((s) => ({ key: s.key, data: values(s.data), label: entityLabel("provider", s.key, s.key), color: colorFor("provider", s.key), sum: s.data.reduce((a, v) => a + v, 0) }))
     .filter((s) => s.sum > 0)
     .sort((a, b) => b.sum - a.sum);
   const total = labels.map((_, i) => shown.reduce((a, s) => a + (s.data[i] ?? 0), 0));
-  const fmt = (v: number) => `${compact(v)}/min`;
+  const fmt = (v: number) => (kind === "total" ? compact(v) : `${compact(v)}/min`);
+  const gradient = (color: string, top: number, bottom: number) => ({
+    color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(color, top) }, { offset: 1, color: withAlpha(color, bottom) }] },
+  });
+  const seriesOf = (s: (typeof shown)[number]) => {
+    const base = { name: s.label, data: s.data, color: s.color, emphasis: { focus: "series" } };
+    switch (kind) {
+      case "bars":
+        // A surface-colored edge keeps a gap between stacked segments, as in the other stacked bars.
+        return { ...base, type: "bar", stack: "rate", barMaxWidth: 14, barCategoryGap: "30%", itemStyle: { borderColor: c.surface, borderWidth: 1, borderRadius: 2 } };
+      case "lines":
+        return { ...base, type: "line", smooth: 0.25, smoothMonotone: "x", showSymbol: false, lineStyle: { width: 2 } };
+      case "dots":
+        // Quiet minutes have no dot, so the trace shows where the work was.
+        return { ...base, type: "scatter", data: s.data.map((v) => (v > 0 ? v : null)), symbolSize: 6 };
+      case "steps":
+        return { ...base, type: "line", stack: "rate", step: "middle", showSymbol: false, lineStyle: { width: 1.5 }, areaStyle: gradient(s.color, 0.45, 0.06) };
+      default:
+        return { ...base, type: "line", stack: "rate", smooth: 0.25, smoothMonotone: "x", showSymbol: false, lineStyle: { width: 0 }, areaStyle: gradient(s.color, 0.8, kind === "total" ? 0.3 : 0.15) };
+    }
+  };
+  const stacked = kind === "area" || kind === "bars" || kind === "steps" || kind === "total";
   return {
     animationDuration: 500,
     textStyle: c.text,
@@ -591,33 +626,22 @@ export function rateChart(series: { key: string; data: number[] }[], from: numbe
     xAxis: {
       type: "category",
       data: labels,
-      boundaryGap: false,
+      boundaryGap: kind === "bars" || kind === "dots",
       axisLine: c.axisLine,
       axisTick: { show: false },
       axisLabel: { ...c.axisLabel, margin: 10 },
     },
     yAxis: { type: "value", splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
     series: [
-      ...shown.map((s) => ({
-        name: s.label,
-        type: "line",
-        stack: "rate",
-        data: s.data,
-        color: s.color,
-        smooth: 0.25,
-        smoothMonotone: "x",
-        showSymbol: false,
-        lineStyle: { width: 0 },
-        areaStyle: {
-          color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(s.color, 0.8) }, { offset: 1, color: withAlpha(s.color, 0.15) }] },
-        },
-        emphasis: { focus: "series" },
-      })),
-      { name: t("common.total"), type: "line", data: total, color: c.ink2, smooth: 0.25, smoothMonotone: "x", showSymbol: false, lineStyle: { width: 1.5 }, emphasis: { disabled: true }, z: 5 },
+      ...shown.map(seriesOf),
+      ...(kind === "area" || kind === "total"
+        ? [{ name: t("common.total"), type: "line", data: total, color: c.ink2, smooth: 0.25, smoothMonotone: "x", showSymbol: false, lineStyle: { width: 1.5 }, emphasis: { disabled: true }, z: 5 }]
+        : []),
       {
         name: "now",
         type: "effectScatter",
-        data: minutes ? [[minutes - 1, total[minutes - 1] ?? 0]] : [],
+        // On the top of the stack where there is one, on the busiest provider otherwise.
+        data: minutes ? [[minutes - 1, stacked ? (total[minutes - 1] ?? 0) : (shown[0]?.data[minutes - 1] ?? 0)]] : [],
         symbolSize: 7,
         color: shown[0]?.color ?? c.ink2,
         rippleEffect: { scale: 3, brushType: "stroke" },
@@ -723,12 +747,13 @@ export interface ShareItem {
 }
 
 /** Breakdown rows as share items for donuts and treemaps; the detail line carries the metric not shown. */
-export function breakdownItems(rows: BreakdownRow[], dim: string, metric: "tokens" | "cost"): (ShareItem & { detail: string })[] {
+export function breakdownItems(rows: BreakdownRow[], dim: string, metric: "tokens" | "cost"): (ShareItem & { detail: string; detailMore: string })[] {
   return rows.map((r) => ({
     key: r.key,
     label: entityLabel(dim, r.key, r.label),
     value: metric === "cost" ? r.cost : r.tokens,
-    detail: `${metric === "cost" ? t("common.tokensN", { n: compact(r.tokens) }) : usd(r.cost)} · ${t("common.sessionsN", { n: compact(r.sessions) })}`,
+    detail: metric === "cost" ? t("common.tokensN", { n: compact(r.tokens) }) : usd(r.cost),
+    detailMore: t("common.sessionsN", { n: compact(r.sessions) }),
   }));
 }
 

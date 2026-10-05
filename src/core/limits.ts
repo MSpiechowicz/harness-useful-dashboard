@@ -8,10 +8,12 @@ import { join } from "node:path";
  *  - "claude": Anthropic, asked with the Claude Code login on this machine (what Claude Code's /usage shows).
  *  - "omp": every account omp is logged in to (`omp usage --json`): Claude, ChatGPT/Codex, Copilot, Gemini, …
  *  - "codex": the readings Codex writes into its session logs, stored while ingesting. No network.
+ *  - "pi", "opencode": the logins those harnesses keep (auth.json), each asked at its own provider: Anthropic for a
+ *    Claude plan, ChatGPT for a Codex plan, GitHub for Copilot premium requests.
  * Credentials never leave this process except to their own provider, and errors carry fixed messages only.
  */
 
-export type LimitSource = "claude" | "omp" | "codex";
+export type LimitSource = "claude" | "omp" | "codex" | "pi" | "opencode";
 
 export interface LimitWindow {
   id: string;
@@ -48,6 +50,8 @@ export interface LimitReport {
 export interface LimitProblem {
   source: LimitSource;
   code: "expired" | "unauthorized" | "rate-limited" | "unreachable" | "failed" | "not-installed";
+  /** When the source is asked again, epoch ms. */
+  retryAt?: number;
 }
 
 export interface LimitsResult {
@@ -71,9 +75,23 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 class LimitError extends Error {
-  constructor(readonly code: LimitProblem["code"]) {
+  constructor(
+    readonly code: LimitProblem["code"],
+    /** How long the provider asked us to wait (a 429's Retry-After). */
+    readonly retryAfterMs: number | null = null,
+  ) {
     super(code);
   }
+}
+
+/** A Retry-After header: seconds, or an HTTP date. */
+function retryAfter(res: Response, now: number): number | null {
+  const v = res.headers.get("retry-after");
+  if (!v) return null;
+  const s = Number(v);
+  if (Number.isFinite(s)) return Math.max(0, s * 1000);
+  const at = Date.parse(v);
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
 }
 
 async function runCommand(cmd: string[], timeoutMs: number): Promise<string | null> {
@@ -150,32 +168,168 @@ async function claudeLogin(d: Required<LimitDeps>): Promise<ClaudeLogin | null> 
   }
 }
 
+/** A GET to a provider with a login, answering JSON. Failures carry fixed codes only: never the provider's reply. */
+async function askProvider(d: Required<LimitDeps>, url: string, headers: Record<string, string>): Promise<Record<string, any>> {
+  let res: Response;
+  try {
+    res = await d.fetch(url, { headers: { Accept: "application/json", "User-Agent": "harness-dashboard", ...headers }, redirect: "error", signal: AbortSignal.timeout(10_000) });
+  } catch {
+    throw new LimitError("unreachable");
+  }
+  if (res.status === 401 || res.status === 403) throw new LimitError("unauthorized");
+  if (res.status === 429) throw new LimitError("rate-limited", retryAfter(res, d.now()));
+  if (!res.ok) throw new LimitError("failed");
+  try {
+    return (await res.json()) as Record<string, any>;
+  } catch {
+    throw new LimitError("failed");
+  }
+}
+
+/** A Claude plan's windows, asked with an Anthropic OAuth login (Claude Code's, pi's or OpenCode's). */
+async function anthropicWindows(d: Required<LimitDeps>, token: string): Promise<LimitWindow[]> {
+  return claudeWindows(await askProvider(d, "https://api.anthropic.com/api/oauth/usage", { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" }));
+}
+
 export async function claudeLimits(deps: LimitDeps = {}): Promise<LimitReport | null> {
   const d = withDefaults(deps);
   const login = await claudeLogin(d);
   if (!login) return null;
   // Renewing the login would sign Claude Code out (the refresh token rotates), so an expired one is reported instead.
   if (login.expiresAt != null && login.expiresAt <= d.now()) throw new LimitError("expired");
-  let res: Response;
-  try {
-    res = await d.fetch("https://api.anthropic.com/api/oauth/usage", {
-      headers: { Authorization: `Bearer ${login.accessToken}`, "anthropic-beta": "oauth-2025-04-20", Accept: "application/json" },
-      redirect: "error",
-      signal: AbortSignal.timeout(10_000),
+  const windows = await anthropicWindows(d, login.accessToken);
+  return { key: "claude:login", provider: "claude", plan: login.plan, account: null, source: "claude", observedAt: d.now(), windows };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// ChatGPT plans (Codex) and GitHub Copilot, asked with a harness's own login.
+
+/** ChatGPT's usage windows: used percent, length and reset of the primary and secondary window. */
+export function chatgptWindows(body: Record<string, any>, now: number): LimitWindow[] {
+  const windows: LimitWindow[] = [];
+  const rate = body?.rate_limit ?? {};
+  for (const id of ["primary_window", "secondary_window"] as const) {
+    const w = rate[id];
+    if (!w || typeof w.used_percent !== "number") continue;
+    const resetsAt = typeof w.reset_at === "number" ? w.reset_at * 1000 : typeof w.reset_after_seconds === "number" ? now + w.reset_after_seconds * 1000 : null;
+    windows.push({
+      id: id === "primary_window" ? "primary" : "secondary",
+      windowMs: typeof w.limit_window_seconds === "number" ? w.limit_window_seconds * 1000 : null,
+      scope: null,
+      label: null,
+      usedFraction: Math.max(0, w.used_percent / 100),
+      resetsAt,
     });
-  } catch {
-    throw new LimitError("unreachable");
   }
-  if (res.status === 401 || res.status === 403) throw new LimitError("unauthorized");
-  if (res.status === 429) throw new LimitError("rate-limited");
-  if (!res.ok) throw new LimitError("failed");
-  let body: Record<string, unknown>;
+  return windows.sort((a, b) => (a.windowMs ?? Infinity) - (b.windowMs ?? Infinity));
+}
+
+/** Copilot's monthly premium requests: how many of the plan's entitlement are used, until the quota resets. */
+export function copilotWindows(body: Record<string, any>): LimitWindow[] {
+  const premium = body?.quota_snapshots?.premium_interactions;
+  if (!premium || premium.unlimited || typeof premium.entitlement !== "number" || premium.entitlement <= 0 || typeof premium.remaining !== "number") return [];
+  const used = Math.max(0, premium.entitlement - premium.remaining);
+  const reset = typeof body.quota_reset_date === "string" ? Date.parse(body.quota_reset_date) : NaN;
+  return [
+    { id: "premium", windowMs: null, scope: null, label: "Premium requests", usedFraction: used / premium.entitlement, resetsAt: Number.isFinite(reset) ? reset : null, used, limit: premium.entitlement, unit: "requests" },
+  ];
+}
+
+/** The ChatGPT account a Codex login belongs to, from the login token's claims when not stored beside it. */
+function chatgptAccount(token: string): string | null {
   try {
-    body = (await res.json()) as Record<string, unknown>;
+    const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
+    const id = claims?.["https://api.openai.com/auth"]?.chatgpt_account_id;
+    return typeof id === "string" ? id : null;
   } catch {
-    throw new LimitError("failed");
+    return null;
   }
-  return { key: "claude:login", provider: "claude", plan: login.plan, account: null, source: "claude", observedAt: d.now(), windows: claudeWindows(body) };
+}
+
+/** One provider's login in a harness's auth.json: an OAuth access token, when it expires, and what else it carries. */
+interface StoredLogin {
+  access: string | null;
+  refresh: string | null;
+  /** Epoch ms. */
+  expires: number | null;
+  accountId: string | null;
+}
+
+function storedLogin(v: unknown): StoredLogin | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (o.type !== "oauth") return null; // API keys have no plan limits
+  const str = (...keys: string[]) => keys.map((k) => o[k]).find((x): x is string => typeof x === "string" && x.length > 0) ?? null;
+  const exp = [o.expires, o.expiresAt].find((x): x is number => typeof x === "number") ?? null;
+  return {
+    access: str("access", "accessToken"),
+    refresh: str("refresh", "refreshToken"),
+    // Seconds or milliseconds, whichever was stored.
+    expires: exp == null ? null : exp < 1e12 ? exp * 1000 : exp,
+    accountId: str("accountId", "account_id"),
+  };
+}
+
+/** Where pi and OpenCode keep their logins. */
+function authFile(source: "pi" | "opencode", d: Required<LimitDeps>): string {
+  return source === "pi" ? join(d.home, ".pi", "agent", "auth.json") : join(d.env.XDG_DATA_HOME ?? join(d.home, ".local", "share"), "opencode", "auth.json");
+}
+
+/**
+ * The plan limits of every account pi or OpenCode is logged in to: a Claude plan at Anthropic, a ChatGPT plan at
+ * ChatGPT, Copilot at GitHub. Logins are never renewed (that would sign the harness out): an expired one is reported.
+ * A provider that says it's asked too often holds back the whole source; other failures leave the rest standing.
+ */
+export async function loginLimits(source: "pi" | "opencode", deps: LimitDeps = {}): Promise<{ reports: LimitReport[]; problem: LimitProblem["code"] | null }> {
+  const d = withDefaults(deps);
+  const raw = d.readFile(authFile(source, d));
+  if (raw == null) return { reports: [], problem: null };
+  let auth: Record<string, unknown>;
+  try {
+    auth = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { reports: [], problem: "failed" };
+  }
+  const now = d.now();
+  const reports: LimitReport[] = [];
+  let problem: LimitProblem["code"] | null = null;
+  const asks: [string, () => Promise<{ plan: string | null; windows: LimitWindow[] } | null>][] = [
+    ["anthropic", async () => {
+      const l = storedLogin(auth.anthropic);
+      if (!l?.access) return null;
+      if (l.expires != null && l.expires <= now) throw new LimitError("expired");
+      return { plan: null, windows: await anthropicWindows(d, l.access) };
+    }],
+    // pi names the ChatGPT login "openai-codex", OpenCode "openai".
+    ["codex", async () => {
+      const l = storedLogin(auth["openai-codex"]) ?? storedLogin(auth.openai);
+      if (!l?.access) return null;
+      if (l.expires != null && l.expires <= now) throw new LimitError("expired");
+      const account = l.accountId ?? chatgptAccount(l.access);
+      const body = await askProvider(d, "https://chatgpt.com/backend-api/wham/usage", { Authorization: `Bearer ${l.access}`, ...(account ? { "ChatGPT-Account-Id": account } : {}) });
+      return { plan: typeof body.plan_type === "string" ? body.plan_type : null, windows: chatgptWindows(body, now) };
+    }],
+    // Copilot's GitHub token is the login's refresh token: the access token is a short-lived Copilot API token.
+    ["copilot", async () => {
+      const l = storedLogin(auth["github-copilot"]);
+      const token = l?.refresh ?? l?.access;
+      if (!token) return null;
+      const body = await askProvider(d, "https://api.github.com/copilot_internal/user", { Authorization: `token ${token}` });
+      return { plan: typeof body.copilot_plan === "string" ? body.copilot_plan : null, windows: copilotWindows(body) };
+    }],
+  ];
+  for (const [provider, ask] of asks) {
+    try {
+      const r = await ask();
+      if (r && r.windows.length) reports.push({ key: `${source}:${provider}`, provider: provider === "anthropic" ? "claude" : provider, plan: r.plan, account: null, source, observedAt: now, windows: r.windows });
+    } catch (e) {
+      const code = e instanceof LimitError ? e.code : "failed";
+      if (code === "rate-limited") throw e;
+      problem ??= code;
+    }
+  }
+  if (!reports.length && problem) throw new LimitError(problem);
+  return { reports, problem };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -291,12 +445,17 @@ export interface ActivePlan {
 
 /**
  * The plan a call counts against: Claude Code against the Claude plan of its login, Codex against the ChatGPT plan it
- * logs, omp against whatever it billed the call through (Copilot, an Anthropic or ChatGPT login). Cursor reports none.
+ * logs, and omp, pi and OpenCode against whatever they billed the call through (a Claude or ChatGPT login, Copilot),
+ * read with their own logins. Cursor reports none.
  */
 export function planFor(provider: string, billing: string | null): ActivePlan | null {
   if (provider === "claude") return { provider: "claude", source: "claude" };
   if (provider === "codex") return { provider: "codex", source: "codex" };
-  if (provider === "omp" && billing) return { provider: OMP_PROVIDERS[billing] ?? billing, source: "omp" };
+  if ((provider === "omp" || provider === "pi" || provider === "opencode") && billing) {
+    // OpenCode names its ChatGPT login "openai".
+    const plan = provider === "opencode" && billing === "openai" ? "codex" : (OMP_PROVIDERS[billing] ?? billing);
+    return { provider: plan, source: provider };
+  }
   return null;
 }
 
@@ -327,36 +486,69 @@ function withDefaults(d: LimitDeps): Required<LimitDeps> {
   };
 }
 
-/** Network sources are asked at most once a minute (failures every 30 seconds), however often the page polls. */
-const FRESH_MS = 60_000;
-const RETRY_MS = 30_000;
+/**
+ * Network sources are asked sparingly, however often pages poll: a reading is kept for 2 minutes, "Refresh" asks
+ * again only once it's a minute old, and a failure waits before the next try. When a provider says it's asked too
+ * often, the wait starts at 5 minutes (or what it asks for) and doubles each time up to 30. Meanwhile the last good
+ * reading is still shown.
+ */
+const FRESH_MS = 2 * 60_000;
+const FORCE_AFTER_MS = 60_000;
+const RETRY_MS = 2 * 60_000;
+const RATE_LIMITED_MS = 5 * 60_000;
+const MAX_BACKOFF_MS = 30 * 60_000;
+
+interface Cached {
+  /** When the source was last asked. */
+  at: number;
+  /** The last good reading's reports: kept through failures. */
+  reports: LimitReport[];
+  problem: LimitProblem | null;
+  /** Not asked again before this, epoch ms. */
+  nextAt: number;
+  /** Failures in a row, for the backoff. */
+  failures: number;
+}
 
 export class LimitsCache {
-  private cached = new Map<LimitSource, { at: number; reports: LimitReport[]; problem: LimitProblem | null }>();
+  private cached = new Map<LimitSource, Cached>();
   private pending = new Map<LimitSource, Promise<void>>();
 
   constructor(private deps: LimitDeps = {}) {}
 
   /** With `active`, only the sources those plans need are asked, and only their reports come back. */
-  async get(db: Database, host: string, enabled: Record<LimitSource, boolean>, force = false, active?: ActivePlan[]): Promise<LimitsResult> {
+  async get(db: Database, host: string, enabled: Partial<Record<LimitSource, boolean>>, force = false, active?: ActivePlan[]): Promise<LimitsResult> {
     const now = (this.deps.now ?? Date.now)();
-    if (active) enabled = { claude: enabled.claude && active.some((a) => a.source === "claude"), omp: enabled.omp && active.some((a) => a.source === "omp"), codex: enabled.codex && active.some((a) => a.source === "codex") };
-    const remote: [LimitSource, () => Promise<LimitReport[]>][] = [
-      ["claude", async () => ((r) => (r ? [r] : []))(await claudeLimits(this.deps))],
-      ["omp", () => ompLimits(this.deps)],
+    const on = (s: LimitSource) => !!enabled[s] && (!active || active.some((a) => a.source === s));
+    type Loaded = { reports: LimitReport[]; problem: LimitProblem["code"] | null };
+    const remote: [LimitSource, () => Promise<Loaded>][] = [
+      ["claude", async () => ({ reports: ((r) => (r ? [r] : []))(await claudeLimits(this.deps)), problem: null })],
+      ["omp", async () => ({ reports: await ompLimits(this.deps), problem: null })],
+      ["pi", () => loginLimits("pi", this.deps)],
+      ["opencode", () => loginLimits("opencode", this.deps)],
     ];
     await Promise.all(
       remote
-        .filter(([s]) => enabled[s])
+        .filter(([s]) => on(s))
         .map(([source, load]) => {
           const c = this.cached.get(source);
-          const stale = !c || now - c.at > (c.problem ? RETRY_MS : FRESH_MS) || (force && now - c.at > 10_000);
-          if (!stale) return Promise.resolve();
+          // Refresh asks sooner than the schedule, but never during a backoff after a failure.
+          const due = !c || now >= c.nextAt || (force && !c.problem && now - c.at >= FORCE_AFTER_MS);
+          if (!due) return Promise.resolve();
           let p = this.pending.get(source);
           if (!p) {
             p = load()
-              .then((reports) => void this.cached.set(source, { at: now, reports, problem: null }))
-              .catch((e) => void this.cached.set(source, { at: now, reports: [], problem: { source, code: e instanceof LimitError ? e.code : "failed" } }))
+              // A login that failed beside others that answered is noted, without holding the source back.
+              .then(({ reports, problem }) => void this.cached.set(source, { at: now, reports, problem: problem ? { source, code: problem } : null, nextAt: now + FRESH_MS, failures: 0 }))
+              .catch((e) => {
+                const err = e instanceof LimitError ? e : new LimitError("failed");
+                const failures = (c?.failures ?? 0) + 1;
+                const wait =
+                  err.code === "rate-limited"
+                    ? Math.min(MAX_BACKOFF_MS, Math.max(err.retryAfterMs ?? 0, RATE_LIMITED_MS * 2 ** (failures - 1)))
+                    : Math.min(MAX_BACKOFF_MS, RETRY_MS * 2 ** (failures - 1));
+                this.cached.set(source, { at: now, reports: c?.reports ?? [], problem: { source, code: err.code, retryAt: now + wait }, nextAt: now + wait, failures });
+              })
               .finally(() => this.pending.delete(source));
             this.pending.set(source, p);
           }
@@ -367,12 +559,12 @@ export class LimitsCache {
     const problems: LimitProblem[] = [];
     for (const [source] of remote) {
       const c = this.cached.get(source);
-      if (!enabled[source] || !c) continue;
+      if (!on(source) || !c) continue;
       reports.push(...c.reports);
       // omp missing is not a problem worth showing: most people don't use it.
       if (c.problem && c.problem.code !== "not-installed") problems.push(c.problem);
     }
-    if (enabled.codex) {
+    if (on("codex")) {
       const codex = codexLimits(db, host, now);
       if (codex) reports.push(codex);
     }

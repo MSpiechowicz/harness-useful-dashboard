@@ -16,16 +16,17 @@
     provider: string;
     plan: string | null;
     account: string | null;
-    source: "claude" | "omp" | "codex";
+    source: Source;
     observedAt: number;
     windows: LimitWindow[];
   }
+  type Source = "claude" | "omp" | "codex" | "pi" | "opencode";
   export interface LimitsResult {
     reports: LimitReport[];
-    problems: { source: "claude" | "omp" | "codex"; code: string }[];
+    problems: { source: Source; code: string; retryAt?: number }[];
     fetchedAt: number;
     /** The plans the sessions in the window ran on, when the limits were asked for a window. */
-    active: { provider: string; source: "claude" | "omp" | "codex" }[] | null;
+    active: { provider: string; source: Source }[] | null;
   }
 </script>
 
@@ -45,7 +46,8 @@
   function windowName(w: LimitWindow): string {
     const ms = w.windowMs;
     const base =
-      ms === 5 * HOUR ? t("live.window.5h")
+      w.id === "premium" ? t("live.window.premium")
+      : ms === 5 * HOUR ? t("live.window.5h")
       : ms === 7 * DAY ? t("live.window.week")
       : ms === DAY ? t("live.window.day")
       : ms && ms % DAY === 0 ? t("live.window.days", { n: ms / DAY })
@@ -62,7 +64,7 @@
 
   // A reading is only dated when it's old (Codex logs it only while in use): a fresh one needs no note.
   const STALE_MS = 5 * 60_000;
-  const PROBLEM_SOURCES = { claude: "Claude Code", omp: "omp", codex: "Codex" };
+  const PROBLEM_SOURCES = { claude: "Claude Code", omp: "omp", codex: "Codex", pi: "pi", opencode: "OpenCode" };
 </script>
 
 {#snippet reset(w: LimitWindow)}
@@ -98,6 +100,6 @@
     </section>
   {/each}
   {#each data.problems as p (p.source)}
-    <p class="rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-2">{t(`live.problem.${p.code}` as "live.problem.failed", { source: PROBLEM_SOURCES[p.source] })}</p>
+    <p class="rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-2">{t(`live.problem.${p.code}` as "live.problem.failed", { source: PROBLEM_SOURCES[p.source], time: p.retryAt ? until(p.retryAt, now) : "" })}</p>
   {/each}
 </div>

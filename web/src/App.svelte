@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     Activity, Bot, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
-    PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
+    PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
@@ -61,6 +61,8 @@
   ];
 
   let menuOpen = $state(false);
+  // Collapsed, the sidebar keeps only the icons. It applies on wide screens: on small ones the menu is a drawer.
+  const collapsed = $derived(store.navCollapsed);
   const page = $derived(store.route.page);
   const id = $derived(store.route.id);
   // Live shows the last minutes as they happen: the range and filters don't apply to it.
@@ -100,46 +102,69 @@
 <div class="flex min-h-screen">
   <!-- Sidebar -->
   <aside
-    class="fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-line bg-surface transition-transform lg:sticky lg:top-0 lg:h-screen lg:translate-x-0"
+    class="fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-line bg-surface transition-[translate,width] duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 {collapsed ? 'lg:w-16' : ''}"
     class:-translate-x-full={!menuOpen}
   >
-    <div class="flex h-14 items-center gap-2.5 px-4">
+    <div class="flex h-14 items-center gap-2.5 px-4 {collapsed ? 'lg:justify-center lg:px-0' : ''}">
       <img src="/favicon.svg" alt="" class="h-7 w-7 shrink-0" />
-      <div class="truncate text-[15px] font-semibold tracking-tight">{t("app.name")}</div>
+      <div class="truncate text-[15px] font-semibold tracking-tight" class:lg:hidden={collapsed}>{t("app.name")}</div>
       <button class="ml-auto lg:hidden" aria-label="Close menu" onclick={() => (menuOpen = false)}><X size={18} /></button>
     </div>
     <nav class="flex-1 overflow-y-auto px-2 py-2">
       {#each groups as g, gi (gi)}
-        {#if g.label}<div class="mt-4 mb-1 px-3 text-[11px] font-medium tracking-wide text-muted uppercase">{t(g.label)}</div>{/if}
+        {#if g.label}
+          <div class="mt-4 mb-1 px-3 text-[11px] font-medium tracking-wide text-muted uppercase" class:lg:hidden={collapsed}>{t(g.label)}</div>
+          <!-- Collapsed, a rule takes the place of the group's name, at the same height. -->
+          {#if collapsed}<div class="mx-3 hidden h-[34px] items-center lg:flex"><div class="h-px w-full bg-line"></div></div>{/if}
+        {/if}
         {#each g.items as item (item.page)}
           <a
             href="#/{item.page}"
             onclick={() => (menuOpen = false)}
-            class="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
+            class="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors {collapsed ? 'lg:justify-center lg:px-0' : ''} {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
             aria-current={isActive(item.page) ? "page" : undefined}
+            aria-label={collapsed ? t(item.label) : undefined}
+            title={collapsed ? t(item.label) : undefined}
           >
-            <item.icon size={16} />{t(item.label)}
+            <item.icon size={16} class="shrink-0" /><span class="truncate" class:lg:hidden={collapsed}>{t(item.label)}</span>
           </a>
         {/each}
       {/each}
+      <!-- The last menu item, under Settings: collapse to icons, or expand again. Wide screens only: small ones use the drawer. -->
+      <button
+        type="button"
+        class="hidden w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink lg:flex {collapsed ? 'lg:justify-center lg:px-0' : ''}"
+        aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
+        title={collapsed ? t("nav.expand") : t("nav.collapse")}
+        aria-expanded={!collapsed}
+        onclick={() => store.setNavCollapsed(!collapsed)}
+      >
+        {#if collapsed}<PanelLeftOpen size={16} class="shrink-0" />{:else}<PanelLeftClose size={16} class="shrink-0" /><span class="truncate">{t("nav.collapse")}</span>{/if}
+      </button>
     </nav>
     <!-- Language and theme, then the live status: lined up with the menu's highlight boxes (the nav's px-2). -->
     <div class="flex flex-col gap-3 border-t border-line px-2 py-3">
-      <UpdateBanner />
-      <div class="flex items-center justify-between gap-2">
-        <LangPicker />
-        <ThemeToggle />
+      <div class="flex flex-col gap-3" class:lg:hidden={collapsed}>
+        <UpdateBanner />
+        <div class="flex items-center justify-between gap-2">
+          <LangPicker up />
+          <ThemeToggle />
+        </div>
       </div>
-      <div class="flex items-center gap-2 px-1 text-[11px] text-muted" title={live.status?.dbPath}>
+      <div class="flex items-center gap-2 px-1 text-[11px] text-muted {collapsed ? 'lg:justify-center' : ''}" title={collapsed ? `${live.connected ? t("status.lastScan", { ago }) : t("status.offline")} · v${live.status?.version ?? ""}` : live.status?.dbPath}>
         <span class="inline-block h-2 w-2 shrink-0 rounded-full" style:background={live.connected ? "var(--status-good)" : "var(--status-critical)"}></span>
-        {#if live.scanning}
-          <Gauge size={12} class="animate-pulse" />{t("status.scanning", live.scanning)}
-        {:else if live.connected}
-          {t("status.lastScan", { ago })}
-        {:else}
-          {t("status.offline")}
-        {/if}
-        <span class="ml-auto">v{live.status?.version ?? ""}</span>
+        <span class="flex min-w-0 flex-1 items-center gap-2" class:lg:hidden={collapsed}>
+          <span class="min-w-0 truncate" title={live.connected ? t("status.lastScan", { ago }) : undefined}>
+          {#if live.scanning}
+            <Gauge size={12} class="animate-pulse" />{t("status.scanning", live.scanning)}
+          {:else if live.connected}
+            {t("status.lastScan", { ago })}
+          {:else}
+            {t("status.offline")}
+          {/if}
+          </span>
+          <span class="ml-auto shrink-0">v{live.status?.version ?? ""}</span>
+        </span>
       </div>
     </div>
   </aside>

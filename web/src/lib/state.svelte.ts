@@ -62,6 +62,8 @@ class Store {
   /** Whether project views list the work done outside any project ("No project"). */
   showNoProject = $state<boolean>(load("hd.showNoProject", ["true", "false"] as const, "true") === "true");
   theme = $state<ThemePref>(load("hd.theme", ["system", "light", "dark"] as const, "system"));
+  /** The sidebar shows only icons (on wide screens, where it stays open). */
+  navCollapsed = $state<boolean>(load("hd.navCollapsed", ["true", "false"] as const, "false") === "true");
   systemDark = $state(typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
   /** Bumped whenever new data was ingested; data hooks refetch on change. */
   refreshTick = $state(0);
@@ -91,6 +93,11 @@ class Store {
   setRange(r: RangePreset): void {
     this.range = r;
     save("hd.range", r);
+  }
+
+  setNavCollapsed(collapsed: boolean): void {
+    this.navCollapsed = collapsed;
+    save("hd.navCollapsed", String(collapsed));
   }
 
   setShowNoProject(show: boolean): void {

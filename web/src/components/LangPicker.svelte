@@ -1,21 +1,19 @@
 <script lang="ts">
-  import { i18n, LANGS, t } from "../lib/i18n.svelte.ts";
+  import { i18n, LANGS, t, type Lang } from "../lib/i18n.svelte.ts";
+  import Dropdown from "./Dropdown.svelte";
 
-  /** `wide` fills a form column and names each language in full. */
-  let { wide = false }: { wide?: boolean } = $props();
+  /**
+   * The language, each named in its own language. `wide` fills a form column (Settings), `up` opens the list above
+   * the control, for the sidebar's footer.
+   */
+  let { wide = false, up = false }: { wide?: boolean; up?: boolean } = $props();
 </script>
 
-<div class="flex items-center" class:w-full={wide}>
-  <div class="seg" class:wide role="radiogroup" aria-label={t("settings.language")}>
-    {#each LANGS as l (l.code)}
-      <button
-        role="radio"
-        aria-checked={i18n.lang === l.code}
-        title={l.label}
-        onclick={() => i18n.set(l.code)}
-      >
-        {wide ? l.label : l.code.toUpperCase()}
-      </button>
-    {/each}
-  </div>
-</div>
+<Dropdown
+  label={t("settings.language")}
+  value={i18n.lang}
+  options={LANGS.map((l) => ({ value: l.code, label: l.label }))}
+  onchange={(v: Lang) => i18n.set(v)}
+  full={wide}
+  {up}
+/>

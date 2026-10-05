@@ -29,6 +29,10 @@ export const FAMILIES = {
   gold: { light: ["#9e8d00"], dark: ["#b6a300"] },
   // Deeper than the general pool's violet and pink it sits between (L 0.54 / 0.56).
   plum: { light: ["#9e3db0"], dark: ["#ab40ad"] },
+  // The last two hues with room left between the pool, the token types and the other providers' model shades:
+  // a deep teal below sky and cache read, and a crimson past Claude's orange and the pool's pink.
+  teal: { light: ["#007973"], dark: ["#159085"] },
+  crimson: { light: ["#bd004b"], dark: ["#e60357"] },
   // Token types in TOKEN_TYPES order: cache read in teal (the big part of every column), cache write olive,
   // input lilac, output purple. Each keeps its hue in both themes; the four are as far apart as the rest of the
   // palette allows, for normal vision and red-green deficiencies alike, so even thin slivers read apart.
@@ -47,16 +51,18 @@ export const RESERVED = {
   codex: "blue",
   cursor: "gold",
   omp: "plum",
+  pi: "teal",
+  opencode: "crimson",
   tokenType: "tokens",
 } as const satisfies Record<string, FamilyName>;
 
-export type Provider = "claude" | "codex" | "cursor" | "omp";
-export const PROVIDERS: readonly Provider[] = ["claude", "codex", "cursor", "omp"];
+export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode";
+export const PROVIDERS: readonly Provider[] = ["claude", "codex", "cursor", "omp", "pi", "opencode"];
 
 /**
  * Models wear their maker's color - the family of the provider that makes them - whichever harness or plan
  * they ran under: a Claude model through omp or Copilot is still Claude. Only these providers hand out model
- * shades; harnesses without models of their own (Cursor, omp) have just their one color.
+ * shades. Harnesses without models of their own (Cursor, omp, pi, OpenCode) have just their one color.
  */
 export const MAKER_FAMILIES: Record<Maker, Provider> = { anthropic: "claude", openai: "codex" };
 /** In the order their model shades are generated: a maker added at the end never repaints the ones before it. */

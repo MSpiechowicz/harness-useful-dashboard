@@ -32,9 +32,10 @@ export function integer(n: number | null | undefined): string {
 export function usd(n: number | null | undefined, opts: { compact?: boolean } = {}): string {
   if (n == null || !Number.isFinite(n)) return "–";
   const abs = Math.abs(n);
-  if (opts.compact && abs >= 10_000) return nf({ style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(n);
+  // The short "$" in every language: "1198 $" rather than "1198 USD" (Polish) or "1 198 $US" (French).
+  if (opts.compact && abs >= 10_000) return nf({ style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", notation: "compact", maximumFractionDigits: 1 }).format(n);
   const digits = abs > 0 && abs < 0.01 ? 4 : abs < 100 ? 2 : 0;
-  return nf({ style: "currency", currency: "USD", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
+  return nf({ style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 }
 
 export function percent(x: number | null | undefined, digits = 0): string {
@@ -77,13 +78,19 @@ export function bucketLabel(b: string, bucket: string): string {
 export function relative(ts: number | null | undefined): string {
   if (!ts) return "–";
   const diff = (ts - Date.now()) / 1000;
-  const rtf = new Intl.RelativeTimeFormat(i18n.locale, { numeric: "auto" });
+  // The short style keeps it to a table cell in every language: "20 sec. ago", "il y a 20 s", "20 sek. temu".
+  const rtf = new Intl.RelativeTimeFormat(i18n.locale, { numeric: "auto", style: "short" });
   const abs = Math.abs(diff);
   if (abs < 60) return rtf.format(Math.round(diff), "second");
   if (abs < 3600) return rtf.format(Math.round(diff / 60), "minute");
   if (abs < 86400) return rtf.format(Math.round(diff / 3600), "hour");
   if (abs < 86400 * 30) return rtf.format(Math.round(diff / 86400), "day");
   return shortDate(ts);
+}
+
+/** A count of days by the language's plural rules: "1 day", "12 days". */
+export function days(n: number): string {
+  return t(new Intl.PluralRules(i18n.locale).select(n) === "one" ? "common.day" : "common.days", { n: nf({ maximumFractionDigits: 0 }).format(n) });
 }
 
 /** How long until a moment, in its two largest units: "4h 30m", "1d 10h", "12m". */
@@ -93,7 +100,9 @@ export function until(ts: number | null | undefined, now = Date.now()): string {
   const d = Math.floor(minutes / 1440);
   const h = Math.floor((minutes % 1440) / 60);
   const m = minutes % 60;
-  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+  // Units in the UI's language, as short as it writes them: "3h 22m", "3 h 22 min", "3 Std. 22 Min.".
+  const unit = (n: number, u: "day" | "hour" | "minute") => nf({ style: "unit", unit: u, unitDisplay: "narrow" }).format(n);
+  return d ? `${unit(d, "day")} ${unit(h, "hour")}` : h ? `${unit(h, "hour")} ${unit(m, "minute")}` : unit(m, "minute");
 }
 
 export function shortPath(p: string | null | undefined, keep = 2): string {

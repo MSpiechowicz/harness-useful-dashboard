@@ -52,7 +52,7 @@ function and(where: string, cond: string): string {
 
 /** Tools that read or change a file, across harnesses (Claude Code, Codex, omp). */
 export const READ_TOOLS = "'Read','NotebookRead','read'";
-const EDIT_TOOLS = "'Edit','MultiEdit','Write','NotebookEdit','apply_patch','edit','write'";
+export const EDIT_TOOLS = "'Edit','MultiEdit','Write','NotebookEdit','apply_patch','edit','write'";
 
 /** Per-file tool call counts, split into reads and edits by the tool that touched the file. */
 const FILE_COUNTS = `COUNT(*) AS calls,

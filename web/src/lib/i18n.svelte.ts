@@ -1,20 +1,27 @@
 import { de } from "./locales/de.ts";
 import { en, type MessageKey } from "./locales/en.ts";
+import { es } from "./locales/es.ts";
+import { fr } from "./locales/fr.ts";
+import { pl } from "./locales/pl.ts";
 
-export type Lang = "en" | "de";
+export type Lang = "en" | "de" | "es" | "fr" | "pl";
+/** Each language named in itself, as a language picker lists them. */
 export const LANGS: { code: Lang; label: string }[] = [
   { code: "en", label: "English" },
   { code: "de", label: "Deutsch" },
+  { code: "es", label: "Español" },
+  { code: "fr", label: "Français" },
+  { code: "pl", label: "Polski" },
 ];
 
-const DICTS: Record<Lang, Record<MessageKey, string>> = { en, de };
-const LOCALES: Record<Lang, string> = { en: "en-US", de: "de-DE" };
+const DICTS: Record<Lang, Record<MessageKey, string>> = { en, de, es, fr, pl };
+const LOCALES: Record<Lang, string> = { en: "en-US", de: "de-DE", es: "es-ES", fr: "fr-FR", pl: "pl-PL" };
 
 function initialLang(): Lang {
-  // English is the default; German only when explicitly chosen.
+  // English is the default. Another language only when explicitly chosen.
   try {
     const saved = localStorage.getItem("hd.lang");
-    if (saved === "en" || saved === "de") return saved;
+    if (LANGS.some((l) => l.code === saved)) return saved as Lang;
   } catch {
     /* storage unavailable */
   }

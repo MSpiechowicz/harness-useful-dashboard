@@ -1,4 +1,4 @@
-export type Provider = "claude" | "codex" | "cursor" | "omp";
+export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode";
 
 export interface SessionRecord {
   id: string;

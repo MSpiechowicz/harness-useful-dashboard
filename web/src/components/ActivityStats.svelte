@@ -1,7 +1,7 @@
 <script lang="ts">
   import { CalendarCheck, Flame, Mountain, Sigma, Sun, Trophy } from "@lucide/svelte";
   import { type ActivityDay, type ActivityStats, parseDay } from "../lib/activity.ts";
-  import { metricValue, percent } from "../lib/format.ts";
+  import { days, metricValue, percent } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -28,13 +28,13 @@
     {
       icon: Flame,
       label: t("calendar.currentStreak"),
-      value: t("common.days", { n: stats.current }),
+      value: days(stats.current),
       hint: stats.currentSince ? t("calendar.since", { date: date(stats.currentSince, { month: "short", day: "numeric" }) }) : t("calendar.noStreak"),
     },
     {
       icon: Mountain,
       label: t("calendar.longestStreak"),
-      value: t("common.days", { n: stats.longest }),
+      value: days(stats.longest),
       hint:
         stats.longestFrom && stats.longestTo
           ? stats.longestFrom === stats.longestTo

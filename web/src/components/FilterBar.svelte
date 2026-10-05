@@ -39,9 +39,11 @@
   {#each visible as k (k)}
     {@const list = opts.data?.[k] ?? []}
     <!-- All filters share one width, whatever their values: symmetric, and nothing shifts when one is chosen. -->
+    <!-- Unfiltered, a filter shows just its name ("Provider"), filtered its value too ("Provider: claude"). -->
     <Dropdown
       prefix
       stretch
+      labelWhenEmpty
       label={labelFor(k)}
       value={store[k]}
       active={store[k] !== ""}

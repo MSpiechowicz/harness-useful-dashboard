@@ -1,38 +1,64 @@
 # Harness Dashboard
 
-**Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the transcripts that
-Claude Code, Codex and omp (oh-my-pi) already write to disk, plus Cursor usage exports. It stores everything in a
-local SQLite database and shows clear, interactive charts of where your tokens and money go.
+**Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the sessions that
+Claude Code, Codex, OpenCode, pi and omp (oh-my-pi) already write to disk, plus Cursor usage exports. It stores
+everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
 - **By project, user, model, provider, skill, agent, session and prompt**: every dimension is a filter
 - **Trends**: hourly/daily/weekly/monthly series, a 7-day moving average, cumulative spend, peak day and a 30-day projection
 - **Per-prompt cost analytics**: what each request really consumed, call by call, including the subagents it spawned
 - **Tool and file heatmaps**: tools × projects, tools × hour of day, and the files that get read or edited most
-- **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads and omp subagents are tied back to the spawning prompt or parent session
+- **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads, OpenCode subagent sessions and omp subagents are tied back to the spawning prompt or parent session
 - **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
 - **Cache analytics**: hit rate over time, money saved by caching, and what cache writes cost
 - **Rule-based tips**: low cache hit rate, context bloat, premium models on small prompts, tool loops, spikes, and more
 - **Live view**: tokens per minute as you work, the sessions running right now, and how much of your plan limits is left
   (Claude's 5-hour and weekly limits, Codex, and every plan omp is logged in to, such as GitHub Copilot)
-- **English and German UI** (English by default), light and dark themes, responsive layout
+- **English, German, Spanish, French and Polish UI** (English by default), light and dark themes, responsive layout
 - **Shared database**: point several machines at one SQLite file on iCloud Drive, Dropbox, OneDrive or a network share
 
 Everything runs locally. Your usage is never uploaded anywhere.
 
 ![Overview: cost and token KPIs, usage over time by token type, top projects and models](docs/screenshots/overview.png)
 
+![Overview, further down: provider split, when you work, your rhythm and the daily activity calendar](docs/screenshots/overview-activity.png)
+
 <table>
   <tr>
-    <td><img src="docs/screenshots/live.png" alt="Live: tokens per minute, plan limits left and active sessions"></td>
-    <td><img src="docs/screenshots/models.png" alt="Models: cost distribution, usage over time and the full model table"></td>
+    <td width="50%"><img src="docs/screenshots/live.png" alt="Live: tokens per minute, plan limits left and the sessions running now"><br><sub><b>Live</b>: tokens per minute, plan limits left and the sessions running now</sub></td>
+    <td width="50%"><img src="docs/screenshots/trends.png" alt="Trends: daily usage, a moving average and the running total"><br><sub><b>Trends</b>: daily usage, a moving average and the running total</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/trends.png" alt="Trends: daily usage, a moving average and cumulative spend"></td>
-    <td><img src="docs/screenshots/tools.png" alt="Tools: most used tools split by project, and the kinds of work they do"></td>
+    <td width="50%"><img src="docs/screenshots/projects.png" alt="Projects: where the tokens go, project by project"><br><sub><b>Projects</b>: where the tokens go, project by project</sub></td>
+    <td width="50%"><img src="docs/screenshots/models.png" alt="Models: which models do the work and what they cost"><br><sub><b>Models</b>: which models do the work and what they cost</sub></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/screenshots/sessions.png" alt="Sessions: cost against tokens per session, and the session table"></td>
+    <td width="50%"><img src="docs/screenshots/providers.png" alt="Providers: Claude Code, Codex, omp, OpenCode and pi side by side"><br><sub><b>Providers</b>: Claude Code, Codex, omp, OpenCode and pi side by side</sub></td>
+    <td width="50%"><img src="docs/screenshots/users.png" alt="Users: everyone on a shared database"><br><sub><b>Users</b>: everyone on a shared database</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/skills.png" alt="Skills: what each skill costs from the moment it's invoked"><br><sub><b>Skills</b>: what each skill costs from the moment it's invoked</sub></td>
+    <td width="50%"><img src="docs/screenshots/agents.png" alt="Agents: main sessions against the subagents they start"><br><sub><b>Agents</b>: main sessions against the subagents they start</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/sessions.png" alt="Sessions: cost against tokens per session, and every session"><br><sub><b>Sessions</b>: cost against tokens per session, and every session</sub></td>
+    <td width="50%"><img src="docs/screenshots/session-detail.png" alt="Session detail: every model call, prompt and spawned agent of one session"><br><sub><b>Session detail</b>: every model call, prompt and spawned agent of one session</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/prompts.png" alt="Prompts: what each request really cost, and where the spend concentrates"><br><sub><b>Prompts</b>: what each request really cost, and where the spend concentrates</sub></td>
+    <td width="50%"><img src="docs/screenshots/prompt-detail.png" alt="Prompt detail: one prompt call by call, subagents included"><br><sub><b>Prompt detail</b>: one prompt call by call, subagents included</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/tools.png" alt="Tools: most used tools by project, and the kinds of work they do"><br><sub><b>Tools</b>: most used tools by project, and the kinds of work they do</sub></td>
+    <td width="50%"><img src="docs/screenshots/files.png" alt="Files: the files that get read and edited most"><br><sub><b>Files</b>: the files that get read and edited most</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/cache.png" alt="Cache: hit rate over time and what caching saves"><br><sub><b>Cache</b>: hit rate over time and what caching saves</sub></td>
+    <td width="50%"><img src="docs/screenshots/tips.png" alt="Tips: rule-based suggestions from your own usage"><br><sub><b>Tips</b>: rule-based suggestions from your own usage</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/settings.png" alt="Settings: general options, the shared database, data sources and plan limits"><br><sub><b>Settings</b>: general options, the shared database, data sources and plan limits</sub></td>
   </tr>
 </table>
 
@@ -109,6 +135,8 @@ Starting it again while it's running just opens another window. Use **Settings �
 | Claude Code | `~/.claude/projects/**/*.jsonl` (or `$CLAUDE_CONFIG_DIR`) | per-message usage, prompts, tools, skills, subagent transcripts |
 | Codex | `~/.codex/sessions/**` and `archived_sessions/**` (or `$CODEX_HOME`) | per-response records or cumulative token counts, spawned and guardian threads, thread titles |
 | omp (oh-my-pi) | `~/.omp/agent/sessions/**/*.jsonl` (or `$PI_CODING_AGENT_DIR/sessions`) | per-message usage with the plan or account it was billed through (ChatGPT plan, GitHub Copilot, API keys), Copilot premium requests, prompts, tools, `skill://` reads, subagent transcripts |
+| OpenCode | `~/.local/share/opencode/opencode.db` (or `$XDG_DATA_HOME/opencode`, also on macOS and Windows) | the SQLite database OpenCode keeps since v1.2: one row per model call with the provider it was billed through, prompts, tools (files from `apply_patch` too), and subagent sessions tied back to the task call that started them. Read-only, from where the last scan stopped. Older JSON storage is moved into the database by OpenCode itself |
+| pi | `~/.pi/agent/sessions/**/*.jsonl` | the same format as omp (omp is a fork of pi): per-message usage with the plan or account it was billed through, usage logged outside messages (cache warming, compactions), prompts, tools and session names. History copied into a fork counts once. A folder set up for both pi and omp (they share `$PI_CODING_AGENT_DIR`) is read once, as omp's |
 | Cursor | CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Import the CSV in **Settings** or with `import-cursor` |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
@@ -117,16 +145,19 @@ bytes appended since the last one, so rescans take milliseconds.
 ### Plan limits
 
 The **Live** view shows how much of each plan limit is left, only for the plans the sessions in its time window run on:
-Claude Code counts against the Claude plan of its login, Codex against the ChatGPT plan it uses, and omp against whatever
-it billed a call through.
+Claude Code counts against the Claude plan of its login, Codex against the ChatGPT plan it uses, and OpenCode, pi and
+omp against whatever they billed a call through, read with their own logins.
 
 | Plan | Where the limits come from |
 |---|---|
 | Claude (Pro, Max) | Anthropic, asked with the login Claude Code keeps on the machine (`~/.claude/.credentials.json`, or the macOS keychain). The same numbers Claude Code's `/usage` shows. An expired login is reported, never renewed, so Claude Code stays signed in. |
 | Codex (ChatGPT plans) | The rate limits Codex writes into its session logs, read while ingesting. No network request. A reading is as fresh as the last Codex session. |
 | Everything omp is logged in to | `omp usage --json`: Claude, ChatGPT/Codex, GitHub Copilot premium requests, Gemini and more |
+| Everything OpenCode or pi is logged in to | Their logins (`~/.local/share/opencode/auth.json`, `~/.pi/agent/auth.json`), each asked at its own provider: Anthropic for a Claude plan, ChatGPT for a Codex plan, GitHub for Copilot premium requests. Logins are never renewed, so an expired one is reported until the tool is used again |
 
-Each source can be switched off in **Settings → Plan limits**. Network sources are asked at most once a minute.
+Each source can be switched off in **Settings → Plan limits**. Network sources are asked at most every 2 minutes. When a
+provider says it's asked too often, the dashboard waits at least 5 minutes (doubling up to 30) and keeps showing the
+last reading.
 
 ### Shared database (iCloud, Dropbox, network share)
 
@@ -175,9 +206,10 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
 
 Every data color comes from one palette (`web/src/lib/palette.ts`), and each color means one thing:
 
-- **Reserved.** Each provider has its own color. Models wear their maker's color whichever harness or plan they ran
-  under (a Claude model through omp or Copilot is still Claude orange), with shades generated from it so models of
-  one maker stay apart in a stacked chart. The four token types have their own set (teal, olive, lilac, purple).
+- **Reserved.** Each harness has its own color: Claude Code orange, Codex blue, Cursor gold, omp plum, pi teal and
+  OpenCode crimson. Models wear their maker's color whichever harness or plan they ran under (a Claude model through
+  omp or Copilot is still Claude orange), with shades generated from it so models of one maker stay apart in a stacked
+  chart. The four token types have their own set (green-teal, olive, lilac, purple).
 - **General pool.** Projects, users, skills, agents and sources take the top values' colors by hue first (green, sky,
   violet, pink), then a strong variant of each, then *Other*.
 
@@ -192,8 +224,9 @@ state-changing requests (CSRF protection). Prompt text is stored truncated to 2,
 expensive prompts. Set **Stored prompt length** to `0` to keep no prompt text at all.
 
 The app makes two kinds of outbound request, and never sends your usage in either: the optional update check against
-the GitHub releases API, and, while the Live view is open, the plan-limit check with Anthropic (with your Claude Code
-login, sent to Anthropic only) and through `omp usage`. Both plan-limit sources can be switched off in **Settings**.
+the GitHub releases API, and, while the Live view is open, the plan-limit checks: with Anthropic, ChatGPT and GitHub,
+each with the login Claude Code, OpenCode or pi keeps for it and sent to that provider only, and through `omp usage`.
+Every plan-limit source can be switched off in **Settings**.
 
 ## Development
 
@@ -221,7 +254,7 @@ src/
     db.ts                schema + migrations
     pricing.ts           price book (built-in list prices + user overrides)
     models.ts            model id normalization and makers, shared with the UI
-    ingest/              incremental JSONL scanner, Claude/Codex/omp parsers, Cursor CSV importer
+    ingest/              incremental JSONL scanner, Claude/Codex/pi/omp parsers, OpenCode database reader, Cursor CSV importer
     queries.ts           all aggregations behind the API
     tips.ts              rule-based tips engine
     limits.ts            plan limits: Claude login, omp, Codex logs

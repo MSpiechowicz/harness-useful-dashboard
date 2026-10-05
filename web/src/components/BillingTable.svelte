@@ -14,7 +14,7 @@
     "google-gemini-cli": "Gemini CLI",
   };
   /** Harnesses that don't report a plan are billed to their own account. */
-  const HARNESSES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", omp: "omp" };
+  const HARNESSES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", omp: "omp", pi: "pi", opencode: "OpenCode" };
 
   export function billingLabel(r: BillingRow): string {
     return r.reported ? PLANS[r.key] ?? r.key : t("billing.own", { name: HARNESSES[r.key] ?? r.key });

@@ -8,7 +8,8 @@
   import TableCard from "../components/TableCard.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import { settled, useFetch } from "../lib/api.svelte.ts";
-  import { rateChart } from "../lib/charts.ts";
+  import Dropdown from "../components/Dropdown.svelte";
+  import { rateChart, type RateKind } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
@@ -66,8 +67,19 @@
   });
   const data = useFetch<LiveData>(() => `/api/live?minutes=${minutes}&t=${tick}`);
   // "Refresh" asks the providers again instead of answering from the minute-long cache.
+  // Only the click asks with force=1: the regular checks after it go by the server's schedule again.
   let forced = $state(0);
-  const limits = useFetch<LimitsResult>(() => `/api/limits?minutes=${minutes}&t=${Math.floor(tick / 4)}${forced ? `&force=1&f=${forced}` : ""}`);
+  let refreshing = $state(false);
+  const limits = useFetch<LimitsResult>(() => `/api/limits?minutes=${minutes}&t=${Math.floor(tick / 4)}&f=${forced}`);
+  async function refreshLimits() {
+    refreshing = true;
+    try {
+      await fetch(`/api/limits?minutes=${minutes}&force=1`);
+    } finally {
+      refreshing = false;
+      forced++;
+    }
+  }
 
   const total = $derived.by(() => {
     const d = data.data;
@@ -85,7 +97,23 @@
       peakAt: peak.i >= 0 ? d.from + peak.i * 60_000 : null,
     };
   });
-  const option = $derived.by(() => (void store.dark, data.data ? rateChart(data.data.series, data.data.from) : null));
+  // How the rate is drawn, kept between visits.
+  const KINDS = ["area", "bars", "lines", "dots", "steps", "total"] as const;
+  let kind = $state<RateKind>("area");
+  try {
+    const saved = localStorage.getItem("hd.liveChart");
+    if ((KINDS as readonly string[]).includes(saved ?? "")) kind = saved as RateKind;
+  } catch {
+    /* no storage: the default */
+  }
+  function pickKind(k: RateKind) {
+    try {
+      localStorage.setItem("hd.liveChart", k);
+    } catch {
+      /* not kept */
+    }
+  }
+  const option = $derived.by(() => (void store.dark, data.data ? rateChart(data.data.series, data.data.from, kind) : null));
   const quiet = $derived(!!total && total.sum === 0);
   const windowLabel = $derived(minutes < 60 ? t("live.lastMinutes", { n: minutes }) : minutes === 60 ? t("live.lastHour") : t("live.lastHours", { n: minutes / 60 }));
   const time = (ts: number) => new Intl.DateTimeFormat(i18n.locale, { hour: "numeric", minute: "2-digit" }).format(ts);
@@ -120,7 +148,10 @@
     {/if}
 
     <div class="grid gap-5 xl:grid-cols-5">
-      <Card title={t("live.rate")} subtitle={t("live.rateHint", { window: windowLabel })} class="xl:col-span-3">
+      <Card title={t("live.rate")} subtitle={t(kind === "total" ? "live.totalHint" : "live.rateHint", { window: windowLabel })} class="xl:col-span-3">
+        {#snippet actions()}
+          <Dropdown label={t("live.chart")} bind:value={kind} options={KINDS.map((k) => ({ value: k, label: t(`live.chart.${k}`) }))} onchange={pickKind} />
+        {/snippet}
         {#if quiet}
           <div class="flex h-[280px] flex-col items-center justify-center gap-2 text-center">
             <Gauge size={22} class="text-muted" />
@@ -133,7 +164,7 @@
       </Card>
       <Card title={t("live.limits")} subtitle={t("live.limitsHint")} class="xl:col-span-2">
         {#snippet actions()}
-          <button class="btn !h-7 !px-2 !text-xs" onclick={() => forced++} disabled={limits.loading}>{t("live.refresh")}</button>
+          <button class="btn !h-7 !px-2 !text-xs" onclick={refreshLimits} disabled={refreshing}>{t("live.refresh")}</button>
         {/snippet}
         {#if limits.data && (limits.data.reports.length || limits.data.problems.length)}
           <PlanLimits data={limits.data} {now} />

@@ -13,7 +13,9 @@
   import { t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
 
-  type SourceKey = "claude" | "codex" | "omp";
+  type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode";
+  type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs";
+  type LimitKey = "claude" | "codex" | "omp" | "pi" | "opencode";
   interface Config {
     dbPath: string;
     journalMode: "auto" | "wal" | "delete";
@@ -22,8 +24,8 @@
     scanIntervalSec: number;
     promptTextLimit: number;
     checkUpdates: boolean;
-    sources: { claudeDirs: string[]; codexDirs: string[]; ompDirs: string[]; enabled: Record<SourceKey, boolean> };
-    limits: Record<SourceKey, boolean>;
+    sources: Record<DirsKey, string[]> & { enabled: Record<SourceKey, boolean> };
+    limits: Record<LimitKey, boolean>;
   }
   interface Settings {
     config: Config;
@@ -43,11 +45,15 @@
     source?: "builtin" | "user";
   }
 
-  const SOURCES: { key: SourceKey; dirs: "claudeDirs" | "codexDirs" | "ompDirs" }[] = [
+  const SOURCES: { key: SourceKey; dirs: DirsKey }[] = [
     { key: "claude", dirs: "claudeDirs" },
     { key: "codex", dirs: "codexDirs" },
+    { key: "opencode", dirs: "opencodeDirs" },
+    { key: "pi", dirs: "piDirs" },
     { key: "omp", dirs: "ompDirs" },
   ];
+  /** Where plan limits can be read from (see Live). */
+  const LIMIT_SOURCES: LimitKey[] = ["claude", "codex", "opencode", "pi", "omp"];
 
   let cfg = $state<Config | null>(null);
   let currentDb = $state("");
@@ -57,7 +63,7 @@
   let dbInput = $state("");
   let target = $state<{ file: string; state: DbState } | null>(null);
   let copyDb = $state(true);
-  let dirs = $state<Record<SourceKey, string[]>>({ claude: [""], codex: [""], omp: [""] });
+  let dirs = $state<Record<SourceKey, string[]>>({ claude: [""], codex: [""], omp: [""], pi: [""], opencode: [""] });
   let saved = $state<string | null>(null);
   let errorMsg = $state<string | null>(null);
   let busy = $state(false);
@@ -86,7 +92,7 @@
     syncFolders = s.syncFolders;
     sharedFolder = s.sharedFolder;
     dbInput = asFolder(s.config.dbPath);
-    for (const src of SOURCES) dirs[src.key] = s.config.sources[src.dirs].length ? [...s.config.sources[src.dirs]] : [""];
+    for (const src of SOURCES) dirs[src.key] = s.config.sources[src.dirs]?.length ? [...s.config.sources[src.dirs]] : [""];
   }
 
   async function load() {
@@ -117,7 +123,7 @@
         promptTextLimit: Number(cfg.promptTextLimit),
         checkUpdates: cfg.checkUpdates,
         journalMode: cfg.journalMode,
-        sources: { claudeDirs: clean(dirs.claude), codexDirs: clean(dirs.codex), ompDirs: clean(dirs.omp), enabled: cfg.sources.enabled },
+        sources: { ...Object.fromEntries(SOURCES.map((src) => [src.dirs, clean(dirs[src.key])])), enabled: cfg.sources.enabled },
         limits: cfg.limits,
         ...extra,
       });
@@ -352,9 +358,9 @@
     </Card>
 
     <Card title={t("settings.limits")} subtitle={t("settings.limitsHint")} divided>
-      {#each SOURCES as src (src.key)}
-        <SettingRow label={t(`settings.limits.${src.key}`)} hint={t(`settings.limits.${src.key}Hint`)}>
-          <Switch bind:checked={cfg!.limits[src.key]} label={t(`settings.limits.${src.key}`)} onchange={() => save()} />
+      {#each LIMIT_SOURCES as key (key)}
+        <SettingRow label={t(`settings.limits.${key}`)} hint={t(`settings.limits.${key}Hint`)}>
+          <Switch bind:checked={cfg!.limits[key]} label={t(`settings.limits.${key}`)} onchange={() => save()} />
         </SettingRow>
       {/each}
     </Card>

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
-import { type Filters, projectLabel, READ_TOOLS, whereClause } from "./queries.ts";
+import { EDIT_TOOLS, type Filters, projectLabel, READ_TOOLS, whereClause } from "./queries.ts";
 
 export type Severity = "info" | "warn" | "critical";
 
@@ -167,6 +167,100 @@ export function generateTips(db: Database, f: Filters, prices: PriceBook): Tip[]
       .map((r) => normalizeModel(r.model))
       .join(", ");
     tips.push({ id: "estimated-pricing", severity: "info", params: { share: pct(t.estCost / t.cost), models }, link: "#/settings", impact: 0 });
+  }
+
+  // Prices per model for the rules below that cost a kind of token: cache writes, output.
+  const price = (model: string | null) => prices.lookup(model).price;
+  const writeCost = (rows: { model: string | null; tokens: number }[]) =>
+    rows.reduce((a, r) => a + (r.tokens * (price(r.model).cacheWrite5m ?? price(r.model).input * 1.25)) / 1e6, 0);
+
+  // 15. The prompt cache expired during a pause: Anthropic's cache lives 5 minutes, so the first call after a longer
+  // break writes the whole context again. Pauses over an hour are new work, not a cache that ran out mid-task.
+  const expired = q<{ model: string | null; n: number; tokens: number }>(
+    `WITH calls AS (
+       SELECT model, cache_write_tokens AS cw, ts - LAG(ts) OVER (PARTITION BY session_id ORDER BY ts) AS gap
+       FROM usage u ${and("provider != 'cursor'")}
+     )
+     SELECT model, COUNT(*) AS n, SUM(cw) AS tokens FROM calls WHERE gap > 300000 AND gap < 3600000 AND cw > 20000 GROUP BY model`,
+  );
+  const expiredCount = expired.reduce((a, r) => a + r.n, 0);
+  const expiredCost = writeCost(expired);
+  if (expiredCount >= 10 && expiredCost > 1) {
+    tips.push({ id: "cache-expired", severity: expiredCost / t.cost > 0.1 ? "warn" : "info", params: { count: expiredCount, cost: round2(expiredCost) }, link: "#/cache", impact: monthly(expiredCost * 0.7) });
+  }
+
+  // 16. Switching models mid-session: the cache belongs to one model, so the next call writes the context again.
+  const switches = q<{ model: string | null; n: number; tokens: number }>(
+    `WITH calls AS (
+       SELECT model, cache_write_tokens + cache_write_1h_tokens AS cw, LAG(model) OVER (PARTITION BY session_id ORDER BY ts) AS prev
+       FROM usage u ${and("is_subagent = 0 AND provider != 'cursor'")}
+     )
+     SELECT model, COUNT(*) AS n, SUM(cw) AS tokens FROM calls WHERE prev IS NOT NULL AND prev <> model AND cw > 20000 GROUP BY model`,
+  );
+  const switchCount = switches.reduce((a, r) => a + r.n, 0);
+  const switchCost = writeCost(switches);
+  if (switchCount >= 5 && switchCost > 1) {
+    tips.push({ id: "model-switch", severity: "info", params: { count: switchCount, cost: round2(switchCost) }, link: "#/sessions", impact: monthly(switchCost * 0.8) });
+  }
+
+  // 17. Output is the priciest kind of token: a large share of spend on it means long answers or whole-file rewrites.
+  const outputCost = q<{ model: string | null; tokens: number }>(`SELECT model, SUM(output_tokens) AS tokens FROM usage u ${and("provider != 'cursor'")} GROUP BY model`).reduce(
+    (a, r) => a + (r.tokens * price(r.model).output) / 1e6,
+    0,
+  );
+  if (t.cost > 5 && outputCost / t.cost > 0.4) {
+    tips.push({ id: "output-heavy", severity: "info", params: { share: pct(outputCost / t.cost) }, link: "#/models", impact: monthly(outputCost * 0.2) });
+  }
+
+  // 18. Cost per prompt rising: the second half of the range against the first.
+  if (spanDays >= 6) {
+    const mid = (t.minTs + t.maxTs) / 2;
+    const halves = q<{ late: number; prompts: number; cost: number }>(
+      `SELECT late, COUNT(*) AS prompts, SUM(cost) AS cost FROM (
+         SELECT prompt_id, MIN(ts) >= $mid AS late, SUM(cost_usd) AS cost FROM usage u ${and("prompt_id IS NOT NULL")} GROUP BY prompt_id
+       ) GROUP BY late`,
+      { mid },
+    );
+    const early = halves.find((h) => !h.late);
+    const late = halves.find((h) => h.late);
+    if (early && late && early.prompts >= 15 && late.prompts >= 15) {
+      const before = early.cost / early.prompts;
+      const after = late.cost / late.prompts;
+      if (before > 0 && after > 0.1 && after > before * 1.5) {
+        tips.push({ id: "prompt-cost-rising", severity: "warn", params: { before: round2(before), after: round2(after), ratio: round1(after / before) }, link: "#/trends", impact: monthly(late.cost - late.prompts * before) });
+      }
+    }
+  }
+
+  // 19. The same prompt sent again and again: a routine worth a skill or command, or retries. Prompts that already
+  // call a skill or a command are routines already.
+  const repeated = one<{ text: string; n: number; id: string }>(
+    `SELECT p.text, COUNT(*) AS n, MAX(p.id) AS id FROM prompts p
+     WHERE p.id IN (SELECT DISTINCT prompt_id FROM usage u ${and("prompt_id IS NOT NULL")})
+       AND p.is_command = 0 AND p.skill IS NULL AND length(p.text) >= 25
+       AND p.text NOT LIKE '<%' AND p.text NOT LIKE '/%' AND p.text NOT LIKE '$%' AND p.text NOT LIKE '[$%'
+     GROUP BY p.text HAVING n >= 4 ORDER BY n DESC LIMIT 1`,
+  );
+  if (repeated) {
+    tips.push({ id: "repeated-prompt", severity: "info", params: { text: repeated.text.slice(0, 80), count: repeated.n }, link: `#/prompts/${encodeURIComponent(repeated.id)}`, impact: 0 });
+  }
+
+  // 20. One file edited over and over in one session: the agent is often fighting a formatter, a type error or an unclear target.
+  const churn = db
+    .query<{ file_path: string; session_id: string; n: number }, any>(
+      `SELECT file_path, session_id, COUNT(*) AS n FROM tool_calls t ${tw.sql ? tw.sql + " AND" : "WHERE"} tool IN (${EDIT_TOOLS}) AND file_path IS NOT NULL
+       GROUP BY session_id, file_path HAVING n >= 15 ORDER BY n DESC LIMIT 1`,
+    )
+    .get(tw.params);
+  if (churn) {
+    tips.push({ id: "edit-churn", severity: "info", params: { file: churn.file_path.split(/[\\/]/).pop() ?? churn.file_path, count: churn.n }, link: `#/sessions/${encodeURIComponent(churn.session_id)}`, impact: 0 });
+  }
+
+  // 21. GitHub Copilot premium requests on pace past the 300 a month that Copilot Pro includes.
+  const premium = one<{ n: number }>(`SELECT COALESCE(SUM(premium_requests), 0) AS n FROM usage u ${w.sql}`)!.n;
+  const pace = Math.round((premium / spanDays) * 30);
+  if (spanDays >= 3 && pace > 300) {
+    tips.push({ id: "copilot-premium-pace", severity: "warn", params: { pace, used: Math.round(premium) }, link: "#/providers", impact: 0 });
   }
 
   const rank: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };
