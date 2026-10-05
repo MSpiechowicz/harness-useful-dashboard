@@ -1,6 +1,6 @@
 {
   "name": "harness-dashboard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Local token usage dashboard for AI coding harnesses (Claude Code, Codex, Cursor)",
   "license": "GPL-3.0-or-later",
   "private": true,
