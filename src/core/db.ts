@@ -1,0 +1,160 @@
+import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import type { JournalMode } from "./config.ts";
+
+export const SCHEMA_VERSION = 1;
+
+const MIGRATIONS: Record<number, string> = {
+  1: /* sql */ `
+    CREATE TABLE IF NOT EXISTS meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id                TEXT PRIMARY KEY,   -- "<provider>:<native session id>"
+      provider          TEXT NOT NULL,
+      native_id         TEXT NOT NULL,
+      project           TEXT,               -- absolute project path (cwd)
+      user              TEXT,
+      host              TEXT,
+      title             TEXT,
+      git_branch        TEXT,
+      client            TEXT,
+      client_version    TEXT,
+      parent_session_id TEXT,
+      agent             TEXT,               -- subagent type / nickname, NULL for main sessions
+      started_at        INTEGER,
+      ended_at          INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
+
+    CREATE TABLE IF NOT EXISTS prompts (
+      id          TEXT PRIMARY KEY,         -- "<provider>:<session>:<prompt id>"
+      session_id  TEXT NOT NULL,
+      provider    TEXT NOT NULL,
+      ts          INTEGER NOT NULL,
+      text        TEXT,
+      skill       TEXT,
+      is_command  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id);
+    CREATE INDEX IF NOT EXISTS idx_prompts_ts ON prompts(ts);
+
+    -- One row per billed model response (deduplicated).
+    CREATE TABLE IF NOT EXISTS usage (
+      id                    TEXT PRIMARY KEY,
+      provider              TEXT NOT NULL,
+      session_id            TEXT NOT NULL,
+      prompt_id             TEXT,
+      ts                    INTEGER NOT NULL,   -- epoch ms
+      project               TEXT,
+      user                  TEXT,
+      host                  TEXT,
+      model                 TEXT,
+      skill                 TEXT,
+      agent                 TEXT NOT NULL DEFAULT 'main',
+      is_subagent           INTEGER NOT NULL DEFAULT 0,
+      spawn_ref             TEXT,               -- tool_use id that spawned a subagent (resolved post-ingest)
+      input_tokens          INTEGER NOT NULL DEFAULT 0,  -- uncached input
+      output_tokens         INTEGER NOT NULL DEFAULT 0,  -- includes reasoning
+      cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens    INTEGER NOT NULL DEFAULT 0,  -- 5 minute TTL writes (or unspecified)
+      cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens      INTEGER NOT NULL DEFAULT 0,
+      total_tokens          INTEGER NOT NULL DEFAULT 0,
+      cost_usd              REAL NOT NULL DEFAULT 0,
+      cost_estimated        INTEGER NOT NULL DEFAULT 0,  -- 1 = model price unknown, fallback used
+      speed                 TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage(ts);
+    CREATE INDEX IF NOT EXISTS idx_usage_session ON usage(session_id);
+    CREATE INDEX IF NOT EXISTS idx_usage_prompt ON usage(prompt_id);
+    CREATE INDEX IF NOT EXISTS idx_usage_project ON usage(project, ts);
+    CREATE INDEX IF NOT EXISTS idx_usage_model ON usage(model, ts);
+
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id          TEXT PRIMARY KEY,
+      usage_id    TEXT,
+      session_id  TEXT NOT NULL,
+      prompt_id   TEXT,
+      provider    TEXT NOT NULL,
+      ts          INTEGER NOT NULL,
+      project     TEXT,
+      user        TEXT,
+      tool        TEXT NOT NULL,
+      file_path   TEXT,
+      skill       TEXT,
+      agent       TEXT NOT NULL DEFAULT 'main',
+      spawn_ref   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tools_ts ON tool_calls(ts);
+    CREATE INDEX IF NOT EXISTS idx_tools_session ON tool_calls(session_id);
+
+    -- Incremental ingest bookkeeping, per machine (DB may be shared between machines).
+    CREATE TABLE IF NOT EXISTS ingest_files (
+      host    TEXT NOT NULL,
+      path    TEXT NOT NULL,
+      size    INTEGER NOT NULL,
+      mtime   INTEGER NOT NULL,
+      offset  INTEGER NOT NULL,
+      state   TEXT,
+      PRIMARY KEY (host, path)
+    );
+
+    -- User overrides / additions to the built-in price table ($ per 1M tokens).
+    CREATE TABLE IF NOT EXISTS pricing (
+      pattern         TEXT PRIMARY KEY,
+      input           REAL NOT NULL,
+      output          REAL NOT NULL,
+      cache_read      REAL,
+      cache_write_5m  REAL,
+      cache_write_1h  REAL
+    );
+  `,
+};
+
+export interface OpenDbOptions {
+  journalMode?: JournalMode;
+  isDefaultPath?: boolean;
+  readonly?: boolean;
+}
+
+export function openDb(path: string, opts: OpenDbOptions = {}): Database {
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+  const db = new Database(path, { create: !opts.readonly, readonly: opts.readonly, strict: true });
+  db.exec("PRAGMA busy_timeout = 15000");
+  db.exec("PRAGMA foreign_keys = ON");
+  if (!opts.readonly && path !== ":memory:") {
+    // WAL does not work reliably on network/cloud-synced filesystems, so only use it for local default paths.
+    const mode = opts.journalMode ?? "auto";
+    const useWal = mode === "wal" || (mode === "auto" && opts.isDefaultPath !== false);
+    db.exec(`PRAGMA journal_mode = ${useWal ? "WAL" : "DELETE"}`);
+    db.exec("PRAGMA synchronous = NORMAL");
+  }
+  if (!opts.readonly) migrate(db);
+  return db;
+}
+
+export function migrate(db: Database): void {
+  db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
+  const row = db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'").get();
+  let current = row ? Number(row.value) : 0;
+  while (current < SCHEMA_VERSION) {
+    const next = current + 1;
+    db.transaction(() => {
+      db.exec(MIGRATIONS[next]!);
+      db.query("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)").run(String(next));
+    })();
+    current = next;
+  }
+}
+
+export function getMeta(db: Database, key: string): string | null {
+  return db.query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?").get(key)?.value ?? null;
+}
+
+export function setMeta(db: Database, key: string, value: string): void {
+  db.query("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)").run(key, value);
+}

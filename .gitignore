@@ -1,2 +1,17 @@
 # Tasks
 .tasks
+
+# Dependencies & build output
+node_modules/
+dist/
+web/dist/
+src/server/assets.generated.ts
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+
+# OS / editor
+.DS_Store
+*.log

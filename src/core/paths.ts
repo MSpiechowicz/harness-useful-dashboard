@@ -1,0 +1,42 @@
+import { homedir, hostname, userInfo } from "node:os";
+import { join } from "node:path";
+
+export const APP_ID = "harness-dashboard";
+
+/** Per-OS directory for config + default database. */
+export function appDataDir(): string {
+  if (process.env.HARNESS_DASHBOARD_HOME) return process.env.HARNESS_DASHBOARD_HOME;
+  const home = homedir();
+  switch (process.platform) {
+    case "darwin":
+      return join(home, "Library", "Application Support", APP_ID);
+    case "win32":
+      return join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), APP_ID);
+    default:
+      return join(process.env.XDG_CONFIG_HOME ?? join(home, ".config"), APP_ID);
+  }
+}
+
+export function defaultDbPath(): string {
+  return join(appDataDir(), "usage.db");
+}
+
+export function configPath(): string {
+  return join(appDataDir(), "config.json");
+}
+
+export function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) return join(homedir(), p.slice(2));
+  return p;
+}
+
+export function localIdentity(): { user: string; host: string } {
+  let user = "unknown";
+  try {
+    user = userInfo().username;
+  } catch {
+    user = process.env.USER ?? process.env.USERNAME ?? "unknown";
+  }
+  return { user, host: hostname() };
+}

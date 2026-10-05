@@ -1,0 +1,143 @@
+#!/bin/sh
+# Harness Dashboard installer for macOS and Linux.
+#
+#   curl -fsSL https://raw.githubusercontent.com/MSpiechowicz/harness-useful-dashboard/main/install.sh | sh
+#
+# Environment overrides:
+#   HARNESS_DASHBOARD_VERSION      release tag to install (default: latest), e.g. v0.2.0
+#   HARNESS_DASHBOARD_INSTALL_DIR  where the binary goes (default: ~/.local/bin)
+#   HARNESS_DASHBOARD_NO_SHORTCUT  set to 1 to skip the desktop/app launcher
+set -eu
+
+REPO="MSpiechowicz/harness-useful-dashboard"
+BIN="harness-dashboard"
+APP_NAME="Harness Dashboard"
+INSTALL_DIR="${HARNESS_DASHBOARD_INSTALL_DIR:-$HOME/.local/bin}"
+VERSION="${HARNESS_DASHBOARD_VERSION:-latest}"
+
+info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
+fail() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+need() { command -v "$1" >/dev/null 2>&1 || fail "'$1' is required but not installed"; }
+
+download() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 -o "$2" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$2" "$1"
+  else
+    fail "curl or wget is required"
+  fi
+}
+
+case "$(uname -s)" in
+  Darwin) OS="darwin" ;;
+  Linux) OS="linux" ;;
+  *) fail "unsupported OS: $(uname -s). On Windows use install.ps1." ;;
+esac
+
+case "$(uname -m)" in
+  x86_64 | amd64) ARCH="x64" ;;
+  arm64 | aarch64) ARCH="arm64" ;;
+  *) fail "unsupported architecture: $(uname -m)" ;;
+esac
+
+# Rosetta: prefer the native arm64 build on Apple Silicon.
+if [ "$OS" = "darwin" ] && [ "$ARCH" = "x64" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+  ARCH="arm64"
+fi
+
+ASSET="$BIN-$OS-$ARCH"
+if [ "$VERSION" = "latest" ]; then
+  BASE="https://github.com/$REPO/releases/latest/download"
+else
+  BASE="https://github.com/$REPO/releases/download/$VERSION"
+fi
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+info "Downloading $ASSET ($VERSION)"
+download "$BASE/$ASSET" "$TMP/$ASSET" || fail "download failed: $BASE/$ASSET"
+
+if download "$BASE/checksums.txt" "$TMP/checksums.txt" 2>/dev/null; then
+  EXPECTED="$(grep " $ASSET\$" "$TMP/checksums.txt" | awk '{print $1}')"
+  [ -n "$EXPECTED" ] || fail "checksums.txt has no entry for $ASSET"
+  if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
+  else
+    need shasum
+    ACTUAL="$(shasum -a 256 "$TMP/$ASSET" | awk '{print $1}')"
+  fi
+  [ "$EXPECTED" = "$ACTUAL" ] || fail "checksum mismatch for $ASSET"
+  info "Checksum verified"
+else
+  warn "no checksums.txt in this release; skipping verification"
+fi
+
+mkdir -p "$INSTALL_DIR"
+chmod +x "$TMP/$ASSET"
+mv "$TMP/$ASSET" "$INSTALL_DIR/$BIN"
+
+if [ "$OS" = "darwin" ]; then
+  xattr -d com.apple.quarantine "$INSTALL_DIR/$BIN" 2>/dev/null || true
+  # Apple Silicon refuses to run unsigned code; an ad-hoc signature is enough for local use.
+  command -v codesign >/dev/null 2>&1 && codesign --force --sign - "$INSTALL_DIR/$BIN" >/dev/null 2>&1 || true
+fi
+
+info "Installed $("$INSTALL_DIR/$BIN" version 2>/dev/null || echo "$BIN") to $INSTALL_DIR/$BIN"
+
+# ---- launcher so it opens like any other app --------------------------------
+if [ "${HARNESS_DASHBOARD_NO_SHORTCUT:-0}" != "1" ]; then
+  if [ "$OS" = "linux" ]; then
+    APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    ICONS="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+    mkdir -p "$APPS" "$ICONS"
+    cat >"$ICONS/$BIN.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1c5cab"/><rect x="7" y="17" width="4" height="8" rx="1.5" fill="#cde2fb"/><rect x="14" y="11" width="4" height="14" rx="1.5" fill="#86b6ef"/><rect x="21" y="6" width="4" height="19" rx="1.5" fill="#ffffff"/></svg>
+SVG
+    cat >"$APPS/$BIN.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$APP_NAME
+Comment=Token usage dashboard for Claude Code, Codex and Cursor
+Exec=$INSTALL_DIR/$BIN
+Icon=$BIN
+Terminal=false
+Categories=Development;Utility;
+EOF
+    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" >/dev/null 2>&1 || true
+    info "Added \"$APP_NAME\" to your applications menu"
+  else
+    APPDIR="$HOME/Applications/$APP_NAME.app"
+    mkdir -p "$APPDIR/Contents/MacOS"
+    cat >"$APPDIR/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>$APP_NAME</string>
+  <key>CFBundleIdentifier</key><string>com.github.mspiechowicz.harness-dashboard</string>
+  <key>CFBundleExecutable</key><string>launcher</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+EOF
+    cat >"$APPDIR/Contents/MacOS/launcher" <<EOF
+#!/bin/sh
+exec "$INSTALL_DIR/$BIN" serve >/dev/null 2>&1
+EOF
+    chmod +x "$APPDIR/Contents/MacOS/launcher"
+    info "Added \"$APP_NAME\" to ~/Applications (Spotlight / Launchpad)"
+  fi
+fi
+
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*) ;;
+  *)
+    warn "$INSTALL_DIR is not on your PATH. Add this to your shell profile:"
+    printf '    export PATH="%s:$PATH"\n' "$INSTALL_DIR"
+    ;;
+esac
+
+printf '\nRun \033[1m%s\033[0m to open the dashboard. Update later with \033[1m%s update\033[0m.\n' "$BIN" "$BIN"

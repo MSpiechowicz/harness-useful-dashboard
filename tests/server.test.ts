@@ -1,0 +1,116 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import { parseArgs } from "../src/cli.ts";
+import { App } from "../src/server/app.ts";
+import { createHandler, parseFilters } from "../src/server/http.ts";
+import { assetName, compareVersions } from "../src/server/update.ts";
+import { claudeAssistant, claudeUser, CLAUDE_SESSION, tempDir, writeJsonl } from "./helpers.ts";
+
+describe("update helpers", () => {
+  test("asset names per platform", () => {
+    expect(assetName("darwin", "arm64")).toBe("harness-dashboard-darwin-arm64");
+    expect(assetName("linux", "x64")).toBe("harness-dashboard-linux-x64");
+    expect(assetName("win32", "x64")).toBe("harness-dashboard-windows-x64.exe");
+  });
+  test("version comparison", () => {
+    expect(compareVersions("0.2.0", "0.1.9")).toBeGreaterThan(0);
+    expect(compareVersions("v1.0.0", "1.0.0")).toBe(0);
+    expect(compareVersions("1.0.0-beta.1", "1.0.0")).toBeLessThan(0);
+    expect(compareVersions("1.10.0", "1.9.3")).toBeGreaterThan(0);
+  });
+});
+
+describe("cli args", () => {
+  test("defaults to serve and parses flags", () => {
+    expect(parseArgs([])).toEqual({ cmd: "serve", positional: [], flags: {} });
+    expect(parseArgs(["--db", "/x/usage.db", "--no-open", "--port=5000"])).toEqual({ cmd: "serve", positional: [], flags: { db: "/x/usage.db", "no-open": true, port: "5000" } });
+    expect(parseArgs(["import-cursor", "file.csv"]).positional).toEqual(["file.csv"]);
+    expect(parseArgs(["scan", "--full"]).flags.full).toBe(true);
+  });
+});
+
+describe("parseFilters", () => {
+  test("reads numeric range and string filters", () => {
+    expect(parseFilters(new URLSearchParams("from=10&to=abc&provider=claude&model="))).toEqual({
+      from: 10, to: undefined, provider: "claude", project: undefined, user: undefined, model: undefined, skill: undefined, agent: undefined,
+    });
+  });
+});
+
+describe("HTTP API", () => {
+  let app: App;
+  let handle: (req: Request) => Promise<Response>;
+  const prevHome = process.env.HARNESS_DASHBOARD_HOME;
+  const prevClaude = process.env.CLAUDE_CONFIG_DIR;
+  const prevCodex = process.env.CODEX_HOME;
+
+  beforeAll(async () => {
+    const root = tempDir();
+    process.env.HARNESS_DASHBOARD_HOME = join(root, "home");
+    process.env.CLAUDE_CONFIG_DIR = join(root, "claude");
+    process.env.CODEX_HOME = join(root, "codex");
+    writeJsonl(join(root, "claude", "projects", "-work-alpha", `${CLAUDE_SESSION}.jsonl`), [
+      claudeUser("hello", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }),
+      claudeAssistant({ id: "m1", ts: "2026-09-01T10:00:01.000Z" }),
+    ]);
+    app = new App(join(root, "test.db"));
+    await app.scanNow();
+    handle = createHandler(app, { get: async (p) => (p === "/index.html" ? new Response("<html>ui</html>") : null) }, { restart() {}, shutdown() {} });
+  });
+
+  afterAll(() => {
+    app.close();
+    process.env.HARNESS_DASHBOARD_HOME = prevHome;
+    if (prevClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevClaude;
+    if (prevCodex === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodex;
+  });
+
+  const get = (path: string, host = "localhost:4317") => handle(new Request(`http://${host}${path}`, { headers: { host } }));
+
+  test("serves JSON endpoints", async () => {
+    for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/cache", "/api/tips", "/api/filters", "/api/settings", "/api/pricing"]) {
+      const res = await get(path);
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      await res.json();
+    }
+    const summary = (await (await get("/api/summary")).json()) as { messages: number };
+    expect(summary.messages).toBe(1);
+  });
+
+  test("falls back to index.html for client routes", async () => {
+    expect(await (await get("/sessions/whatever")).text()).toBe("<html>ui</html>");
+  });
+
+  test("rejects foreign Host headers (DNS rebinding)", async () => {
+    expect((await get("/api/status", "evil.example:4317")).status).toBe(403);
+    expect((await get("/api/status", "127.0.0.1:4317")).status).toBe(200);
+  });
+
+  test("state-changing requests need the custom header", async () => {
+    const bare = await handle(new Request("http://localhost/api/scan", { method: "POST", headers: { host: "localhost" } }));
+    expect(bare.status).toBe(403);
+    const ok = await handle(new Request("http://localhost/api/scan", { method: "POST", headers: { host: "localhost", "x-harness-dashboard": "1" } }));
+    expect(ok.status).toBe(200);
+  });
+
+  test("pricing updates re-price history", async () => {
+    const before = ((await (await get("/api/summary")).json()) as { cost: number }).cost;
+    const res = await handle(
+      new Request("http://localhost/api/pricing", {
+        method: "PUT",
+        headers: { host: "localhost", "x-harness-dashboard": "1", "content-type": "application/json" },
+        body: JSON.stringify([{ pattern: "claude-opus-5-5*", input: 400, output: 2000, cacheRead: 20 }]),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const after = ((await (await get("/api/summary")).json()) as { cost: number }).cost;
+    expect(after).toBeCloseTo(before * 100, 6);
+  });
+
+  test("unknown routes 404", async () => {
+    expect((await get("/api/nope")).status).toBe(404);
+  });
+});
