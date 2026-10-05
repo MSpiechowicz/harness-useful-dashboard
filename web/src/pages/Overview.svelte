@@ -138,6 +138,7 @@
               format={(v) => metricValue(v, store.metric)}
               onselect={(key) => store.setFilter("provider", key)}
               loading={providers.loading}
+              size={216}
             />
           {/if}
         </Card>

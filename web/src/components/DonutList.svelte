@@ -17,8 +17,10 @@
     /** Clicking a slice or row selects that item, e.g. to apply it as a filter. */
     onselect?: (key: string) => void;
     loading?: boolean;
+    /** The largest diameter the donut grows to, in pixels, when its card has the width: to fill a card beside a taller one. */
+    size?: number;
   }
-  let { items, dim, format, onselect, loading = false }: Props = $props();
+  let { items, dim, format, onselect, loading = false, size = 176 }: Props = $props();
 
   const total = $derived(items.reduce((a, i) => a + i.value, 0));
   // The legend lists what the donut draws: the top slices, the rest folded into "Other".
@@ -41,17 +43,18 @@
   </span>
 {/snippet}
 
-<!-- Sized by its card, not the window: the legend moves beside the donut only when the card is wide enough. -->
-<div class="@container">
-<div class="grid items-center gap-x-6 gap-y-4 transition-opacity @sm:grid-cols-[11rem_minmax(0,1fr)]" class:loading-dim={loading}>
-  <div class="relative mx-auto h-44 w-44">
+<!-- Sized by its card, not the window: the legend moves beside the donut only when the card is wide enough. In a card
+     taller than its content (beside a taller one) the donut and legend sit in the middle of the height. -->
+<div class="@container h-full">
+<div class="grid h-full content-center items-center gap-x-6 gap-y-4 transition-opacity @sm:grid-cols-[var(--donut)_minmax(0,1fr)]" class:loading-dim={loading} style:--donut="clamp(176px, 42cqw, {Math.max(176, size)}px)">
+  <div class="relative mx-auto size-(--donut)">
     <Chart
       {option}
-      height={176}
+      height="var(--donut)"
       onclick={onselect ? (p) => { const key = (p.data as { key?: string } | undefined)?.key; if (key && key !== "__other__") onselect(key); } : undefined}
     />
     <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-      <span class="tabular text-lg leading-tight font-semibold tracking-tight text-ink">{format(total)}</span>
+      <span class="tabular leading-tight font-semibold tracking-tight text-ink {size > 176 ? '@xl:text-xl' : ''} text-lg">{format(total)}</span>
       <span class="text-[11px] text-muted">{t("common.total")}</span>
     </div>
   </div>
