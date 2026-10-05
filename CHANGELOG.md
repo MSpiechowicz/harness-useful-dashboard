@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.0.0...v1.1.0) (2026-10-05)
+
+
+### Features
+
+* add omp support, a validated color palette, standard tables and a reworked settings page ([e5e225b](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/e5e225b9ef46e605f55515b9480edd8562394d32))
+
 # 1.0.0 (2026-10-05)
 
 
