@@ -2,7 +2,7 @@ import type { BreakdownRow, TimeSeries } from "./api.svelte.ts";
 import { colorFor, cssVar, isColored, seqRamp } from "./colors.svelte.ts";
 import type { EChartsOption } from "./echarts.ts";
 import { bucketLabel, compact, entityLabel, metricValue, percent, usd } from "./format.ts";
-import { t } from "./i18n.svelte.ts";
+import { i18n, t } from "./i18n.svelte.ts";
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -554,6 +554,77 @@ export function cumulativeChart(ts: TimeSeries, opts: { dim: string; metric: "to
       ...(shown.length > 1
         ? [{ name: t("common.total"), type: "line", data: total, color: c.ink2, smooth: 0.3, smoothMonotone: "x", showSymbol: false, lineStyle: { width: 1.5 }, emphasis: { disabled: true }, z: 5 }]
         : []),
+    ],
+  };
+}
+
+/**
+ * Tokens per minute over the last minutes, live: a band per provider over a soft gradient, a neutral line along the
+ * total, and a pulsing point on the latest minute. Minutes without use are zero, so quiet stretches drop to the floor.
+ */
+export function rateChart(series: { key: string; data: number[] }[], from: number): EChartsOption {
+  const c = chrome();
+  const minutes = series[0]?.data.length ?? 0;
+  const time = new Intl.DateTimeFormat(i18n.locale, { hour: "numeric", minute: "2-digit" });
+  const labels = Array.from({ length: minutes }, (_, i) => time.format(from + i * 60_000));
+  const shown = series
+    .map((s) => ({ ...s, label: entityLabel("provider", s.key, s.key), color: colorFor("provider", s.key), sum: s.data.reduce((a, v) => a + v, 0) }))
+    .filter((s) => s.sum > 0)
+    .sort((a, b) => b.sum - a.sum);
+  const total = labels.map((_, i) => shown.reduce((a, s) => a + (s.data[i] ?? 0), 0));
+  const fmt = (v: number) => `${compact(v)}/min`;
+  return {
+    animationDuration: 500,
+    textStyle: c.text,
+    grid: { left: 4, right: 12, top: 12, bottom: 4, containLabel: true },
+    legend: shown.length > 1 ? htmlLegend(shown.map((s) => s.label), shown.map((s) => s.color)) : undefined,
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: c.axis } },
+      formatter: (params: { dataIndex: number }[]) => {
+        const i = params[0]?.dataIndex ?? 0;
+        const rows = shown.map((s) => ({ color: s.color, name: s.label, raw: s.data[i] ?? 0, value: fmt(s.data[i] ?? 0) })).filter((r) => r.raw > 0);
+        return tooltipRows(labels[i]!, rows, rows.length > 1 ? fmt(total[i]!) : undefined);
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: labels,
+      boundaryGap: false,
+      axisLine: c.axisLine,
+      axisTick: { show: false },
+      axisLabel: { ...c.axisLabel, margin: 10 },
+    },
+    yAxis: { type: "value", splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
+    series: [
+      ...shown.map((s) => ({
+        name: s.label,
+        type: "line",
+        stack: "rate",
+        data: s.data,
+        color: s.color,
+        smooth: 0.25,
+        smoothMonotone: "x",
+        showSymbol: false,
+        lineStyle: { width: 0 },
+        areaStyle: {
+          color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(s.color, 0.8) }, { offset: 1, color: withAlpha(s.color, 0.15) }] },
+        },
+        emphasis: { focus: "series" },
+      })),
+      { name: t("common.total"), type: "line", data: total, color: c.ink2, smooth: 0.25, smoothMonotone: "x", showSymbol: false, lineStyle: { width: 1.5 }, emphasis: { disabled: true }, z: 5 },
+      {
+        name: "now",
+        type: "effectScatter",
+        data: minutes ? [[minutes - 1, total[minutes - 1] ?? 0]] : [],
+        symbolSize: 7,
+        color: shown[0]?.color ?? c.ink2,
+        rippleEffect: { scale: 3, brushType: "stroke" },
+        tooltip: { show: false },
+        silent: true,
+        z: 6,
+      },
     ],
   };
 }

@@ -69,11 +69,25 @@ export interface ToolRecord {
   spawnRef?: string | null;
 }
 
+/** A plan-limit reading a harness logged: how much of a limit window was used and when it resets. */
+export interface LimitRecord {
+  provider: Provider;
+  windowId: string;
+  windowMinutes: number | null;
+  usedPercent: number;
+  /** Epoch ms. */
+  resetsAt: number | null;
+  plan: string | null;
+  /** When it was read, epoch ms. */
+  ts: number;
+}
+
 export interface IngestSink {
   session(s: SessionRecord): void;
   prompt(p: PromptRecord): void;
   usage(u: UsageRecord): void;
   tool(t: ToolRecord): void;
+  limit?(l: LimitRecord): void;
 }
 
 export interface FileContext {

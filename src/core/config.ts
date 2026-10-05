@@ -31,6 +31,8 @@ export interface AppConfig {
   promptTextLimit: number;
   checkUpdates: boolean;
   sources: SourceConfig;
+  /** Where the Live view reads how much of each plan limit is left (see limits.ts). */
+  limits: { claude: boolean; omp: boolean; codex: boolean };
 }
 
 export function defaultConfig(): AppConfig {
@@ -53,6 +55,7 @@ export function defaultConfig(): AppConfig {
       ompDirs: [join(ompAgent, "sessions")],
       enabled: { claude: true, codex: true, omp: true },
     },
+    limits: { claude: true, omp: true, codex: true },
   };
 }
 
@@ -65,6 +68,7 @@ function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {
       ...(patch.sources ?? {}),
       enabled: { ...base.sources.enabled, ...(patch.sources?.enabled ?? {}) },
     },
+    limits: { ...base.limits, ...(patch.limits ?? {}) },
   };
 }
 

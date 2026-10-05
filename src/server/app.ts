@@ -134,7 +134,7 @@ export class App {
   }
 
   updateConfig(patch: Partial<AppConfig>): AppConfig {
-    this.cfg = { ...this.cfg, ...patch, sources: { ...this.cfg.sources, ...(patch.sources ?? {}) } };
+    this.cfg = { ...this.cfg, ...patch, sources: { ...this.cfg.sources, ...(patch.sources ?? {}) }, limits: { ...this.cfg.limits, ...(patch.limits ?? {}) } };
     saveConfig(this.cfg);
     this.startBackgroundScan();
     return this.cfg;

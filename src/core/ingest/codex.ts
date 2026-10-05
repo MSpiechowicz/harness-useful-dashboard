@@ -135,6 +135,24 @@ export const codexParser: LineParser<CodexState> = {
 
       if (rec.type === "event_msg") {
         if (p.type === "token_count") {
+          // The plan's rate limits ride along with every token count, also in files billed per record.
+          if (p.rate_limits && ts != null) {
+            for (const windowId of ["primary", "secondary"] as const) {
+              const w = p.rate_limits[windowId];
+              if (!w || typeof w.used_percent !== "number") continue;
+              const resetsAt =
+                typeof w.resets_at === "number" ? w.resets_at * 1000 : typeof w.resets_in_seconds === "number" ? ts + w.resets_in_seconds * 1000 : null;
+              sink.limit?.({
+                provider: "codex",
+                windowId,
+                windowMinutes: typeof w.window_minutes === "number" ? w.window_minutes : null,
+                usedPercent: w.used_percent,
+                resetsAt,
+                plan: typeof p.rate_limits.plan_type === "string" ? p.rate_limits.plan_type : null,
+                ts,
+              });
+            }
+          }
           if (state.mode === "records" || !p.info) continue;
           state.mode = "counts";
           const total = num(p.info.total_token_usage?.total_tokens);

@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -123,6 +123,24 @@ const MIGRATIONS: Record<number, string> = {
   3: /* sql */ `
     ALTER TABLE usage ADD COLUMN billing TEXT;
     ALTER TABLE usage ADD COLUMN premium_requests REAL NOT NULL DEFAULT 0;
+  `,
+  // The latest plan-limit reading a harness wrote into its logs (Codex logs its rate limits next to token counts),
+  // one row per limit window and machine.
+  4: /* sql */ `
+    CREATE TABLE IF NOT EXISTS plan_limits (
+      provider       TEXT NOT NULL,
+      host           TEXT NOT NULL,
+      window_id      TEXT NOT NULL,     -- "primary", "secondary"
+      window_minutes INTEGER,
+      used_percent   REAL NOT NULL,
+      resets_at      INTEGER,           -- epoch ms
+      plan           TEXT,
+      observed_at    INTEGER NOT NULL,  -- epoch ms
+      PRIMARY KEY (provider, host, window_id)
+    );
+    -- Read the Codex logs (rollout-*.jsonl) once more for the readings ingested before this table existed. Records are
+    -- keyed by their place in the file, so reading again changes nothing else.
+    DELETE FROM ingest_files WHERE path LIKE '%rollout-%.jsonl';
   `,
 };
 

@@ -23,6 +23,7 @@
     promptTextLimit: number;
     checkUpdates: boolean;
     sources: { claudeDirs: string[]; codexDirs: string[]; ompDirs: string[]; enabled: Record<SourceKey, boolean> };
+    limits: Record<SourceKey, boolean>;
   }
   interface Settings {
     config: Config;
@@ -117,6 +118,7 @@
         checkUpdates: cfg.checkUpdates,
         journalMode: cfg.journalMode,
         sources: { claudeDirs: clean(dirs.claude), codexDirs: clean(dirs.codex), ompDirs: clean(dirs.omp), enabled: cfg.sources.enabled },
+        limits: cfg.limits,
         ...extra,
       });
       apply(r);
@@ -347,6 +349,14 @@
         <button class="btn" onclick={() => rescan(true)} disabled={busy} title={t("settings.fullRescanHint")}>{t("settings.fullRescan")}</button>
         <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
       {/snippet}
+    </Card>
+
+    <Card title={t("settings.limits")} subtitle={t("settings.limitsHint")} divided>
+      {#each SOURCES as src (src.key)}
+        <SettingRow label={t(`settings.limits.${src.key}`)} hint={t(`settings.limits.${src.key}Hint`)}>
+          <Switch bind:checked={cfg!.limits[src.key]} label={t(`settings.limits.${src.key}`)} onchange={() => save()} />
+        </SettingRow>
+      {/each}
     </Card>
 
     <Card title={t("settings.pricing")} subtitle={t("settings.pricingHint")} divided>

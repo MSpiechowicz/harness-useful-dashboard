@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import type { PriceBook } from "../pricing.ts";
 import { projectResolver } from "../project.ts";
-import type { IngestSink, PromptRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
+import type { IngestSink, LimitRecord, PromptRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
 
 export interface WriterStats {
   usage: number;
@@ -18,6 +18,7 @@ export class DbWriter implements IngestSink {
   private sPrompt: Statement;
   private sUsage: Statement;
   private sTool: Statement;
+  private sLimit: Statement;
 
   constructor(
     db: Database,
@@ -67,6 +68,15 @@ export class DbWriter implements IngestSink {
         skill                 = COALESCE(usage.skill, excluded.skill),
         billing               = COALESCE(usage.billing, excluded.billing),
         premium_requests      = MAX(usage.premium_requests, excluded.premium_requests)
+    `);
+    // Only a newer reading replaces the one kept, so rereading an old log can't roll a limit back.
+    this.sLimit = db.prepare(`
+      INSERT INTO plan_limits (provider, host, window_id, window_minutes, used_percent, resets_at, plan, observed_at)
+      VALUES ($provider, $host, $windowId, $windowMinutes, $usedPercent, $resetsAt, $plan, $ts)
+      ON CONFLICT(provider, host, window_id) DO UPDATE SET
+        window_minutes = excluded.window_minutes, used_percent = excluded.used_percent,
+        resets_at = excluded.resets_at, plan = excluded.plan, observed_at = excluded.observed_at
+      WHERE excluded.observed_at >= plan_limits.observed_at
     `);
     this.sTool = db.prepare(`
       INSERT OR IGNORE INTO tool_calls (id, usage_id, session_id, prompt_id, provider, ts, project, user, tool,
@@ -164,6 +174,19 @@ export class DbWriter implements IngestSink {
       spawnRef: t.spawnRef ?? null,
     });
     this.stats.tools++;
+  }
+
+  limit(l: LimitRecord): void {
+    this.sLimit.run({
+      provider: l.provider,
+      host: this.identity.host,
+      windowId: l.windowId,
+      windowMinutes: l.windowMinutes,
+      usedPercent: l.usedPercent,
+      resetsAt: l.resetsAt,
+      plan: l.plan,
+      ts: l.ts,
+    });
   }
 }
 

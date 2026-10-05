@@ -297,6 +297,58 @@ export class Queries {
     );
   }
 
+  /**
+   * The last `minutes` minute by minute, for the Live view: tokens per minute by provider, and the sessions with
+   * activity in that time. A subagent's usage counts toward the session that started it, as one line.
+   */
+  live(f: Filters, minutes: number, now = Date.now()) {
+    const MINUTE = 60_000;
+    const first = Math.floor(now / MINUTE) - minutes + 1;
+    const w = whereClause({ ...f, from: first * MINUTE, to: undefined });
+    const cells = this.all<{ minute: number; key: string; tokens: number; cost: number }>(
+      `SELECT CAST(u.ts / ${MINUTE} AS INTEGER) AS minute, u.provider AS key,
+              COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost
+       FROM usage u ${w.sql} GROUP BY minute, key`,
+      w.params,
+    );
+    const keys = [...new Set(cells.map((c) => c.key))].sort();
+    const series = keys.map((key) => ({ key, data: new Array<number>(minutes).fill(0) }));
+    for (const c of cells) {
+      const i = c.minute - first;
+      if (i >= 0 && i < minutes) series[keys.indexOf(c.key)]!.data[i]! += c.tokens;
+    }
+    const sessions = this.all<{
+      id: string; title: string | null; project: string | null; provider: string; gitBranch: string | null;
+      tokens: number; cost: number; messages: number; subagents: number; model: string | null; firstTs: number; lastTs: number;
+    }>(
+      `WITH active AS (
+         SELECT DISTINCT COALESCE(s.parent_session_id, u.session_id) AS id
+         FROM usage u LEFT JOIN sessions s ON s.id = u.session_id ${w.sql}
+       )
+       SELECT a.id, root.title, root.project, root.provider, root.git_branch AS gitBranch,
+              COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost, COUNT(u.id) AS messages,
+              COUNT(DISTINCT CASE WHEN u.session_id <> a.id THEN u.session_id END) AS subagents,
+              (SELECT u2.model FROM usage u2 WHERE u2.session_id = a.id ORDER BY u2.ts DESC LIMIT 1) AS model,
+              MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
+       FROM active a
+       JOIN sessions root ON root.id = a.id
+       JOIN sessions s ON s.id = a.id OR s.parent_session_id = a.id
+       JOIN usage u ON u.session_id = s.id
+       GROUP BY a.id ORDER BY lastTs DESC LIMIT 20`,
+      w.params,
+    );
+    // When anything was last used, also before the window: "last activity 3 hours ago" on a quiet page.
+    const ever = whereClause({ ...f, from: undefined, to: undefined });
+    const last = this.get<{ ts: number | null }>(`SELECT MAX(u.ts) AS ts FROM usage u ${ever.sql}`, ever.params);
+    return {
+      from: first * MINUTE,
+      minutes,
+      series,
+      sessions: sessions.map((r) => ({ ...r, projectLabel: projectLabel(r.project) })),
+      lastTs: last?.ts ?? null,
+    };
+  }
+
   sessions(f: Filters, opts: { sort?: string; limit?: number; offset?: number; q?: string }) {
     const w = whereClause(f);
     const params: Params = { ...w.params, limit: opts.limit ?? 50, offset: opts.offset ?? 0 };

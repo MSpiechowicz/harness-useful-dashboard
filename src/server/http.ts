@@ -5,6 +5,7 @@ import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
 import { defaultDbPath } from "../core/paths.ts";
 import type { Bucket, Dimension, Filters, Metric, SeriesGroup } from "../core/queries.ts";
 import { SHARED_FOLDER, dbTarget, findSyncFolders } from "../core/syncFolders.ts";
+import { activePlans, LimitsCache } from "../core/limits.ts";
 import { generateTips } from "../core/tips.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
@@ -110,6 +111,7 @@ function isAllowed(req: Request, url: URL): boolean {
 }
 
 export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks) {
+  const limits = new LimitsCache();
   return async function handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (!isAllowed(req, url)) return error("forbidden", 403);
@@ -178,6 +180,18 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           return json(q.cache(f, pick(sp.get("bucket"), BUCKETS, "day")));
         case "/api/tips":
           return json(generateTips(app.db, f, app.priceBook()));
+        case "/api/live": {
+          // The page polls this: pick up what was written since the last scan without waiting for the timer.
+          if (!app.isScanning && Date.now() - (app.lastScanAt ?? 0) > 10_000) app.scanNow().catch(() => {});
+          const minutes = Math.min(360, Math.max(5, Math.round(Number(sp.get("minutes")) || 60)));
+          return json(q.live(f, minutes));
+        }
+        case "/api/limits": {
+          // With `minutes`, only the plans the sessions of that window ran on are asked about.
+          const minutes = Number(sp.get("minutes"));
+          const active = minutes > 0 ? activePlans(app.db, Date.now() - minutes * 60_000) : undefined;
+          return json({ ...(await limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active)), active: active ?? null });
+        }
         case "/api/filters":
           return json(q.filters(f));
         case "/api/settings":
@@ -216,6 +230,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
             if (k in body) patch[k] = body[k];
           }
           if (body.sources) patch.sources = body.sources;
+          if (body.limits && typeof body.limits === "object") patch.limits = body.limits;
           app.updateConfig(patch);
           if (typeof body.dbPath === "string") {
             const target = dbTarget(body.dbPath, app.dbPath, defaultDbPath());

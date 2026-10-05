@@ -15,6 +15,7 @@
   import Breakdown from "./pages/Breakdown.svelte";
   import Cache from "./pages/Cache.svelte";
   import Files from "./pages/Files.svelte";
+  import Live from "./pages/Live.svelte";
   import Overview from "./pages/Overview.svelte";
   import PromptDetail from "./pages/PromptDetail.svelte";
   import Prompts from "./pages/Prompts.svelte";
@@ -33,6 +34,7 @@
   const groups: { label: MessageKey | null; items: NavItem[] }[] = [
     { label: null, items: [
       { page: "overview", label: "nav.overview", icon: PanelsTopLeft },
+      { page: "live", label: "nav.live", icon: Activity },
       { page: "trends", label: "nav.trends", icon: TrendingUp },
     ] },
     { label: "nav.group.analyze", items: [
@@ -61,7 +63,8 @@
   let menuOpen = $state(false);
   const page = $derived(store.route.page);
   const id = $derived(store.route.id);
-  const showFilters = $derived(page !== "settings" && !(page === "sessions" && id) && !(page === "prompts" && id));
+  // Live shows the last minutes as they happen: the range and filters don't apply to it.
+  const showFilters = $derived(page !== "settings" && page !== "live" && !(page === "sessions" && id) && !(page === "prompts" && id));
   // Re-render relative "updated x ago" text periodically.
   let now = $state(Date.now());
   $effect(() => {
@@ -159,6 +162,7 @@
     <main class="mx-auto w-full max-w-[1500px] flex-1 px-4 py-6 sm:px-6">
       {#key page + (id ?? "")}
         {#if page === "overview"}<Overview />
+        {:else if page === "live"}<Live />
         {:else if page === "trends"}<Trends />
         {:else if page === "projects"}<Breakdown dim="project" />
         {:else if page === "models"}<Breakdown dim="model" />

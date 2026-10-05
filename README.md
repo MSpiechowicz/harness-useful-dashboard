@@ -13,11 +13,30 @@ local SQLite database and shows clear, interactive charts of where your tokens a
 - **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
 - **Cache analytics**: hit rate over time, money saved by caching, and what cache writes cost
 - **Rule-based tips**: low cache hit rate, context bloat, premium models on small prompts, tool loops, spikes, and more
-- **Live**: new usage shows up within seconds while you work
+- **Live view**: tokens per minute as you work, the sessions running right now, and how much of your plan limits is left
+  (Claude's 5-hour and weekly limits, Codex, and every plan omp is logged in to, such as GitHub Copilot)
 - **English and German UI** (English by default), light and dark themes, responsive layout
 - **Shared database**: point several machines at one SQLite file on iCloud Drive, Dropbox, OneDrive or a network share
 
-Everything runs locally. Nothing is uploaded anywhere.
+Everything runs locally. Your usage is never uploaded anywhere.
+
+![Overview: cost and token KPIs, usage over time by token type, top projects and models](docs/screenshots/overview.png)
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/live.png" alt="Live: tokens per minute, plan limits left and active sessions"></td>
+    <td><img src="docs/screenshots/models.png" alt="Models: cost distribution, usage over time and the full model table"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/trends.png" alt="Trends: daily usage, a moving average and cumulative spend"></td>
+    <td><img src="docs/screenshots/tools.png" alt="Tools: most used tools split by project, and the kinds of work they do"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/sessions.png" alt="Sessions: cost against tokens per session, and the session table"></td>
+  </tr>
+</table>
+
+<sub>Screenshots show made-up demo data (`bun scripts/demo-data.ts`).</sub>
 
 ## Install
 
@@ -90,10 +109,24 @@ Starting it again while it's running just opens another window. Use **Settings �
 | Claude Code | `~/.claude/projects/**/*.jsonl` (or `$CLAUDE_CONFIG_DIR`) | per-message usage, prompts, tools, skills, subagent transcripts |
 | Codex | `~/.codex/sessions/**` and `archived_sessions/**` (or `$CODEX_HOME`) | per-response records or cumulative token counts, spawned and guardian threads, thread titles |
 | omp (oh-my-pi) | `~/.omp/agent/sessions/**/*.jsonl` (or `$PI_CODING_AGENT_DIR/sessions`) | per-message usage with the plan or account it was billed through (ChatGPT plan, GitHub Copilot, API keys), Copilot premium requests, prompts, tools, `skill://` reads, subagent transcripts |
-| Cursor | CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side; import the CSV in **Settings** or with `import-cursor` |
+| Cursor | CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Import the CSV in **Settings** or with `import-cursor` |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
 bytes appended since the last one, so rescans take milliseconds.
+
+### Plan limits
+
+The **Live** view shows how much of each plan limit is left, only for the plans the sessions in its time window run on:
+Claude Code counts against the Claude plan of its login, Codex against the ChatGPT plan it uses, and omp against whatever
+it billed a call through.
+
+| Plan | Where the limits come from |
+|---|---|
+| Claude (Pro, Max) | Anthropic, asked with the login Claude Code keeps on the machine (`~/.claude/.credentials.json`, or the macOS keychain). The same numbers Claude Code's `/usage` shows. An expired login is reported, never renewed, so Claude Code stays signed in. |
+| Codex (ChatGPT plans) | The rate limits Codex writes into its session logs, read while ingesting. No network request. A reading is as fresh as the last Codex session. |
+| Everything omp is logged in to | `omp usage --json`: Claude, ChatGPT/Codex, GitHub Copilot premium requests, Gemini and more |
+
+Each source can be switched off in **Settings → Plan limits**. Network sources are asked at most once a minute.
 
 ### Shared database (iCloud, Dropbox, network share)
 
@@ -132,8 +165,9 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
   chats (`~/Documents/Codex/<date>/…`) and Claude desktop scratch workspaces are grouped as **No project**.
 - **Prompts.** Each human prompt starts a turn. Every model call until the next prompt, including the subagents it
   spawned, is attributed to it.
-- **Skills.** From the moment a skill is invoked (Claude `Skill` tool or `/skill` command; Codex `$skill`, an injected
-  `<skill>` block or a `SKILL.md` read; omp reading `skill://<name>`) until the next prompt, calls count toward that skill.
+- **Skills.** From the moment a skill is invoked until the next prompt, calls count toward that skill. Claude Code invokes
+  one with the `Skill` tool or a `/skill` command, Codex with `$skill`, an injected `<skill>` block or a `SKILL.md` read,
+  and omp by reading `skill://<name>`.
 - **Users.** The name in **Settings → Your name** (defaults to your OS user name), stored with every row this machine
   ingests.
 
@@ -155,8 +189,11 @@ or when colors shown together get too similar, also for colour-blind readers.
 The database lives on your machine, or wherever you point it. The server only listens on `127.0.0.1`. It rejects
 requests whose `Host` header isn't a loopback name (DNS-rebinding protection), and it requires a custom header on
 state-changing requests (CSRF protection). Prompt text is stored truncated to 2,000 characters so you can recognise
-expensive prompts. Set **Stored prompt length** to `0` to keep no prompt text at all. The only outbound request is the
-optional update check against the GitHub releases API.
+expensive prompts. Set **Stored prompt length** to `0` to keep no prompt text at all.
+
+The app makes two kinds of outbound request, and never sends your usage in either: the optional update check against
+the GitHub releases API, and, while the Live view is open, the plan-limit check with Anthropic (with your Claude Code
+login, sent to Anthropic only) and through `omp usage`. Both plan-limit sources can be switched off in **Settings**.
 
 ## Development
 
@@ -169,6 +206,7 @@ bun test           # unit + integration tests
 bun run check      # TypeScript + svelte-check
 bun run build      # standalone binary for this platform → dist/
 bun run build:all  # all platforms + dist/checksums.txt
+bun scripts/demo-data.ts /tmp/demo.db   # made-up usage for screenshots: run with --db /tmp/demo.db
 ```
 
 **Stack:** a TypeScript backend on Bun (`bun:sqlite`, `Bun.serve`, `Bun.Glob`), and a Svelte 5 + Vite + Tailwind CSS 4 frontend
@@ -186,6 +224,7 @@ src/
     ingest/              incremental JSONL scanner, Claude/Codex/omp parsers, Cursor CSV importer
     queries.ts           all aggregations behind the API
     tips.ts              rule-based tips engine
+    limits.ts            plan limits: Claude login, omp, Codex logs
   server/
     app.ts               state, background scanner, live events
     http.ts              REST + SSE API, static UI, request guards

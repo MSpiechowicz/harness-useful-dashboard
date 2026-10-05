@@ -86,6 +86,16 @@ export function relative(ts: number | null | undefined): string {
   return shortDate(ts);
 }
 
+/** How long until a moment, in its two largest units: "4h 30m", "1d 10h", "12m". */
+export function until(ts: number | null | undefined, now = Date.now()): string {
+  if (!ts) return "–";
+  const minutes = Math.max(0, Math.round((ts - now) / 60_000));
+  const d = Math.floor(minutes / 1440);
+  const h = Math.floor((minutes % 1440) / 60);
+  const m = minutes % 60;
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+
 export function shortPath(p: string | null | undefined, keep = 2): string {
   if (!p) return "–";
   const parts = p.split(/[\\/]/).filter(Boolean);
