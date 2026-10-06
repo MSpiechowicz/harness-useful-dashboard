@@ -375,6 +375,8 @@ export const en = {
   "drift.usualRange": "Usual range",
   "drift.legend.daily": "Daily median",
   "drift.legend.recent": "Last {n} days, compared",
+  "drift.window.baseline": "{n} days before",
+  "drift.window.recent": "Last {n} days",
   "drift.update": "Client update",
   "drift.recent": "compared",
   "drift.allModels": "All models",

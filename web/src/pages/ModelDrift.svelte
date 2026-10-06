@@ -77,7 +77,10 @@
           versions: data.versions,
           name: label(s.key),
           format: FORMAT[s.key],
-          labels: { samples: t("drift.samples"), usual: t("drift.usualRange"), update: t("drift.update"), recent: t("drift.recent") },
+          labels: { samples: t("drift.samples"), usual: t("drift.usualRange"), update: t("drift.update"), recent: t("drift.recent"),
+            baselineWindow: t("drift.window.baseline", { n: data.window.baselineDays }),
+            recentWindow: t("drift.window.recent", { n: data.window.recentDays }),
+          },
         }),
       ]),
     );

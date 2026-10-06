@@ -93,9 +93,10 @@ describe("drift", () => {
     expect(none.series.every((s) => s.counts.every((n) => n === 0))).toBe(true);
   });
 
-  test("daily values cover the chart range", () => {
+  test("the charts cover the two compared windows, whatever the range's start", () => {
     const d = drift(seed(), { from: NOW - 10 * DAY, to: NOW }, { now: NOW });
-    expect(d.days).toHaveLength(11);
+    expect(d.days).toHaveLength(35);
+    expect(d.days[0]! < d.days[28]!).toBe(true);
     const speed = d.series.find((s) => s.key === "speed")!;
     expect(speed.values.every((v) => v != null && v > 40 && v < 55)).toBe(true);
     expect(speed.counts.every((n) => n === 20)).toBe(true);

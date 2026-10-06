@@ -377,6 +377,8 @@ export const fr: Record<MessageKey, string> = {
   "drift.usualRange": "Plage habituelle",
   "drift.legend.daily": "Médiane du jour",
   "drift.legend.recent": "{n} derniers jours, comparés",
+  "drift.window.baseline": "{n} jours précédents",
+  "drift.window.recent": "{n} derniers jours",
   "drift.update": "Mise à jour du client",
   "drift.recent": "comparé",
   "drift.allModels": "Tous les modèles",

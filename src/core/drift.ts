@@ -9,7 +9,6 @@ import { type Filters, whereClause } from "./queries.ts";
 export type DriftMetric = "speed" | "ttft" | "toolErrors" | "interrupts" | "steps" | "output";
 export const DRIFT_METRICS: DriftMetric[] = ["speed", "ttft", "toolErrors", "interrupts", "steps", "output"];
 
-const DAY = 86_400_000;
 export const RECENT_DAYS = 7;
 export const BASELINE_DAYS = 28;
 /** Responses, tool calls or prompts each window needs before a metric is judged. */
@@ -303,8 +302,8 @@ export function drift(db: Database, f: Filters, opts: { model?: string | null; e
   };
   const recentFrom = dayStart(RECENT_DAYS - 1);
   const baselineFrom = dayStart(RECENT_DAYS + BASELINE_DAYS - 1);
-  const chartFrom = Math.max(f.from ?? baselineFrom, to - 400 * DAY);
-  const from = Math.min(chartFrom, baselineFrom);
+  // The range only sets where the windows end: the charts show exactly the two windows being compared.
+  const from = baselineFrom;
   const effort = opts.effort || null;
 
   // The model is chosen on this page. Outcomes carry no skill, so that filter applies to responses only.
@@ -355,7 +354,7 @@ export function drift(db: Database, f: Filters, opts: { model?: string | null; e
   }));
   const busiest = [...recentCount].sort((a, b) => (rank.get(b[0]) ?? 0) - (rank.get(a[0]) ?? 0) || b[1] - a[1])[0]?.[0];
   const model = opts.model || f.model || busiest || models[0]?.model || null;
-  const days = dayList(chartFrom, to);
+  const days = dayList(baselineFrom, to);
   let series: DriftSeries[] = [];
   let efforts: string[] = [];
   let versions: Drift["versions"] = [];

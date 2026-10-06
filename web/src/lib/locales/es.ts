@@ -377,6 +377,8 @@ export const es: Record<MessageKey, string> = {
   "drift.usualRange": "Rango habitual",
   "drift.legend.daily": "Mediana diaria",
   "drift.legend.recent": "Últimos {n} días, comparados",
+  "drift.window.baseline": "{n} días anteriores",
+  "drift.window.recent": "Últimos {n} días",
   "drift.update": "Actualización del cliente",
   "drift.recent": "comparado",
   "drift.allModels": "Todos los modelos",

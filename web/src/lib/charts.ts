@@ -485,7 +485,7 @@ export function driftLine(o: {
   versions: { day: string; label: string }[];
   name: string;
   format: (v: number) => string;
-  labels: { samples: string; usual: string; update: string; recent: string };
+  labels: { samples: string; usual: string; update: string; recent: string; baselineWindow: string; recentWindow: string };
 }): EChartsOption {
   const c = chrome();
   const color = cssVar("--accent");
@@ -505,11 +505,15 @@ export function driftLine(o: {
   const extent = { min: Math.max(0, Math.floor((lo - pad) / step) * step), max: Math.ceil((hi + pad) / step) * step, step };
   const areas: unknown[] = [];
   if (o.band) areas.push([{ yAxis: o.band.lo, itemStyle: { color: withAlpha(color, 0.1) } }, { yAxis: o.band.hi }]);
-  if (recentIdx >= 0) areas.push([{ xAxis: recentIdx, itemStyle: { color: withAlpha(cssVar("--ink-2"), 0.1) } }, { xAxis: o.days.length - 1 }]);
+  // Each window named at the top of the plot, so it's clear which days are compared with which.
+  // Above the plot, clear of the update lines: the baseline's from its left edge, the recent window's centered.
+  const windowLabel = (text: string, position: [number, number] | "top") => ({ show: true, position, distance: 4, color: c.muted, fontSize: 11, formatter: text });
+  if (recentIdx > 0) areas.push([{ xAxis: 0, itemStyle: { color: "transparent" }, label: windowLabel(o.labels.baselineWindow, [0, -16]) }, { xAxis: recentIdx }]);
+  if (recentIdx >= 0) areas.push([{ xAxis: recentIdx, itemStyle: { color: withAlpha(cssVar("--ink-2"), 0.1) }, label: windowLabel(o.labels.recentWindow, "top") }, { xAxis: o.days.length - 1 }]);
   return {
     animationDuration: 300,
     textStyle: c.text,
-    grid: { left: 8, right: 12, top: 12, bottom: 4, containLabel: true },
+    grid: { left: 8, right: 12, top: 24, bottom: 4, containLabel: true },
     tooltip: {
       ...c.tooltip,
       trigger: "axis",
