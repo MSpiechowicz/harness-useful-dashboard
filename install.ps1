@@ -49,6 +49,15 @@ try {
     Write-Host "==> Added $InstallDir to your PATH (open a new terminal to use it)" -ForegroundColor Cyan
   }
 
+  # The app's logo for the shortcut, published with each release (releases before 1.3.1 don't have it).
+  $Icon = Join-Path $InstallDir "$Bin.ico"
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Bin.ico" -OutFile $Icon
+  } catch {
+    $Icon = $null
+    Write-Warning "No app icon in this release; the shortcut uses a generic one."
+  }
+
   $StartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
   $Shell = New-Object -ComObject WScript.Shell
   $Link = $Shell.CreateShortcut((Join-Path $StartMenu "$AppName.lnk"))
@@ -56,7 +65,8 @@ try {
   $Link.Arguments = "serve"
   $Link.WorkingDirectory = $InstallDir
   $Link.WindowStyle = 7  # minimized console
-  $Link.Description = "Token usage dashboard for Claude Code, Codex and Cursor"
+  $Link.Description = "Token usage across your AI coding tools"
+  if ($Icon) { $Link.IconLocation = "$Icon,0" }
   $Link.Save()
   Write-Host "==> Added `"$AppName`" to the Start menu" -ForegroundColor Cyan
 

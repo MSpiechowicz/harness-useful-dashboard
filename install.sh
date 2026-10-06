@@ -94,24 +94,29 @@ if [ "${HARNESS_DASHBOARD_NO_SHORTCUT:-0}" != "1" ]; then
     APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
     ICONS="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
     mkdir -p "$APPS" "$ICONS"
-    cat >"$ICONS/$BIN.svg" <<'SVG'
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1c5cab"/><rect x="7" y="17" width="4" height="8" rx="1.5" fill="#cde2fb"/><rect x="14" y="11" width="4" height="14" rx="1.5" fill="#86b6ef"/><rect x="21" y="6" width="4" height="19" rx="1.5" fill="#ffffff"/></svg>
-SVG
+    # The app's logo, published with each release (releases before 1.3.1 don't have it).
+    download "$BASE/$BIN.svg" "$ICONS/$BIN.svg" 2>/dev/null || warn "no app icon in this release; the launcher uses a generic one"
     cat >"$APPS/$BIN.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$APP_NAME
-Comment=Token usage dashboard for Claude Code, Codex and Cursor
+Comment=Token usage across your AI coding tools
 Exec=$INSTALL_DIR/$BIN
 Icon=$BIN
 Terminal=false
 Categories=Development;Utility;
 EOF
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" >/dev/null 2>&1 || true
+    # Desktops cache icons by name: refresh an existing cache so a changed icon shows without logging out. Never
+    # create one, since a cache nothing else keeps up to date would hide icons other apps add later.
+    THEME="$(dirname "$(dirname "$ICONS")")"
+    [ -f "$THEME/icon-theme.cache" ] && command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$THEME" >/dev/null 2>&1 || true
     info "Added \"$APP_NAME\" to your applications menu"
   else
     APPDIR="$HOME/Applications/$APP_NAME.app"
-    mkdir -p "$APPDIR/Contents/MacOS"
+    mkdir -p "$APPDIR/Contents/MacOS" "$APPDIR/Contents/Resources"
+    # The app's logo, published with each release (releases before 1.3.1 don't have it).
+    download "$BASE/$BIN.icns" "$APPDIR/Contents/Resources/AppIcon.icns" 2>/dev/null || warn "no app icon in this release; the app uses a generic one"
     cat >"$APPDIR/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -120,6 +125,7 @@ EOF
   <key>CFBundleIdentifier</key><string>com.github.mspiechowicz.harness-dashboard</string>
   <key>CFBundleExecutable</key><string>launcher</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
 </dict></plist>
 EOF
@@ -128,6 +134,8 @@ EOF
 exec "$INSTALL_DIR/$BIN" serve >/dev/null 2>&1
 EOF
     chmod +x "$APPDIR/Contents/MacOS/launcher"
+    # Finder caches app icons: touching the bundle makes it pick up the new one.
+    touch "$APPDIR"
     info "Added \"$APP_NAME\" to ~/Applications (Spotlight / Launchpad)"
   fi
 fi

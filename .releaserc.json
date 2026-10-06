@@ -60,6 +60,18 @@
             "label": "Windows x64"
           },
           {
+            "path": "assets/icons/harness-dashboard.svg",
+            "label": "App icon (Linux)"
+          },
+          {
+            "path": "assets/icons/harness-dashboard.icns",
+            "label": "App icon (macOS)"
+          },
+          {
+            "path": "assets/icons/harness-dashboard.ico",
+            "label": "App icon (Windows)"
+          },
+          {
             "path": "dist/checksums.txt",
             "label": "SHA-256 checksums"
           }

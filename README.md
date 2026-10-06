@@ -252,6 +252,7 @@ bun run check      # TypeScript + svelte-check
 bun run build      # standalone binary for this platform → dist/
 bun run build:all  # all platforms + dist/checksums.txt
 bun scripts/demo-data.ts /tmp/demo.db   # made-up usage for screenshots: run with --db /tmp/demo.db
+bun scripts/icons.ts                    # app icons for the installers, from web/public/favicon.svg
 ```
 
 **Stack:** a TypeScript backend on Bun (`bun:sqlite`, `Bun.serve`, `Bun.Glob`), and a Svelte 5 + Vite + Tailwind CSS 4 frontend
