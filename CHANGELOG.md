@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.6.0...v1.6.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* refresh Live once a minute, like the other pages ([bb1b576](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/bb1b57609c56d71580e4b6d26edb1335a02ddaa4))
+
 # [1.6.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.5.2...v1.6.0) (2026-10-06)
 
 
