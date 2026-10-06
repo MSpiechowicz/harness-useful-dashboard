@@ -1,3 +1,11 @@
+## [1.5.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.5.0...v1.5.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* keep the top bar on Live and Settings so pages start at the same height ([c5082c5](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/c5082c5b41a642ff57647bf6e156ff65a7766ec7))
+* say why there are no filters on Live, Settings and detail pages ([e005bd6](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/e005bd643be4aa65fbcb84a5e4c3b1024cad95b1))
+
 # [1.5.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.4.0...v1.5.0) (2026-10-06)
 
 
