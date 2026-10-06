@@ -1,3 +1,10 @@
+## [1.3.7](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.6...v1.3.7) (2026-10-06)
+
+
+### Bug Fixes
+
+* stop the link address bubble covering the corner of the app window ([77fc65c](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/77fc65c11d31315701160ca1504454c372150b3b))
+
 ## [1.3.6](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.5...v1.3.6) (2026-10-06)
 
 
