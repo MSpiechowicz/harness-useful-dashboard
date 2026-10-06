@@ -7,7 +7,7 @@ import type { LimitReport } from "../src/core/limits.ts";
 import { cycles, limitHistory, planValue, recordReports } from "../src/core/plans.ts";
 import { PriceBook } from "../src/core/pricing.ts";
 import { bucketKey, mergeSpans, overlapByBucket, peakOverlap, timing } from "../src/core/timing.ts";
-import { bucketExpr } from "../src/core/queries.ts";
+import { bucketExpr, liveStatus, Queries } from "../src/core/queries.ts";
 import { ID, memDb } from "./helpers.ts";
 
 const DAY = 86_400_000;
@@ -182,5 +182,36 @@ describe("plans", () => {
     const [h] = limitHistory(db, {});
     expect(h).toMatchObject({ reportKey: "codex:logs", windowMs: 5 * 3_600_000, plan: "pro" });
     expect(h!.points).toEqual([[T0, 0.42]]);
+  });
+});
+
+describe("live", () => {
+  test("a session's status follows its main agent's last response and how long ago it was", () => {
+    const now = T0;
+    expect(liveStatus(now - 30_000, "end_turn", now)).toBe("working"); // calls still coming in
+    expect(liveStatus(now - 5 * MIN, "end_turn", now)).toBe("idle"); // the turn finished: waiting for a prompt
+    expect(liveStatus(now - 5 * MIN, "stop", now)).toBe("idle");
+    expect(liveStatus(now - 5 * MIN, "tool_use", now)).toBe("working"); // a long tool run
+    expect(liveStatus(now - 5 * MIN, "error", now)).toBe("error");
+    expect(liveStatus(now - 30 * MIN, "tool_use", now)).toBe("idle");
+    expect(liveStatus(now - 5 * MIN, null, now)).toBe("idle");
+  });
+
+  test("sessions carry their status, last tool and errors, and the feed lists prompts and failures", () => {
+    const { db, w } = seed();
+    const now = T0 + DAY + 2 * MIN;
+    w.prompt({ id: "claude:s1:p9", sessionId: "claude:s1", provider: "claude", ts: T0 + DAY, text: "ship   it\nnow", skill: null, isCommand: false });
+    w.responseMeta({ usageId: "u2", startTs: T0 + DAY - 1000, endTs: T0 + DAY, stopReason: "end_turn" });
+    w.tool({ id: "t9", usageId: "u2", sessionId: "claude:s1", promptId: "claude:s1:p1", provider: "claude", ts: T0 + DAY, project: "/work/alpha", tool: "Edit", filePath: "/work/alpha/src/a.ts", skill: null, agent: "main" });
+    w.outcome({ id: "t9", provider: "claude", sessionId: "claude:s1", ts: T0 + DAY, project: "/work/alpha", model: null, agent: "main", kind: "tool_error" });
+    const q = new Queries(db, () => new PriceBook());
+    const live = q.live({}, 60, now);
+    const s1 = live.sessions.find((s) => s.id === "claude:s1")!;
+    expect(s1).toMatchObject({ status: "idle", lastTool: "Edit", lastFile: "src/a.ts", errors: 1 });
+    expect(live.feed.map((e) => [e.kind, e.text ?? e.tool])).toEqual([
+      ["prompt", "ship it now"],
+      ["tool_error", "Edit"],
+    ]);
+    expect(live.costSeries.length).toBe(live.series.length);
   });
 });

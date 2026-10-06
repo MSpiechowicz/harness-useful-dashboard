@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Gauge } from "@lucide/svelte";
+  import { Ban, CircleStop, CircleX, Gauge, MessageSquareText } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Kpi from "../components/Kpi.svelte";
@@ -30,12 +30,30 @@
     subagents: number;
     firstTs: number;
     lastTs: number;
+    gitBranch: string | null;
+    status: "working" | "idle" | "error";
+    lastTool: string | null;
+    lastFile: string | null;
+    activeSubagents: number;
+    errors: number;
+  }
+  interface FeedItem {
+    ts: number;
+    kind: "prompt" | "tool_error" | "tool_rejected" | "interrupt";
+    text: string | null;
+    tool: string | null;
+    sessionId: string;
+    title: string | null;
+    provider: string;
   }
   interface LiveData {
     from: number;
     minutes: number;
     series: { key: string; data: number[] }[];
+    costSeries: { key: string; data: number[] }[];
     sessions: LiveSession[];
+    feed: FeedItem[];
+    today: { cost: number; tokens: number; typicalCost: number | null; typicalTokens: number | null; days: number };
     lastTs: number | null;
   }
 
@@ -91,10 +109,28 @@
     }
   }
 
+  // Tokens or cost a minute, kept between visits: the rate chart and its two figures follow it.
+  let metric = $state<"tokens" | "cost">("tokens");
+  try {
+    if (localStorage.getItem("hd.liveMetric") === "cost") metric = "cost";
+  } catch {
+    /* no storage: the default */
+  }
+  function pickMetric(m: "tokens" | "cost") {
+    metric = m;
+    try {
+      localStorage.setItem("hd.liveMetric", m);
+    } catch {
+      /* not kept */
+    }
+  }
+  const shown = $derived(data.data ? (metric === "cost" ? data.data.costSeries : data.data.series) : []);
+  const value = (v: number) => (metric === "cost" ? usd(v) : compact(v));
+
   const total = $derived.by(() => {
     const d = data.data;
     if (!d) return null;
-    const perMinute = d.series[0]?.data.map((_, i) => d.series.reduce((a, s) => a + (s.data[i] ?? 0), 0)) ?? [];
+    const perMinute = shown[0]?.data.map((_, i) => shown.reduce((a, s) => a + (s.data[i] ?? 0), 0)) ?? [];
     const sum = perMinute.reduce((a, v) => a + v, 0);
     // "Right now" is the last five minutes, so one quiet minute between two prompts doesn't read as zero.
     const recent = perMinute.slice(-5);
@@ -123,7 +159,30 @@
       /* not kept */
     }
   }
-  const option = $derived.by(() => (void store.dark, data.data ? rateChart(data.data.series, data.data.from, kind) : null));
+  const option = $derived.by(() => (void store.dark, data.data ? rateChart(shown, data.data.from, kind, metric) : null));
+  const statusCount = $derived(
+    (data.data?.sessions ?? []).reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()),
+  );
+  const STATUS_COLOR = { working: "var(--status-good)", error: "var(--status-critical)", idle: "var(--muted)" } as const;
+  const today = $derived(data.data?.today);
+  // The activity table: newest first, or grouped by what happened (failures first).
+  type FeedSort = "recent" | "kind";
+  let feedSort = $state<FeedSort>("recent");
+  const FEED_SORTS = $derived<{ value: FeedSort; label: string }[]>([
+    { value: "recent", label: t("sort.recent") },
+    { value: "kind", label: t("live.feed.byKind") },
+  ]);
+  const KIND_ORDER = { tool_error: 0, tool_rejected: 1, interrupt: 2, prompt: 3 } as const;
+  const feedRows = $derived(
+    [...(data.data?.feed ?? [])].sort((a, b) => (feedSort === "kind" ? KIND_ORDER[a.kind] - KIND_ORDER[b.kind] : 0) || b.ts - a.ts),
+  );
+  const FEED_ICON = { prompt: MessageSquareText, tool_error: CircleX, tool_rejected: Ban, interrupt: CircleStop } as const;
+  const feedText = (e: FeedItem) =>
+    e.kind === "prompt"
+      ? (e.text ?? t("prompts.noText"))
+      : e.kind === "interrupt"
+        ? t("live.feed.interrupt")
+        : t(e.kind === "tool_error" ? "live.feed.error" : "live.feed.declined", { tool: e.tool ?? t("live.feed.aTool") });
   const quiet = $derived(!!total && total.sum === 0);
   const windowLabel = $derived(minutes < 60 ? t("live.lastMinutes", { n: minutes }) : minutes === 60 ? t("live.lastHour") : t("live.lastHours", { n: minutes / 60 }));
   const time = (ts: number) => new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts);
@@ -150,17 +209,29 @@
 
   <ViewGate ready={settled(data, limits)}>
     {#if total}
-      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label={t("live.kpi.rate")} value={`${compact(total.rate)}/min`} hint={t("live.kpi.rateHint")} />
-        <Kpi label={t("live.kpi.peak")} value={`${compact(total.peak)}/min`} hint={total.peakAt ? t("live.kpi.peakAt", { time: time(total.peakAt) }) : windowLabel} />
-        <Kpi label={t("live.kpi.tokens")} value={compact(total.sum)} hint={windowLabel} />
-        <Kpi label={t("live.kpi.sessions")} value={String(data.data?.sessions.length ?? 0)} hint={t("live.kpi.cost", { cost: usd(total.cost) })} />
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <Kpi label={t("live.kpi.rate")} value={`${value(total.rate)}/min`} hint={t("live.kpi.rateHint")} />
+        <Kpi label={t("live.kpi.peak")} value={`${value(total.peak)}/min`} hint={total.peakAt ? t("live.kpi.peakAt", { time: time(total.peakAt) }) : windowLabel} />
+        <Kpi
+          label={t("live.kpi.today")}
+          value={today ? (metric === "cost" ? usd(today.cost) : compact(today.tokens)) : "–"}
+          hint={today && (metric === "cost" ? today.typicalCost : today.typicalTokens) != null
+            ? t("live.kpi.todayHint", { value: metric === "cost" ? usd(today.typicalCost) : compact(today.typicalTokens) })
+            : t("live.kpi.todayNone")}
+        />
+        <Kpi label={t("live.kpi.sessions")} value={String(data.data?.sessions.length ?? 0)} hint={t("live.kpi.sessionsHint")} />
+        <!-- The sessions the table marks idle: their agent stopped, waiting for the next prompt. -->
+        <Kpi label={t("live.kpi.waiting")} value={String(statusCount.get("idle") ?? 0)} hint={t("live.kpi.waitingHint")} />
       </div>
     {/if}
 
     <div class="grid gap-5 xl:grid-cols-5">
       <Card title={t("live.rate")} subtitle={t(kind === "total" ? "live.totalHint" : "live.rateHint", { window: windowLabel })} class="xl:col-span-3">
         {#snippet actions()}
+          <div class="seg" role="radiogroup" aria-label={t("live.metric")}>
+            <button role="radio" aria-checked={metric === "tokens"} onclick={() => pickMetric("tokens")}>{t("metric.tokens")}</button>
+            <button role="radio" aria-checked={metric === "cost"} onclick={() => pickMetric("cost")}>{t("metric.cost")}</button>
+          </div>
           <Dropdown label={t("live.chart")} bind:value={kind} options={KINDS.map((k) => ({ value: k, label: t(`live.chart.${k}`) }))} onchange={pickKind} />
         {/snippet}
         {#if quiet}
@@ -214,7 +285,7 @@
       title={t("live.sessions")}
       subtitle={t("live.sessionsHint")}
       rows={[...(data.data?.sessions ?? [])].sort((a, b) => (sort === "recent" ? b.lastTs - a.lastTs : b[sort] - a[sort]))}
-      searchText={(s) => `${s.title ?? ""} ${s.projectLabel} ${s.model ?? ""} ${s.provider}`}
+      searchText={(s) => `${s.title ?? ""} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider}`}
       sorts={SORTS}
       bind:sortKey={sort}
     >
@@ -222,21 +293,21 @@
         <table class="data fixed-cols">
           <colgroup>
             <col />
+            <col class="w-40" />
+            <col class="w-40" />
+            <col class="w-36" />
             <col class="w-44" />
-            <col class="w-44" />
-            <col class="w-24" />
             <col class="w-24" />
             <col class="w-28" />
-            <col class="w-32" />
           </colgroup>
           <thead>
             <tr>
               <th>{t("col.title")}</th>
+              <th>{t("col.status")}</th>
               <th>{t("col.project")}</th>
-              <th>{t("col.model")}</th>
-              <th class="num">{t("col.tokens")}</th>
+              <th>{t("col.branch")}</th>
+              <th>{t("col.lastTool")}</th>
               <th class="num">{t("col.cost")}</th>
-              <th class="num">{t("col.started")}</th>
               <th class="num">{t("col.lastSeen")}</th>
             </tr>
           </thead>
@@ -247,15 +318,73 @@
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", s.provider)} title={s.provider}></span>
                     <span class="truncate font-medium">{titleOf(s)}</span>
-                    {#if s.subagents}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{t("live.subagents", { n: s.subagents })}</span>{/if}
+                    {#if s.activeSubagents}
+                      <span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-ink-2">{t("live.subagentsWorking", { n: s.activeSubagents })}</span>
+                    {:else if s.subagents}
+                      <span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{t("live.subagents", { n: s.subagents })}</span>
+                    {/if}
+                    {#if s.errors}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-bad">{t("live.errors", { n: s.errors })}</span>{/if}
                   </div>
                 </td>
+                <td>
+                  <span class="inline-flex items-center gap-2 text-ink-2">
+                    <span class="h-2 w-2 shrink-0 rounded-full" class:animate-pulse={s.status === "working"} style:background={STATUS_COLOR[s.status]}></span>
+                    {t(`live.status.${s.status}`)}
+                  </span>
+                </td>
                 <td class="truncate text-ink-2" title={s.project}>{entityLabel("project", s.project, s.projectLabel)}</td>
-                <td class="truncate text-xs text-ink-2">{s.model ?? "–"}</td>
-                <td class="num font-medium">{compact(s.tokens)}</td>
-                <td class="num text-ink-2">{usd(s.cost)}</td>
-                <td class="num text-ink-2">{time(s.firstTs)}</td>
+                <td class="truncate text-ink-2" title={s.gitBranch ?? ""}>{s.gitBranch ?? "–"}</td>
+                <td class="truncate text-ink-2" title={s.lastFile ?? s.lastTool ?? ""}>
+                  {s.lastTool ?? "–"}{#if s.lastFile}<span class="text-muted"> · {s.lastFile.split(/[\\/]/).pop()}</span>{/if}
+                </td>
+                <td class="num font-medium">{usd(s.cost)}</td>
                 <td class="num text-ink-2">{relative(s.lastTs)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/snippet}
+    </TableCard>
+
+    <TableCard
+      title={t("live.feed")}
+      subtitle={t("live.feedHint")}
+      rows={feedRows}
+      searchText={(e) => `${feedText(e)} ${e.title ?? ""} ${e.tool ?? ""}`}
+      sorts={FEED_SORTS}
+      bind:sortKey={feedSort}
+    >
+      {#snippet children(view)}
+        <table class="data fixed-cols">
+          <colgroup>
+            <col class="w-20" />
+            <col />
+            <col class="w-72" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>{t("col.time")}</th>
+              <th>{t("live.feed.event")}</th>
+              <th>{t("col.session")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each view.rows.slice(view.offset, view.limit == null ? undefined : view.offset + view.limit) as e, i (`${e.ts}:${e.kind}:${e.sessionId}:${i}`)}
+              {@const Icon = FEED_ICON[e.kind]}
+              <tr class="cursor-pointer" onclick={() => navigate("sessions", e.sessionId)}>
+                <td class="text-ink-2 tabular">{time(e.ts)}</td>
+                <td>
+                  <span class="flex min-w-0 items-center gap-2.5">
+                    <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' ? 'text-bad' : 'text-warn'}" />
+                    <span class="truncate {e.kind === 'prompt' ? 'text-ink' : 'text-ink-2'}" title={feedText(e)}>{feedText(e)}</span>
+                  </span>
+                </td>
+                <td>
+                  <span class="flex min-w-0 items-center gap-2 text-ink-2">
+                    <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", e.provider)}></span>
+                    <span class="truncate" title={e.title ?? e.sessionId}>{e.title ?? e.sessionId}</span>
+                  </span>
+                </td>
               </tr>
             {/each}
           </tbody>

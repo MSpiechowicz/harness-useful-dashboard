@@ -672,7 +672,7 @@ export type RateKind = "area" | "bars" | "lines" | "dots" | "steps" | "total";
  *  - "total": the running total over the window, stacked by provider
  * A pulsing point marks the latest minute. Minutes without use are zero, so quiet stretches drop to the floor.
  */
-export function rateChart(series: { key: string; data: number[] }[], from: number, kind: RateKind = "area"): EChartsOption {
+export function rateChart(series: { key: string; data: number[] }[], from: number, kind: RateKind = "area", metric: "tokens" | "cost" = "tokens"): EChartsOption {
   const c = chrome();
   const minutes = series[0]?.data.length ?? 0;
   const time = new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -688,7 +688,8 @@ export function rateChart(series: { key: string; data: number[] }[], from: numbe
     .filter((s) => s.sum > 0)
     .sort((a, b) => b.sum - a.sum);
   const total = labels.map((_, i) => shown.reduce((a, s) => a + (s.data[i] ?? 0), 0));
-  const fmt = (v: number) => (kind === "total" ? compact(v) : `${compact(v)}/min`);
+  const value = (v: number) => (metric === "cost" ? usd(v) : compact(v));
+  const fmt = (v: number) => (kind === "total" ? value(v) : `${value(v)}/min`);
   const gradient = (color: string, top: number, bottom: number) => ({
     color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(color, top) }, { offset: 1, color: withAlpha(color, bottom) }] },
   });
@@ -733,7 +734,7 @@ export function rateChart(series: { key: string; data: number[] }[], from: numbe
       axisTick: { show: false },
       axisLabel: { ...c.axisLabel, margin: 10 },
     },
-    yAxis: { type: "value", splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
+    yAxis: { type: "value", splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => (metric === "cost" ? usd(v, { compact: true }) : compact(v)) } },
     series: [
       ...shown.map(seriesOf),
       ...(kind === "area" || kind === "total"

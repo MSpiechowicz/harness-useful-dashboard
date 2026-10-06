@@ -141,6 +141,20 @@ function dimExpr(dim: Dimension | SeriesGroup): string {
   }
 }
 
+export type LiveStatus = "working" | "idle" | "error";
+
+/**
+ * What a session is doing, from its main agent's last response: calls still coming in, or a tool running, is
+ * working; an error that ended it is shown as such; otherwise it is idle, waiting for your next prompt.
+ */
+export function liveStatus(lastTs: number, lastStop: string | null, now: number): LiveStatus {
+  const quiet = now - lastTs;
+  if (quiet < 90_000) return "working";
+  if (quiet <= 10 * 60_000 && lastStop === "error") return "error";
+  if (quiet <= 10 * 60_000 && (lastStop === "tool_use" || lastStop === "toolUse")) return "working";
+  return "idle";
+}
+
 export class Queries {
   constructor(
     private db: Database,
@@ -328,9 +342,12 @@ export class Queries {
     );
     const keys = [...new Set(cells.map((c) => c.key))].sort();
     const series = keys.map((key) => ({ key, data: new Array<number>(minutes).fill(0) }));
+    const costSeries = keys.map((key) => ({ key, data: new Array<number>(minutes).fill(0) }));
     for (const c of cells) {
       const i = c.minute - first;
-      if (i >= 0 && i < minutes) series[keys.indexOf(c.key)]!.data[i]! += c.tokens;
+      if (i < 0 || i >= minutes) continue;
+      series[keys.indexOf(c.key)]!.data[i]! += c.tokens;
+      costSeries[keys.indexOf(c.key)]!.data[i]! += c.cost;
     }
     const sessions = this.all<{
       id: string; title: string | null; project: string | null; provider: string; gitBranch: string | null;
@@ -352,14 +369,93 @@ export class Queries {
        GROUP BY a.id ORDER BY lastTs DESC LIMIT 20`,
       w.params,
     );
+    const from = first * MINUTE;
+    // Each session with what its main agent last did, its last tool and file, the subagents working right now and the
+    // tool errors in the window. A session's subagents are its child sessions (omp, Codex) or other agents in it (Claude).
+    const tree = "(u.session_id = $id OR u.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id))";
+    const detailed = sessions.map((r) => {
+      const p = { id: r.id, from, recent: now - 3 * MINUTE };
+      const lastStop = this.get<{ stop: string | null }>(
+        `SELECT m.stop_reason AS stop FROM usage u LEFT JOIN response_meta m ON m.usage_id = u.id
+         WHERE u.session_id = $id AND u.agent = 'main' ORDER BY u.ts DESC LIMIT 1`,
+        { id: r.id },
+      )?.stop ?? null;
+      const tool = this.get<{ tool: string; file: string | null }>(
+        `SELECT t.tool, t.file_path AS file FROM tool_calls t
+         WHERE t.session_id = $id OR t.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id) ORDER BY t.ts DESC LIMIT 1`,
+        { id: r.id },
+      );
+      const active = this.get<{ n: number }>(
+        `SELECT COUNT(DISTINCT CASE WHEN u.session_id <> $id THEN u.session_id ELSE COALESCE(u.spawn_ref, u.agent) END) AS n
+         FROM usage u WHERE ${tree} AND u.ts >= $recent AND (u.session_id <> $id OR u.agent <> 'main')`,
+        p,
+      )!.n;
+      const errors = this.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM outcomes o
+         WHERE (o.session_id = $id OR o.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id)) AND o.ts >= $from AND o.kind = 'tool_error'`,
+        p,
+      )!.n;
+      return {
+        ...r,
+        projectLabel: projectLabel(r.project),
+        status: liveStatus(r.lastTs, lastStop, now),
+        lastTool: tool?.tool ?? null,
+        lastFile: tool?.file ? relativeTo(tool.file, r.project) : null,
+        activeSubagents: active,
+        errors,
+      };
+    });
+
+    // The latest happenings across sessions: prompts sent, tool calls that failed or were declined, prompts stopped.
+    const feed = this.all<{ ts: number; kind: string; text: string | null; tool: string | null; sessionId: string; title: string | null; provider: string }>(
+      `SELECT * FROM (
+         SELECT p.ts, 'prompt' AS kind, p.text, NULL AS tool, p.session_id AS sessionId, ${sessionTitle("s")} AS title, p.provider
+         FROM prompts p JOIN sessions s ON s.id = p.session_id WHERE p.ts >= $from
+         UNION ALL
+         SELECT o.ts, o.kind, NULL AS text, t.tool, COALESCE(s.parent_session_id, o.session_id) AS sessionId,
+                ${sessionTitle("root")} AS title, o.provider
+         FROM outcomes o LEFT JOIN tool_calls t ON t.id = o.id LEFT JOIN sessions s ON s.id = o.session_id
+         LEFT JOIN sessions root ON root.id = COALESCE(s.parent_session_id, o.session_id)
+         WHERE o.ts >= $from AND o.kind IN ('tool_error', 'tool_rejected', 'interrupt')
+       ) ORDER BY ts DESC LIMIT 300`,
+      { from },
+    ).map((e) => ({ ...e, text: e.text ? e.text.replace(/\s+/g, " ").slice(0, 140) : null }));
+
+    // Today so far, and a typical day up to the same time: the median of the last 14 days with any use.
+    const midnight = new Date(now);
+    midnight.setHours(0, 0, 0, 0);
+    const sinceMidnight = now - midnight.getTime();
+    const today = this.get<{ cost: number; tokens: number }>(
+      `SELECT COALESCE(SUM(u.cost_usd), 0) AS cost, COALESCE(SUM(u.total_tokens), 0) AS tokens FROM usage u WHERE u.ts >= $start AND u.ts <= $now`,
+      { start: midnight.getTime(), now },
+    )!;
+    const before: { cost: number; tokens: number }[] = [];
+    for (let d = 1; d <= 14; d++) {
+      const day = new Date(midnight);
+      day.setDate(day.getDate() - d);
+      const row = this.get<{ cost: number; tokens: number; n: number }>(
+        `SELECT COALESCE(SUM(u.cost_usd), 0) AS cost, COALESCE(SUM(u.total_tokens), 0) AS tokens, COUNT(*) AS n FROM usage u WHERE u.ts >= $start AND u.ts < $end`,
+        { start: day.getTime(), end: day.getTime() + sinceMidnight },
+      )!;
+      if (row.n) before.push(row);
+    }
+    const mid = (xs: number[]) => {
+      if (!xs.length) return null;
+      const v = [...xs].sort((a, b) => a - b);
+      return v.length % 2 ? v[v.length >> 1]! : (v[v.length / 2 - 1]! + v[v.length / 2]!) / 2;
+    };
+
     // When anything was last used, also before the window: "last activity 3 hours ago" on a quiet page.
     const ever = whereClause({ ...f, from: undefined, to: undefined });
     const last = this.get<{ ts: number | null }>(`SELECT MAX(u.ts) AS ts FROM usage u ${ever.sql}`, ever.params);
     return {
-      from: first * MINUTE,
+      from,
       minutes,
       series,
-      sessions: sessions.map((r) => ({ ...r, projectLabel: projectLabel(r.project) })),
+      costSeries,
+      sessions: detailed,
+      feed,
+      today: { ...today, typicalCost: mid(before.map((b) => b.cost)), typicalTokens: mid(before.map((b) => b.tokens)), days: before.length },
       lastTs: last?.ts ?? null,
     };
   }

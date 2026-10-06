@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import { t } from "../lib/i18n.svelte.ts";
+  import { i18n, t } from "../lib/i18n.svelte.ts";
   export interface LimitWindow {
     id: string;
     windowMs: number | null;
@@ -62,6 +62,18 @@
   const fill = (l: number, provider: string) => (l >= 0.25 ? colorFor("provider", provider) : l >= 0.1 ? "var(--status-serious)" : "var(--status-critical)");
   const ink = (l: number) => (l >= 0.25 ? "text-ink" : l >= 0.1 ? "text-warn" : "text-bad");
 
+  // Where the window stands in time, and where its use is heading: the use so far, kept up, against the time left.
+  // Too early in a window, or with next to nothing used, the projection would be noise: then only the time mark.
+  function pace(w: LimitWindow): { timeLeft: number; outAt: number | null } | null {
+    if (w.reset || w.windowMs == null || w.resetsAt == null || w.resetsAt <= now) return null;
+    const timeLeft = Math.min(1, (w.resetsAt - now) / w.windowMs);
+    const elapsed = w.windowMs - (w.resetsAt - now);
+    if (elapsed < w.windowMs * 0.05 || w.usedFraction < 0.02) return { timeLeft, outAt: null };
+    return { timeLeft, outAt: now + ((1 - w.usedFraction) * elapsed) / w.usedFraction };
+  }
+  const clock = (ts: number) =>
+    new Intl.DateTimeFormat(i18n.locale, ts - now > 20 * HOUR ? { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts);
+
   // A reading is only dated when it's old (Codex logs it only while in use): a fresh one needs no note.
   const STALE_MS = 5 * 60_000;
   const PROBLEM_SOURCES = { claude: "Claude Code", omp: "omp", codex: "Codex", pi: "pi", opencode: "OpenCode" };
@@ -83,6 +95,7 @@
       </header>
       {#each r.windows as w (w.id)}
         {@const l = left(w)}
+        {@const p = pace(w)}
         <div class="flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between gap-3 text-xs">
             <span class="truncate text-ink-2">{windowName(w)}</span>
@@ -92,9 +105,29 @@
               <span class="text-muted"> · {@render reset(w)}</span>
             </span>
           </div>
-          <div class="h-2 overflow-hidden rounded-full bg-surface-3">
-            <div class="h-full rounded-full transition-[width] duration-500" style:width={l > 0 ? `max(${l * 100}%, 4px)` : "0"} style:background={fill(l, r.provider)}></div>
+          <div class="relative">
+            <div class="h-2 overflow-hidden rounded-full bg-surface-3">
+              <div class="h-full rounded-full transition-[width] duration-500" style:width={l > 0 ? `max(${l * 100}%, 4px)` : "0"} style:background={fill(l, r.provider)}></div>
+            </div>
+            <!-- The time left in the window as sand running out: a bright mark, grains slipping from it toward the start of
+                 the bar. A bar that ends short of the mark runs out before the window does: the sand turns red. -->
+            {#if p}
+              <span
+                class="absolute top-1/2 h-0 w-0"
+                style:left="{p.timeLeft * 100}%"
+                style:color={l < p.timeLeft ? "var(--status-critical)" : "var(--ink)"}
+                title={t("live.pace.marker")}
+              >
+                {#each [0, 1, 2] as g (g)}<span class="sand-grain" style:animation-delay="{g * 0.6}s"></span>{/each}
+                <span class="sand-mark absolute h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current"></span>
+              </span>
+            {/if}
           </div>
+          {#if p?.outAt != null}
+            <div class="text-[11px] {p.outAt < (w.resetsAt ?? 0) ? 'text-warn' : 'text-muted'}">
+              {p.outAt < (w.resetsAt ?? 0) ? t("live.pace.out", { time: clock(p.outAt) }) : t("live.pace.lasts")}
+            </div>
+          {/if}
         </div>
       {/each}
     </section>
