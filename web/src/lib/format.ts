@@ -64,6 +64,11 @@ export function shortDate(ts: number | string | null | undefined): string {
   return new Intl.DateTimeFormat(i18n.locale, { month: "short", day: "numeric" }).format(d);
 }
 
+/** A day with its year: Jul 27, 2026 / 27.07.2026. */
+export function dayWithYear(ts: number): string {
+  return new Intl.DateTimeFormat(i18n.locale, { year: "numeric", month: "short", day: "numeric" }).format(new Date(ts));
+}
+
 export function time(ts: number): string {
   return new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit" }).format(ts);
 }

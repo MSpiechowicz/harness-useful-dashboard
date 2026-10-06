@@ -166,6 +166,8 @@ export const de: Record<MessageKey, string> = {
   "trends.projection": "Prognose 30 Tage",
   "trends.projectionHint": "Im Tempo der letzten 14 Tage",
   "trends.change": "Veränderung ggü. Vorperiode",
+  "trends.total": "Bisher insgesamt",
+  "trends.since": "Seit {date}",
 
   "breakdown.subtitle.project": "Wohin deine Tokens fließen – Projekt für Projekt",
   "breakdown.subtitle.model": "Welche Modelle die Arbeit machen und was sie kosten",

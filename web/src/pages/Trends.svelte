@@ -10,7 +10,7 @@
   import UsageChart from "../components/UsageChart.svelte";
   import { apiUrl, settled, useFetch, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
   import { cumulativeChart, seriesLabel, trendAverage } from "../lib/charts.ts";
-  import { bucketLabel, days, metricValue } from "../lib/format.ts";
+  import { bucketLabel, dayWithYear, days, metricValue } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -67,8 +67,10 @@
       <div class="card"><Empty /></div>
     {:else}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <!-- With no earlier period to compare (All time), the tile is the total so far, and since when. -->
         <Kpi
-          label={t("trends.change")}
+          label={summary.data && !summary.data.previous ? t("trends.total") : t("trends.change")}
+          hint={summary.data?.firstTs ? t("trends.since", { date: dayWithYear(summary.data.firstTs) }) : undefined}
           value={summary.data ? metricValue(store.metric === "cost" ? summary.data.cost : summary.data.tokens, store.metric) : "…"}
           current={summary.data ? (store.metric === "cost" ? summary.data.cost : summary.data.tokens) : undefined}
           previous={summary.data?.previous ? (store.metric === "cost" ? summary.data.previous.cost : summary.data.previous.tokens) : null}

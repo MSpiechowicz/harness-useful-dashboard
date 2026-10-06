@@ -164,6 +164,8 @@ export const en = {
   "trends.projection": "30-day projection",
   "trends.projectionHint": "At the pace of the last 14 days",
   "trends.change": "Change vs previous period",
+  "trends.total": "Total so far",
+  "trends.since": "Since {date}",
 
   "breakdown.subtitle.project": "Where your tokens go, project by project",
   "breakdown.subtitle.model": "Which models do the work and what they cost",
