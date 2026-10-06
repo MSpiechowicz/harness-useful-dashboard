@@ -668,7 +668,7 @@ export type RateKind = "area" | "bars" | "lines" | "dots" | "steps" | "total";
 export function rateChart(series: { key: string; data: number[] }[], from: number, kind: RateKind = "area"): EChartsOption {
   const c = chrome();
   const minutes = series[0]?.data.length ?? 0;
-  const time = new Intl.DateTimeFormat(i18n.locale, { hour: "numeric", minute: "2-digit" });
+  const time = new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const labels = Array.from({ length: minutes }, (_, i) => time.format(from + i * 60_000));
   // The running total adds each minute to the ones before: the same stacks, counted up.
   const values = (data: number[]) => {

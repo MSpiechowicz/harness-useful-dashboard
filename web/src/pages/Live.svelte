@@ -117,7 +117,7 @@
   const option = $derived.by(() => (void store.dark, data.data ? rateChart(data.data.series, data.data.from, kind) : null));
   const quiet = $derived(!!total && total.sum === 0);
   const windowLabel = $derived(minutes < 60 ? t("live.lastMinutes", { n: minutes }) : minutes === 60 ? t("live.lastHour") : t("live.lastHours", { n: minutes / 60 }));
-  const time = (ts: number) => new Intl.DateTimeFormat(i18n.locale, { hour: "numeric", minute: "2-digit" }).format(ts);
+  const time = (ts: number) => new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts);
 
   type Sort = "recent" | "tokens" | "cost";
   let sort = $state<Sort>("recent");

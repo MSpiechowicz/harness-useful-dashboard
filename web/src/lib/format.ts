@@ -55,7 +55,7 @@ export function metricValue(n: number, metric: "tokens" | "cost", short = true):
 
 export function dateTime(ts: number | null | undefined): string {
   if (!ts) return "–";
-  return new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium", timeStyle: "short" }).format(ts);
+  return new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium", timeStyle: "short", hourCycle: "h23" }).format(ts);
 }
 
 export function shortDate(ts: number | string | null | undefined): string {
@@ -69,8 +69,9 @@ export function dayWithYear(ts: number): string {
   return new Intl.DateTimeFormat(i18n.locale, { year: "numeric", month: "short", day: "numeric" }).format(new Date(ts));
 }
 
+/** A clock time, 24-hour in every language: 16:05. */
 export function time(ts: number): string {
-  return new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit" }).format(ts);
+  return new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts);
 }
 
 /** Bucket labels from the API: "2026-09-14", "2026-09-14 13:00", "2026-09". */
@@ -81,7 +82,7 @@ export function parseBucket(b: string): Date {
 
 export function bucketLabel(b: string, bucket: string): string {
   const d = parseBucket(b);
-  if (bucket === "hour") return new Intl.DateTimeFormat(i18n.locale, { weekday: "short", hour: "2-digit" }).format(d);
+  if (bucket === "hour") return new Intl.DateTimeFormat(i18n.locale, { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
   if (bucket === "month") return new Intl.DateTimeFormat(i18n.locale, { month: "short", year: "numeric" }).format(d);
   return new Intl.DateTimeFormat(i18n.locale, { month: "short", day: "numeric" }).format(d);
 }
