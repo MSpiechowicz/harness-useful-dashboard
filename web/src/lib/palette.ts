@@ -69,6 +69,8 @@ export const RESERVED = {
 
 export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo";
 export const PROVIDERS: readonly Provider[] = ["claude", "codex", "cursor", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo"];
+/** How each provider (harness) is named in the UI. */
+export const PROVIDER_NAMES: Record<Provider, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", omp: "omp", pi: "pi", opencode: "OpenCode", zed: "Zed", cline: "Cline", roo: "Roo Code", kilo: "Kilo Code" };
 
 /**
  * Models wear their maker's color - the family of the provider that makes them - whichever harness or plan

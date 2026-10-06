@@ -283,6 +283,9 @@ export const pl: Record<MessageKey, string> = {
   "live.sessions": "Aktywne sesje",
   "live.sessionsHint": "Sesje z aktywnością w tym oknie. Uruchomienia subagentów liczą się do sesji, która je rozpoczęła.",
   "live.subagents": "Subagenci: {n}",
+  "live.harnessLegend": "Kolory harnessów",
+  "live.harnessLegendHint": "Każdy harness ma własny kolor na liście sesji. Wyróżnione harnessy mają sesje w tym oknie, a liczba pokazuje, ile ich jest.",
+  "live.toolSessions": "Aktywne sesje: {n}",
   "sort.recent": "Najnowsze",
   "sort.messages": "Najwięcej wywołań",
 

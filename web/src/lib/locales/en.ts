@@ -281,6 +281,9 @@ export const en = {
   "live.sessions": "Active sessions",
   "live.sessionsHint": "Sessions with activity in this window. Subagent runs count toward the session that started them.",
   "live.subagents": "{n} subagents",
+  "live.harnessLegend": "Harness colors",
+  "live.harnessLegendHint": "Each harness has its own color in the session list. Highlighted harnesses have sessions in this window, and the number shows how many.",
+  "live.toolSessions": "Active sessions: {n}",
   "sort.recent": "Most recent",
   "sort.messages": "Most calls",
 

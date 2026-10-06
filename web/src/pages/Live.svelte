@@ -11,6 +11,7 @@
   import Dropdown from "../components/Dropdown.svelte";
   import { rateChart, type RateKind } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
+  import { PROVIDER_NAMES, PROVIDERS } from "../lib/palette.ts";
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
@@ -122,6 +123,11 @@
   let sort = $state<Sort>("recent");
   const SORTS = $derived((["recent", "tokens", "cost"] as const).map((value) => ({ value: value as Sort, label: t(`sort.${value}`) })));
   const titleOf = (s: LiveSession) => s.title ?? s.id.split(":").pop()?.slice(0, 13) ?? s.id;
+  // Every tool's color, so a session's swatch reads as the tool it ran in, not the plan it was billed to.
+  // Tools with sessions in this window stand out and carry their count.
+  const toolCounts = $derived(
+    (data.data?.sessions ?? []).reduce((m, s) => m.set(s.provider, (m.get(s.provider) ?? 0) + 1), new Map<string, number>()),
+  );
 </script>
 
 <div class="flex flex-col gap-5">
@@ -181,6 +187,23 @@
         {/if}
       </Card>
     </div>
+
+    <Card title={t("live.harnessLegend")} subtitle={t("live.harnessLegendHint")}>
+      <!-- Pull the chips left by their padding + border so the first dot lines up with the title. -->
+      <ul class="-ml-[11px] flex flex-wrap items-center gap-2">
+        {#each PROVIDERS as p (p)}
+          {@const n = toolCounts.get(p) ?? 0}
+          <li
+            class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs {n ? 'border-line bg-surface-2 text-ink' : 'border-transparent text-muted'}"
+            title={n ? t("live.toolSessions", { n }) : undefined}
+          >
+            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", p)}></span>
+            {PROVIDER_NAMES[p]}
+            {#if n}<span class="tabular text-ink-2">{n}</span>{/if}
+          </li>
+        {/each}
+      </ul>
+    </Card>
 
     <TableCard
       title={t("live.sessions")}

@@ -1,6 +1,7 @@
 <script lang="ts" module>
   import type { BillingRow } from "../lib/api.svelte.ts";
   import { t } from "../lib/i18n.svelte.ts";
+  import { PROVIDER_NAMES } from "../lib/palette.ts";
 
   export type BillingSortKey = "label" | "cost" | "tokens" | "calls" | "premiumRequests";
 
@@ -13,11 +14,9 @@
     openrouter: "OpenRouter",
     "google-gemini-cli": "Gemini CLI",
   };
-  /** Harnesses that don't report a plan are billed to their own account. */
-  const HARNESSES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", omp: "omp", pi: "pi", opencode: "OpenCode", zed: "Zed", cline: "Cline", roo: "Roo Code", kilo: "Kilo Code" };
 
   export function billingLabel(r: BillingRow): string {
-    return r.reported ? PLANS[r.key] ?? r.key : t("billing.own", { name: HARNESSES[r.key] ?? r.key });
+    return r.reported ? PLANS[r.key] ?? r.key : t("billing.own", { name: PROVIDER_NAMES[r.key as keyof typeof PROVIDER_NAMES] ?? r.key });
   }
 </script>
 
