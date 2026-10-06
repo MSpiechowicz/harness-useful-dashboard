@@ -177,14 +177,16 @@
 
   <!-- Main -->
   <div class="flex min-w-0 flex-1 flex-col">
-    <header class="sticky top-0 z-20 border-b border-line bg-page/85 backdrop-blur" class:lg:hidden={!showFilters}>
+    <!-- On every page, so content starts at the same height. Where the filters don't apply it is an empty row. -->
+    <header class="sticky top-0 z-20 border-b border-line bg-page/85 backdrop-blur">
       <!-- Top-aligned: when the filters wrap onto more lines, the menu button stays level with the first one. -->
       <div class="mx-auto flex max-w-[1500px] items-start gap-3 px-4 py-2.5 sm:px-6">
         <button class="btn shrink-0 !px-2 lg:hidden" aria-label="Open menu" onclick={() => (menuOpen = true)}><Menu size={16} /></button>
         {#if showFilters}
           <div class="min-w-0 flex-1"><FilterBar /></div>
         {:else}
-          <div class="flex-1"></div>
+          <!-- As tall as a row of controls (2rem), so the bar keeps its height. -->
+          <div class="h-8 flex-1"></div>
         {/if}
       </div>
     </header>
