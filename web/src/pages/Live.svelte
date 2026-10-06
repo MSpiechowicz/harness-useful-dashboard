@@ -14,6 +14,7 @@
   import { PROVIDER_NAMES, PROVIDERS } from "../lib/palette.ts";
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
+  import { live } from "../lib/live.svelte.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
 
   interface LiveSession {
@@ -56,22 +57,30 @@
     }
   }
 
-  // The page refreshes itself: usage every 15 seconds (the server rescans the logs first), limits every minute.
+  // The page refreshes itself once a minute, usage and limits together. The server rescans the logs first.
   let tick = $state(0);
   let now = $state(Date.now());
   $effect(() => {
     const h = setInterval(() => {
       tick++;
       now = Date.now();
-    }, 15_000);
+    }, 60_000);
     return () => clearInterval(h);
   });
   const data = useFetch<LiveData>(() => `/api/live?minutes=${minutes}&t=${tick}`);
+  // While the page is open, its own poll is the one refresh: each one counts as an update.
+  $effect(() => {
+    live.watching = true;
+    return () => (live.watching = false);
+  });
+  $effect(() => {
+    if (data.data) live.updatedAt = Date.now();
+  });
   // "Refresh" asks the providers again instead of answering from the minute-long cache.
   // Only the click asks with force=1: the regular checks after it go by the server's schedule again.
   let forced = $state(0);
   let refreshing = $state(false);
-  const limits = useFetch<LimitsResult>(() => `/api/limits?minutes=${minutes}&t=${Math.floor(tick / 4)}&f=${forced}`);
+  const limits = useFetch<LimitsResult>(() => `/api/limits?minutes=${minutes}&t=${tick}&f=${forced}`);
   async function refreshLimits() {
     refreshing = true;
     try {

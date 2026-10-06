@@ -184,8 +184,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
         case "/api/tips":
           return json(generateTips(app.db, f, app.priceBook()));
         case "/api/live": {
-          // The page polls this: pick up what was written since the last scan without waiting for the timer.
-          if (!app.isScanning && Date.now() - (app.lastScanAt ?? 0) > 10_000) app.scanNow().catch(() => {});
+          // The page polls this once a minute: scan first, so the answer includes what was written since the last scan.
+          if (Date.now() - (app.lastScanAt ?? 0) > 10_000) await app.scanNow().catch(() => {});
           const minutes = Math.min(360, Math.max(5, Math.round(Number(sp.get("minutes")) || 60)));
           return json(q.live(f, minutes));
         }

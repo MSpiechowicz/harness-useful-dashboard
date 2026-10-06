@@ -10,7 +10,7 @@ type ServerEvent =
   | { type: "pricing-changed" };
 
 // New data from the background scan refreshes the open view at most once a minute, so pages don't keep reloading
-// while an agent works. The Live page polls on its own, more often.
+// while an agent works. The Live page polls once a minute on its own and takes no extra reloads.
 const REFRESH_MS = 60_000;
 
 class Live {
@@ -22,6 +22,8 @@ class Live {
   private version: string | null = null;
   /** When the open view last reloaded its data: the sidebar shows it as "Updated at". */
   updatedAt = $state<number | null>(null);
+  /** Set by the Live page while it is open. */
+  watching = false;
   private pending: ReturnType<typeof setTimeout> | null = null;
 
   /** Reloads the open view's data now. */
@@ -33,8 +35,9 @@ class Live {
     void loadColorRanking();
   }
 
-  /** Reloads it now, or once a minute has passed since the last reload. */
+  /** Reloads it now, or once a minute has passed since the last reload. Not on the Live page, which polls itself. */
   private refreshSoon(): void {
+    if (this.watching) return;
     if (this.pending) return;
     const wait = (this.updatedAt ?? 0) + REFRESH_MS - Date.now();
     if (wait <= 0) this.refresh();
