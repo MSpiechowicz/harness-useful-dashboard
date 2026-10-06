@@ -107,7 +107,9 @@ Re-running the install command also upgrades.
 
 ```sh
 rm ~/.local/bin/harness-dashboard
-rm -rf ~/.local/share/applications/harness-dashboard.desktop ~/Applications/"Harness Dashboard.app"
+rm -rf ~/Applications/"Harness Dashboard.app"                                       # macOS
+grep -l '^Icon=harness-dashboard$' ~/.local/share/applications/*.desktop | xargs rm -f  # Linux launchers
+rm -f ~/.local/share/icons/hicolor/scalable/apps/harness-dashboard.svg               # Linux icon
 # data + config (optional):
 rm -rf ~/.config/harness-dashboard                          # Linux
 rm -rf ~/Library/Application\ Support/harness-dashboard     # macOS

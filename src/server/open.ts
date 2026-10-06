@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import type { OpenMode } from "../core/config.ts";
 import { appDataDir } from "../core/paths.ts";
 
@@ -34,6 +35,49 @@ function findAppBrowser(): string | null {
   return null;
 }
 
+/** The app ID a Chromium browser gives an `--app` window on Linux: "<browser>-<host>__-<profile>". */
+export function appWindowId(browser: string, url: string): string {
+  const name = basename(browser);
+  const prefix = name.startsWith("google-chrome")
+    ? "chrome"
+    : name.startsWith("microsoft-edge")
+      ? "msedge"
+      : name.startsWith("brave")
+        ? "brave"
+        : name.startsWith("vivaldi")
+          ? "vivaldi"
+          : "chromium";
+  return `${prefix}-${new URL(url).hostname}__-Default`;
+}
+
+/**
+ * Wayland desktops find a window's icon through the launcher named after its app ID. The app window's ID is the
+ * browser's (see appWindowId), which no launcher claims, so it would get a generic icon. A hidden launcher under that
+ * name, pointing at the app's icon, fixes the window's title bar and taskbar entry. Only when the installer added the
+ * app to the applications menu.
+ */
+export function linkWindowToLauncher(browser: string, url: string, dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share")): boolean {
+  if (process.platform !== "linux") return false;
+  const apps = join(dataHome, "applications");
+  const main = join(apps, "harness-dashboard.desktop");
+  if (!existsSync(main)) return false;
+  const exec = /^Exec=(.*)$/m.exec(readFileSync(main, "utf8"))?.[1] ?? "harness-dashboard";
+  const alias = join(apps, `${appWindowId(browser, url)}.desktop`);
+  const entry = `[Desktop Entry]\nType=Application\nName=Harness Dashboard\nExec=${exec}\nIcon=harness-dashboard\nNoDisplay=true\n`;
+  try {
+    if (existsSync(alias) && readFileSync(alias, "utf8") === entry) return false;
+    writeFileSync(alias, entry);
+    // KDE reads launchers from its own cache: rebuild it before the window opens, so even the first one has the icon.
+    for (const tool of ["kbuildsycoca6", "kbuildsycoca5", "update-desktop-database"]) {
+      const bin = Bun.which(tool);
+      if (bin) Bun.spawnSync(tool.startsWith("update") ? [bin, apps] : [bin], { stdio: ["ignore", "ignore", "ignore"], timeout: 10_000 });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function openDefaultBrowser(url: string): void {
   const cmd =
     process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["cmd", "/c", "start", "", url] : ["xdg-open", url];
@@ -47,6 +91,7 @@ export function openUi(url: string, mode: OpenMode): "app" | "browser" | "none" 
     if (browser) {
       const profile = join(appDataDir(), "window-profile");
       mkdirSync(profile, { recursive: true });
+      linkWindowToLauncher(browser, url);
       const flags = [`--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--window-size=1440,920"];
       // On macOS the browser is started by LaunchServices, as a Dock launch would: run as our child it inherits our
       // launch context, which runs a universal browser under Rosetta when we were started from the app bundle, and
