@@ -30,6 +30,8 @@ interface OmpState {
   effort?: string | null;
   /** Model of the last answer, which the tool results that follow belong to. */
   answeredBy?: string | null;
+  /** A subagent's brief was kept: later "user" turns are messages from the parent, not the brief. */
+  briefSeen?: boolean;
 }
 
 /** Failed tool results that only say the user or the harness stopped the call, not that it went wrong. */
@@ -175,7 +177,15 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
         if (ts != null) sessions.touch({ id: sessionId, provider: harness, nativeId: state.sessionId }, ts);
 
         if (m.role === "user") {
-          if (isSub || ts == null) continue; // a subagent's "user" turn is its brief from the parent
+          // A subagent's "user" turn is its brief from the parent: kept with the session, never counted as a prompt.
+          if (isSub && !state.briefSeen) {
+            const brief = truncate(textOf(m.content), ctx.promptTextLimit);
+            if (brief) {
+              sessions.touch({ id: sessionId, provider: harness, nativeId: state.sessionId, brief }, ts);
+              state.briefSeen = true;
+            }
+          }
+          if (isSub || ts == null) continue;
           const promptText = textOf(m.content);
           const promptId = key(entry, m.timestamp ?? ts);
           state.promptId = promptId;

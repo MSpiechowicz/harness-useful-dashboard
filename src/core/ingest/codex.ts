@@ -18,6 +18,8 @@ interface CodexState {
   responseEnd?: number | null;
   /** The file reports tool outcomes as item_completed events, so the older *_end events are not counted too. */
   itemOutcomes?: boolean;
+  /** A subagent's brief was kept: later user messages come from its parent, not the brief. */
+  briefSeen?: boolean;
 }
 
 /** item_completed item types that are tool calls, and how their status maps to an outcome. */
@@ -236,6 +238,11 @@ export const codexParser: LineParser<CodexState> = {
           promptKey = rec.ordinal != null ? String(rec.ordinal) : `o${offset}`;
         }
         if (promptKey && ts != null) state.inputTs = ts;
+        // A spawned thread's first user message is its brief from the parent: kept with the session, never a prompt.
+        if (promptKey && isSub && !state.briefSeen && promptText?.trim()) {
+          sessions.touch({ id: sessionId, provider: "codex", nativeId: state.threadId, brief: truncate(promptText, ctx.promptTextLimit) }, ts);
+          state.briefSeen = true;
+        }
         if (promptKey && ts != null && !isSub) {
           const skill = promptSkill ?? (promptText ? skillFrom(promptText) : null);
           const promptId = `${sessionId}:${promptKey}`;

@@ -69,11 +69,13 @@ describe("omp ingest", () => {
       header(SUB_UUID, { parentSession: sessionFile(root) }),
       user("s0", "Brief from the parent"),
       assistant("s1"),
+      user("s2", "A later message from the parent"),
     ]);
     const db = memDb();
     await scan(db, testConfig(root), ID);
     const sub = db.query<any, []>(`SELECT * FROM sessions WHERE id = 'omp:${SUB_UUID}'`).get();
-    expect(sub).toMatchObject({ parent_session_id: `omp:${UUID}`, agent: "SmithTests" });
+    // The brief is kept with the session: the first instruction, not the later messages.
+    expect(sub).toMatchObject({ parent_session_id: `omp:${UUID}`, agent: "SmithTests", brief: "Brief from the parent" });
     expect(db.query<any, []>(`SELECT * FROM usage WHERE session_id = 'omp:${SUB_UUID}'`).get()).toMatchObject({ agent: "SmithTests", is_subagent: 1 });
     // The parent's brief is not a prompt of the user's.
     expect(db.query<any, []>("SELECT COUNT(*) n FROM prompts").get().n).toBe(1);

@@ -4,9 +4,15 @@ import { dirname } from "node:path";
 import { type AppConfig, loadConfig, resolveDbPath, saveConfig } from "../core/config.ts";
 import { getMeta, openDb } from "../core/db.ts";
 import { type ScanResult, scan } from "../core/ingest/index.ts";
+import { activePlans, LimitsCache } from "../core/limits.ts";
 import { localIdentity } from "../core/paths.ts";
 import { PriceBook } from "../core/pricing.ts";
 import { Queries } from "../core/queries.ts";
+
+/** How often plan limits are read in the background, for the history on the plans view. */
+const LIMIT_POLL_MS = 5 * 60_000;
+/** Only the plans used this recently are asked about: a quiet machine asks nobody. */
+const LIMIT_ACTIVE_MS = 30 * 60_000;
 
 export type AppEvent =
   | { type: "scan"; result: ScanResult }
@@ -23,6 +29,9 @@ export class App {
   private prices!: PriceBook;
   private listeners = new Set<(e: AppEvent) => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private limitTimer: ReturnType<typeof setInterval> | null = null;
+  /** Plan-limit readings, shared by the API and the background poll so providers are asked sparingly. */
+  readonly limits = new LimitsCache();
   private scanning: Promise<ScanResult> | null = null;
   lastScan: ScanResult | null = null;
   lastScanAt: number | null = null;
@@ -107,11 +116,22 @@ export class App {
         this.scanNow().catch((err) => console.error("[scan]", err));
       }, this.cfg.scanIntervalSec * 1000);
     }
+    this.limitTimer = setInterval(() => {
+      this.pollLimits().catch((err) => console.error("[limits]", err));
+    }, LIMIT_POLL_MS);
   }
 
   stopBackgroundScan(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.limitTimer) clearInterval(this.limitTimer);
     this.timer = null;
+    this.limitTimer = null;
+  }
+
+  /** Reads the limits of the plans in use, which keeps them in the history. */
+  private async pollLimits(): Promise<void> {
+    const active = activePlans(this.db, Date.now() - LIMIT_ACTIVE_MS);
+    if (active.length) await this.limits.get(this.db, this.identity.host, this.cfg.limits, false, active);
   }
 
   /**

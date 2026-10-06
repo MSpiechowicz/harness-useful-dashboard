@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 7;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -169,6 +169,35 @@ const MIGRATIONS: Record<number, string> = {
     -- Read every log once more to fill both for the history already ingested. Records are keyed by their place in
     -- the logs, so reading again changes nothing else.
     DELETE FROM ingest_files;
+  `,
+  // Every plan-limit reading, not just the latest: the plans view shows how full each limit got and how often it ran
+  // out. One reading per window every five minutes (slot) is enough for that.
+  6: /* sql */ `
+    CREATE TABLE IF NOT EXISTS limit_readings (
+      host          TEXT NOT NULL,
+      report_key    TEXT NOT NULL,     -- the limit report's key ("claude", "codex:logs", "omp:github-copilot", …)
+      window_id     TEXT NOT NULL,
+      slot          INTEGER NOT NULL,  -- observed_at / 5 minutes
+      provider      TEXT NOT NULL,
+      plan          TEXT,
+      window_ms     INTEGER,
+      scope         TEXT,
+      label         TEXT,
+      used_fraction REAL NOT NULL,
+      resets_at     INTEGER,           -- epoch ms
+      observed_at   INTEGER NOT NULL,  -- epoch ms
+      PRIMARY KEY (host, report_key, window_id, slot)
+    );
+    CREATE INDEX IF NOT EXISTS idx_limit_readings_ts ON limit_readings(observed_at);
+    -- Codex logs a reading with every response: read its logs once more for the history so far.
+    DELETE FROM ingest_files WHERE path LIKE '%rollout-%.jsonl';
+  `,
+  // A subagent's brief: the instruction its parent gave it, which the session page shows. It is no prompt of the user's.
+  7: /* sql */ `
+    ALTER TABLE sessions ADD COLUMN brief TEXT;
+    -- Read the omp, pi and Codex logs once more for the briefs of the subagents already ingested. Records are keyed
+    -- by their place in the logs, so reading again changes nothing else.
+    DELETE FROM ingest_files WHERE path LIKE '%.jsonl';
   `,
 };
 

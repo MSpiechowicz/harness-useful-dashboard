@@ -11,6 +11,8 @@ export interface SessionRecord {
   clientVersion?: string | null;
   parentSessionId?: string | null;
   agent?: string | null;
+  /** A subagent's brief: the first instruction its parent gave it. */
+  brief?: string | null;
   startedAt?: number | null;
   endedAt?: number | null;
 }

@@ -18,9 +18,8 @@
     trend?: number[];
     trendLabels?: string[];
     trendFormat?: (v: number) => string;
-    hero?: boolean;
   }
-  let { label, value, current, previous, upIsGood = null, hint, trend, trendLabels = [], trendFormat = String, hero = false }: Props = $props();
+  let { label, value, current, previous, upIsGood = null, hint, trend, trendLabels = [], trendFormat = String }: Props = $props();
 
   const delta = $derived(current != null && previous ? (current - previous) / previous : null);
   const tone = $derived(
@@ -32,13 +31,13 @@
   });
 </script>
 
-<div class="card flex min-w-0 flex-col gap-2 px-4 py-3.5" class:hero>
+<div class="card flex min-w-0 flex-col gap-2 px-4 py-3.5">
   <div class="truncate text-xs font-medium text-muted">{label}</div>
   <!-- Fixed-height value row and an always-reserved line under the number: every tile, with or without
        a mini chart, delta or hint, is the same height and the numbers share a baseline across pages. -->
   <div class="flex h-14 items-end justify-between gap-3">
     <div class="min-w-0">
-      <div class="truncate font-semibold tracking-tight text-ink {hero ? 'text-[2.15rem] leading-none' : 'text-2xl leading-tight'}" title={value}>
+      <div class="truncate text-2xl leading-tight font-semibold tracking-tight text-ink" title={value}>
         {value}
       </div>
       {#if delta != null}

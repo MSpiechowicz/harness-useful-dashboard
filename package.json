@@ -8,7 +8,7 @@
   "repository": "https://github.com/MSpiechowicz/harness-useful-dashboard",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
-    "dev:server": "bun --watch src/cli.ts serve --no-open --port 4317",
+    "dev:server": "bun --watch src/cli.ts serve --no-open --port 4318",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
     "build": "bun run scripts/build.ts",

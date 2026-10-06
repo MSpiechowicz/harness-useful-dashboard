@@ -384,7 +384,10 @@ export function paretoChart(values: number[], metric: "tokens" | "cost"): EChart
     if ((i + 1) % step === 0 || i === sorted.length - 1) points.push([((i + 1) / sorted.length) * 100, (run / total) * 100]);
   });
   const top10 = topShare(values, 0.1);
-  const data = c.data;
+  // The blue ramp, as on the other single-measure charts: the top 10% of prompts in a stronger shade, so the stretch
+  // the headline counts stands out from the long tail.
+  const hot = cssVar("--seq-6");
+  const data = cssVar("--seq-4");
   return {
     animationDuration: 700,
     textStyle: c.text,
@@ -395,7 +398,7 @@ export function paretoChart(values: number[], metric: "tokens" | "cost"): EChart
       axisPointer: { type: "line", lineStyle: { color: c.axis } },
       formatter: (params: { data: [number, number] }[]) => {
         const [x, y] = params[0]?.data ?? [0, 0];
-        return tooltipRows(t("prompts.topPercent", { share: percent(x / 100, 0) }), [{ color: data, name: t(`metric.${metric}`), value: percent(y / 100, 0) }]);
+        return tooltipRows(t("prompts.topPercent", { share: percent(x / 100, 0) }), [{ color: x <= 10 ? hot : data, name: t(`metric.${metric}`), value: percent(y / 100, 0) }]);
       },
     },
     xAxis: {
@@ -420,18 +423,22 @@ export function paretoChart(values: number[], metric: "tokens" | "cost"): EChart
         color: data,
         smooth: 0.2,
         showSymbol: false,
-        lineStyle: { width: 2 },
-        areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(data, 0.45) }, { offset: 1, color: withAlpha(data, 0.04) }] } },
+        // A hard stop at 10% across the plot's width: the top prompts' stretch in the stronger shade.
+        lineStyle: { width: 2, color: { type: "linear", x: 0, y: 0, x2: 1, y2: 0, colorStops: [{ offset: 0, color: hot }, { offset: 0.1, color: hot }, { offset: 0.1, color: data }, { offset: 1, color: data }] } },
+        areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(data, 0.4) }, { offset: 1, color: withAlpha(data, 0.04) }] } },
+        // The top 10% of prompts, shaded behind the curve.
+        markArea: { silent: true, itemStyle: { color: withAlpha(hot, 0.12) }, data: [[{ xAxis: 0 }, { xAxis: 10 }]] },
         emphasis: { disabled: true },
         markLine: {
           silent: true,
           symbol: "none",
-          lineStyle: { color: c.ink2, type: "dashed", width: 1 },
+          // A reference, not data: the muted axis ink, so it stays behind the curve in both themes.
+          lineStyle: { color: c.muted, type: "dashed", width: 1 },
           label: { color: c.ink2, fontSize: 11 },
           data: [
             // The even spread, for reference.
             [{ coord: [0, 0], label: { show: false } }, { coord: [100, 100] }],
-            { xAxis: 10, label: { formatter: `${percent(top10, 0)}`, position: "end" } },
+            { xAxis: 10, lineStyle: { color: hot, type: "dashed", width: 1 }, label: { formatter: `${percent(top10, 0)}`, position: "end", color: hot, fontWeight: 600 } },
           ],
         },
       },
@@ -787,6 +794,8 @@ export interface CallRow {
   ts: number;
   model: string | null;
   agent?: string;
+  /** Which run of an agent the call belongs to: subagents of one name can run side by side. */
+  run?: string;
   input: number;
   output: number;
   cacheRead: number;
@@ -794,44 +803,171 @@ export interface CallRow {
   cost: number;
 }
 
-/** Per-model-call columns (stacked by token type) — shows how context grows through a session/prompt. */
-export function callTimeline(rows: CallRow[], metric: "tokens" | "cost", timeFmt: (ts: number) => string): EChartsOption {
+/** Interval lengths the call charts group by, shortest first. */
+const STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21_600, 43_200, 86_400].map((s) => s * 1000);
+
+/**
+ * The calls of a session or prompt grouped into equal intervals: about 40 across the span, of a round length. Each
+ * interval sums its calls' tokens and cost; intervals without calls stay empty, so idle stretches show as gaps.
+ */
+export function callIntervals(rows: CallRow[]) {
+  const start = rows[0]?.ts ?? 0;
+  const span = Math.max(1, (rows[rows.length - 1]?.ts ?? start) - start);
+  const step = STEPS.find((s) => s >= span / 40) ?? STEPS[STEPS.length - 1]!;
+  const first = Math.floor(start / step) * step;
+  const count = Math.floor(((rows[rows.length - 1]?.ts ?? start) - first) / step) + 1;
+  const sums = Array.from({ length: count }, (_, i) => ({ ts: first + i * step, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, calls: 0 }));
+  for (const r of rows) {
+    const b = sums[Math.floor((r.ts - first) / step)]!;
+    b.input += r.input;
+    b.output += r.output;
+    b.cacheRead += r.cacheRead;
+    b.cacheWrite += r.cacheWrite;
+    b.cost += r.cost;
+    b.calls++;
+  }
+  return { step, intervals: sums };
+}
+
+/**
+ * Stacked columns per interval: the call charts' cache, input and output, and cost views. Empty intervals draw nothing.
+ */
+export function intervalBars(
+  data: ReturnType<typeof callIntervals>,
+  parts: { key: "input" | "output" | "cacheRead" | "cacheWrite" | "cost"; name: string; color: string }[],
+  fmt: (v: number) => string,
+): EChartsOption {
   const c = chrome();
-  // Same bottom-up order as the token-type series, so stacks and colors match the overview.
-  const keys = ["cacheRead", "cacheWrite", "input", "output"] as const;
-  const colors = keys.map((k) => colorFor("type", k));
-  const names = keys.map((k) => t(`tok.${k}`));
-  const isCost = metric === "cost";
+  const withSeconds = data.step < 60_000;
+  const when = new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", ...(withSeconds ? { second: "2-digit" } : {}), hourCycle: "h23" });
+  const labels = data.intervals.map((b) => when.format(b.ts));
   return {
     animationDuration: 300,
     textStyle: c.text,
-    grid: { left: 8, right: 12, top: 12, bottom: rows.length > 80 ? 40 : 4, containLabel: true },
-    legend: isCost ? undefined : htmlLegend(names),
-    dataZoom: rows.length > 80 ? [{ type: "slider", height: 18, bottom: 6, borderColor: "transparent", fillerColor: cssVar("--accent-wash"), textStyle: { color: c.muted } }, { type: "inside" }] : undefined,
+    // A fixed axis width, not one fitted to the labels: the charts side by side start their columns at the same place,
+    // whether the labels read "15M" or "$6.00".
+    grid: { left: 48, right: 12, top: 12, bottom: 24, containLabel: false },
+    // Always a legend, even for one series: the charts side by side then start their plots at the same height.
+    legend: htmlLegend(parts.map((p) => p.name), parts.map((p) => p.color)),
     tooltip: {
       ...c.tooltip,
       trigger: "axis",
       axisPointer: { type: "shadow", shadowStyle: { color: "rgba(127,127,127,0.08)" } },
       formatter: (params: { dataIndex: number }[]) => {
-        const r = rows[params[0]?.dataIndex ?? 0]!;
-        const header = `${timeFmt(r.ts)} · ${r.model ?? ""}${r.agent && r.agent !== "main" ? ` · ${r.agent}` : ""}`;
-        const lines = keys.filter((k) => r[k] > 0).map((k, i) => ({ color: colors[keys.indexOf(k)]!, name: names[keys.indexOf(k)]!, value: compact(r[k]), i })).reverse();
-        return tooltipRows(header, [...lines, { color: cssVar("--data"), name: t("col.cost"), value: usd(r.cost) }]);
+        const b = data.intervals[params[0]?.dataIndex ?? 0]!;
+        if (!b.calls) return "";
+        const header = `${labels[params[0]?.dataIndex ?? 0]} · ${t("prompts.calls", { n: b.calls })}`;
+        return tooltipRows(header, parts.map((p) => ({ color: p.color, name: p.name, value: fmt(b[p.key]) })));
       },
     },
-    xAxis: { type: "category", data: rows.map((r) => timeFmt(r.ts)), axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel },
-    yAxis: { type: "value", splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => (isCost ? usd(v, { compact: true }) : compact(v)) } },
-    series: isCost
-      ? [{ type: "bar", data: rows.map((r) => r.cost), color: cssVar("--data"), barMaxWidth: 24, itemStyle: { borderRadius: [4, 4, 0, 0] } }]
-      : keys.map((k, i) => ({
-          name: names[i],
-          type: "bar",
-          stack: "t",
-          data: rows.map((r) => r[k]),
-          color: colors[i],
-          barMaxWidth: 24,
-          itemStyle: { borderColor: c.surface, borderWidth: rows.length > 150 ? 0 : 1, borderRadius: i === keys.length - 1 ? [4, 4, 0, 0] : 0 },
-        })),
+    xAxis: { type: "category", data: labels, axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel },
+    yAxis: { type: "value", splitNumber: 3, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: fmt } },
+    series: parts.map((p, i) => ({
+      name: p.name,
+      type: "bar",
+      stack: "interval",
+      data: data.intervals.map((b) => b[p.key] || null),
+      color: p.color,
+      barMaxWidth: 18,
+      itemStyle: { borderColor: c.surface, borderWidth: 1, borderRadius: i === parts.length - 1 ? [2, 2, 0, 0] : 0 },
+    })),
+  };
+}
+
+/**
+ * The context each call sent (cache read, cache write and fresh input together), over time, one line per agent. Each
+ * line joins only its own agent's calls, so agents working side by side never cut into each other. The session's own
+ * agent has a soft fill; up to four subagents wear their agent colours and names, more share one muted entry. Prompt
+ * starts, when there are several prompts, are thin numbered rules.
+ */
+export function contextByAgent(rows: (CallRow & { promptId?: string | null })[], prompts?: Map<string, number>): EChartsOption {
+  const c = chrome();
+  // The main agent where it worked, else (a subagent's own page) the agent of the calls.
+  const own = rows.some((r) => (r.agent ?? "main") === "main") ? "main" : (rows[0]?.agent ?? "main");
+  const context = (r: CallRow) => r.cacheRead + r.cacheWrite + r.input;
+  // A line per run: subagents of one name running side by side (several Explore at once) each keep their own line,
+  // and share their agent's colour and legend entry.
+  const runs = new Map<string, { agent: string; pts: [number, number][] }>();
+  for (const r of rows) {
+    const agent = r.agent ?? "main";
+    const key = agent === own ? own : `${agent}\u0000${r.run ?? ""}`;
+    const run = runs.get(key) ?? { agent, pts: [] };
+    run.pts.push([r.ts, context(r)]);
+    runs.set(key, run);
+  }
+  const counts = new Map<string, number>();
+  for (const r of runs.values()) if (r.agent !== own) counts.set(r.agent, (counts.get(r.agent) ?? 0) + r.pts.length);
+  const subs = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!);
+  const named = subs.length <= 4 ? subs : [];
+  const otherName = t("timeline.otherAgents");
+  const span = (rows[rows.length - 1]?.ts ?? 0) - (rows[0]?.ts ?? 0);
+  const when = new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", ...(span < 30 * 60_000 ? { second: "2-digit" } : {}), hourCycle: "h23" });
+  const line = (pts: [number, number][], name: string, color: string, main: boolean) => {
+    return {
+      name,
+      type: "line",
+      data: pts,
+      color,
+      showSymbol: pts.length < 30,
+      symbolSize: 4,
+      lineStyle: { width: main ? 2 : 1.5 },
+      ...(main
+        ? { areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(color, 0.25) }, { offset: 1, color: withAlpha(color, 0.02) }] } } }
+        : {}),
+      emphasis: { focus: "series" },
+    };
+  };
+  const ownColor = colorFor("type", "cacheRead");
+  const sub = [...runs.entries()].filter(([k]) => k !== own).map(([, r]) => r);
+  const series: Record<string, unknown>[] = [
+    line(runs.get(own)?.pts ?? [], own === "main" ? t("timeline.mainAgent") : own, ownColor, true),
+    ...sub.map((r) => (named.length ? line(r.pts, r.agent, colorFor("agent", r.agent), false) : line(r.pts, otherName, c.muted, false))),
+  ];
+  // Where each later prompt began, numbered as the session's prompt list numbers them (a prompt without model calls
+  // keeps its number, so later ones still match the list). Starts closer than 2% of the span share one rule,
+  // labelled "Prompts 2–3", so labels never print over each other.
+  const starts: { ts: number; n: number }[] = [];
+  if (prompts) {
+    for (const r of rows) {
+      const n = r.promptId ? prompts.get(r.promptId) : undefined;
+      if (n != null && n > 1 && !starts.some((x) => x.n === n)) starts.push({ ts: r.ts, n });
+    }
+  }
+  const marks: { ts: number; from: number; to: number }[] = [];
+  for (const { ts, n } of starts) {
+    const last = marks[marks.length - 1];
+    if (last && ts - last.ts < span * 0.02) {
+      last.ts = ts;
+      last.to = n;
+    } else marks.push({ ts, from: n, to: n });
+  }
+  const markLabel = (m: { from: number; to: number }) => (m.from === m.to ? t("timeline.promptN", { n: m.to }) : t("timeline.promptsN", { from: m.from, to: m.to }));
+  if (marks.length && marks.length <= 15) {
+    series[0]!.markLine = {
+      silent: true,
+      symbol: "none",
+      lineStyle: { color: c.muted, type: "dashed", width: 1 },
+      label: { position: "end", color: c.muted, fontSize: 10, formatter: (p: { dataIndex: number }) => (marks[p.dataIndex] ? markLabel(marks[p.dataIndex]!) : "") },
+      data: marks.map((m) => ({ xAxis: m.ts })),
+    };
+  }
+  const legendNames = [series[0]!.name as string, ...(named.length ? named : subs.length ? [otherName] : [])];
+  const legendColors = [ownColor, ...(named.length ? named.map((a) => colorFor("agent", a)) : subs.length ? [c.muted] : [])];
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 16, top: marks.length ? 24 : 12, bottom: 4, containLabel: true },
+    legend: legendNames.length > 1 ? htmlLegend(legendNames, legendColors) : undefined,
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: c.axis } },
+      formatter: (params: { seriesName: string; color: string; value: [number, number]; axisValue: number }[]) =>
+        tooltipRows(when.format(params[0]?.axisValue ?? 0), params.map((p) => ({ color: p.color, name: p.seriesName, value: compact(p.value[1]) }))),
+    },
+    xAxis: { type: "time", axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel, splitLine: { show: false } },
+    yAxis: { type: "value", splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
+    series,
   };
 }
 
@@ -1018,5 +1154,157 @@ export function sessionScatter(rows: SessionPoint[], metric: "tokens" | "cost"):
       itemStyle: { opacity: 0.7, borderColor: c.surface, borderWidth: 1 },
       emphasis: { scale: 1.25, itemStyle: { opacity: 1 } },
     })),
+  };
+}
+
+/** Bucket by bucket, how many tool calls failed or were turned down and prompts stopped, with the error rate beside. */
+export function frictionChart(
+  rows: { bucket: string; errors: number; rejected: number; interrupts: number; errorRate: number | null }[],
+  bucket: string,
+): EChartsOption {
+  const c = chrome();
+  const parts = [
+    { key: "errors", name: t("friction.errors"), color: cssVar("--status-critical") },
+    { key: "rejected", name: t("friction.rejected"), color: cssVar("--status-warning") },
+    { key: "interrupts", name: t("friction.interrupts"), color: cssVar("--status-serious") },
+  ] as const;
+  const rateName = t("friction.errorRate");
+  const labels = rows.map((r) => bucketLabel(r.bucket, bucket));
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 8, top: 12, bottom: 4, containLabel: true },
+    legend: htmlLegend([...parts.map((p) => p.name), rateName], [...parts.map((p) => p.color), c.ink2]),
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "shadow", shadowStyle: { color: "rgba(127,127,127,0.08)" } },
+      formatter: (params: { dataIndex: number }[]) => {
+        const i = params[0]?.dataIndex ?? 0;
+        const r = rows[i]!;
+        const notes = r.errorRate != null ? [{ color: c.ink2, name: rateName, value: percent(r.errorRate, 1) }] : [];
+        return tooltipRows(labels[i]!, parts.map((p) => ({ color: p.color, name: p.name, value: integer(r[p.key]) })), undefined, notes);
+      },
+    },
+    xAxis: { type: "category", data: labels, axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel },
+    yAxis: [
+      { type: "value", minInterval: 1, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
+      { type: "value", min: 0, splitNumber: 4, splitLine: { show: false }, axisLabel: { ...c.axisLabel, formatter: (v: number) => percent(v) } },
+    ],
+    series: [
+      ...parts.map((p) => ({
+        name: p.name,
+        type: "bar",
+        stack: "friction",
+        data: rows.map((r) => r[p.key] || null),
+        color: p.color,
+        barMaxWidth: BAR_WIDTH,
+        itemStyle: { borderColor: c.surface, borderWidth: 1, borderRadius: 2 },
+      })),
+      {
+        name: rateName,
+        type: "line",
+        yAxisIndex: 1,
+        data: rows.map((r) => r.errorRate),
+        color: c.ink2,
+        connectNulls: true,
+        showSymbol: false,
+        smooth: 0.2,
+        smoothMonotone: "x",
+        lineStyle: { width: 1.5, type: "dashed" },
+        z: 10,
+      },
+    ],
+  };
+}
+
+/**
+ * Bucket by bucket, the hours agents were working, stacked by how many sessions ran at once. One session at a time
+ * is the neutral data ink and parallel work wears the ramp, so the colored part of a bar is the time work overlapped.
+ */
+export function agentTimeChart(rows: { bucket: string; one: number; two: number; more: number }[], bucket: string, fmt: (ms: number) => string): EChartsOption {
+  const c = chrome();
+  const parts = [
+    { key: "one", name: t("time.at.one"), color: c.data },
+    { key: "two", name: t("time.at.two"), color: cssVar("--seq-5") },
+    { key: "more", name: t("time.at.more"), color: cssVar("--seq-7") },
+  ] as const;
+  const labels = rows.map((r) => bucketLabel(r.bucket, bucket));
+  const HOUR = 3_600_000;
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 12, top: 12, bottom: 4, containLabel: true },
+    legend: htmlLegend(parts.map((p) => p.name), parts.map((p) => p.color)),
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "shadow", shadowStyle: { color: "rgba(127,127,127,0.08)" } },
+      formatter: (params: { dataIndex: number }[]) => {
+        const i = params[0]?.dataIndex ?? 0;
+        const r = rows[i]!;
+        const shown = parts.filter((p) => r[p.key] > 0).map((p) => ({ color: p.color, name: p.name, value: fmt(r[p.key]) }));
+        return tooltipRows(labels[i]!, shown, shown.length > 1 ? fmt(r.one + r.two + r.more) : undefined);
+      },
+    },
+    xAxis: { type: "category", data: labels, axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel },
+    // Drawn in hours, so the axis steps are whole hours rather than odd fractions of them.
+    yAxis: { type: "value", minInterval: 1, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => `${trimmedHours(v)} h` } },
+    series: parts.map((p) => ({
+      name: p.name,
+      type: "bar",
+      stack: "agents",
+      data: rows.map((r) => r[p.key] / HOUR || null),
+      color: p.color,
+      barMaxWidth: BAR_WIDTH,
+      itemStyle: { borderColor: c.surface, borderWidth: 1, borderRadius: 2 },
+    })),
+  };
+}
+
+function trimmedHours(h: number): string {
+  return new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: h < 10 ? 1 : 0 }).format(h);
+}
+
+/**
+ * One limit's history: how full its window was at each reading, as a filled step (use only grows while something
+ * runs, and a reset drops straight down), on a 0–100% axis with the limit dashed. Windows that ran out get a red
+ * point at their peak.
+ */
+export function limitHistoryChart(o: { name: string; color: string; points: [number, number][]; outs: [number, number][]; from: number; to: number }): EChartsOption {
+  const c = chrome();
+  const when = new Intl.DateTimeFormat(i18n.locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const critical = cssVar("--status-critical");
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 16, top: 16, bottom: 4, containLabel: true },
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: c.axis } },
+      formatter: (params: { axisValue: number; value: [number, number] }[]) =>
+        tooltipRows(when.format(params[0]?.axisValue ?? 0), [{ color: o.color, name: o.name, value: percent(params[0]?.value[1] ?? 0) }]),
+    },
+    xAxis: { type: "time", min: o.from, max: o.to, axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel, splitLine: { show: false } },
+    yAxis: { type: "value", min: 0, max: 1, interval: 0.25, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => percent(v) } },
+    series: [
+      {
+        name: o.name,
+        type: "line",
+        data: o.points,
+        color: o.color,
+        step: "end",
+        // A limit with a few readings so far shows them as points: a line needs two.
+        showSymbol: o.points.length < 24,
+        symbolSize: 5,
+        lineStyle: { width: 1.5 },
+        areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(o.color, 0.35) }, { offset: 1, color: withAlpha(o.color, 0.03) }] } },
+        markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: critical, type: "dashed", width: 1 }, data: [{ yAxis: 1 }] },
+      },
+      ...(o.outs.length
+        ? [{ name: "out", type: "scatter", data: o.outs, symbolSize: 9, color: critical, itemStyle: { borderColor: c.surface, borderWidth: 2 }, tooltip: { show: false }, z: 5 }]
+        : []),
+    ],
   };
 }

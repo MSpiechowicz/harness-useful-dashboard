@@ -5,10 +5,11 @@
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Empty from "../components/Empty.svelte";
-  import KeyCountList from "../components/KeyCountList.svelte";
+  import ListCard from "../components/ListCard.svelte";
   import Kpi from "../components/Kpi.svelte";
   import { qs, settled, useFetch, type Totals } from "../lib/api.svelte.ts";
-  import { callTimeline, type CallRow } from "../lib/charts.ts";
+  import type { CallRow } from "../lib/charts.ts";
+  import CallCharts from "../components/CallCharts.svelte";
   import { compact, dateTime, percent, time, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
@@ -25,13 +26,11 @@
   }
 
   const d = useFetch<Detail>(() => `/api/prompt${qs({ id })}`);
-  let tlMetric = $state<"tokens" | "cost">("tokens");
   const p = $derived(d.data?.prompt);
   const tot = $derived(d.data?.totals);
   const hit = $derived(tot && tot.input + tot.cacheRead + tot.cacheWrite ? tot.cacheRead / (tot.input + tot.cacheRead + tot.cacheWrite) : 0);
   const subCost = $derived((d.data?.agents ?? []).filter((a) => a.key !== "main").reduce((a, r) => a + r.cost, 0));
   const toolCalls = $derived((d.data?.tools ?? []).reduce((a, r) => a + r.calls, 0));
-  const timelineOption = $derived.by(() => (void store.dark, d.data && d.data.timeline.length ? callTimeline(d.data.timeline, tlMetric, time) : null));
 </script>
 
 <div class="flex flex-col gap-5">
@@ -52,26 +51,18 @@
       </Card>
 
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("col.cost")} value={usd(tot?.cost)} hint={subCost > 0 ? t("prompts.subagentCost", { cost: usd(subCost) }) : undefined} />
+        <Kpi label={t("col.cost")} value={usd(tot?.cost)} hint={subCost > 0 ? t("prompts.subagentCost", { cost: usd(subCost) }) : tot?.messages ? t("detail.costPerCall", { cost: usd((tot.cost ?? 0) / tot.messages) }) : undefined} />
         <Kpi label={t("col.tokens")} value={compact(tot?.tokens)} hint={`${t("tok.output")}: ${compact(tot?.output)}`} />
         <Kpi label={t("kpi.messages")} value={compact(tot?.messages)} hint={`${compact(toolCalls)} ${t("col.tools")}`} />
-        <Kpi label={t("kpi.cacheHit")} value={percent(hit, 1)} />
+        <Kpi label={t("kpi.cacheHit")} value={percent(hit, 1)} hint={t("kpi.cacheHitHint", { n: compact(tot?.cacheRead) })} />
       </div>
 
-      <Card title={t("chart.timeline")} subtitle={t("prompts.calls", { n: d.data.timeline.length })}>
-        {#snippet actions()}
-          <div class="seg" role="group">
-            <button aria-pressed={tlMetric === "tokens"} onclick={() => (tlMetric = "tokens")}>{t("metric.tokens")}</button>
-            <button aria-pressed={tlMetric === "cost"} onclick={() => (tlMetric = "cost")}>{t("metric.cost")}</button>
-          </div>
-        {/snippet}
-        {#if timelineOption}<Chart option={timelineOption} height={260} />{:else}<Empty compact title={t("empty.noData")} />{/if}
-      </Card>
+      {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} />{/if}
 
       <div class="grid gap-5 lg:grid-cols-3">
-        <Card title={t("tools.topTools")}>{#if d.data.tools.length}<KeyCountList items={d.data.tools.slice(0, 15)} />{:else}<Empty compact title={t("empty.noData")} />{/if}</Card>
-        <Card title={t("tools.files")}>{#if d.data.files.length}<KeyCountList items={d.data.files.slice(0, 15).map((f) => ({ ...f, key: f.key.split(/[\\/]/).slice(-2).join("/") }))} mono />{:else}<Empty compact title={t("empty.noData")} />{/if}</Card>
-        <Card title={t("skills.agents")}><KeyCountList items={d.data.agents} value="cost" /></Card>
+        <ListCard title={t("tools.topTools")} subtitle={t("detail.tools.prompt")} items={d.data.tools} empty={t("detail.noTools")} />
+        <ListCard title={t("tools.files")} subtitle={t("detail.files.prompt")} items={d.data.files} paths empty={t("detail.noFiles")} />
+        <ListCard title={t("skills.agents")} subtitle={t("detail.agents")} items={d.data.agents} value="cost" />
       </div>
     {:else}
       <div class="card"><Empty compact title={t("common.loadFailed")} /></div>

@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { t } from "../lib/i18n.svelte.ts";
   export interface LimitWindow {
     id: string;
     windowMs: number | null;
@@ -28,22 +29,14 @@
     /** The plans the sessions in the window ran on, when the limits were asked for a window. */
     active: { provider: string; source: Source }[] | null;
   }
-</script>
-
-<script lang="ts">
-  import { colorFor } from "../lib/colors.svelte.ts";
-  import { compact, relative, until } from "../lib/format.ts";
-  import { t } from "../lib/i18n.svelte.ts";
-
-  let { data, now }: { data: LimitsResult; now: number } = $props();
 
   const HOUR = 3_600_000;
   const DAY = 24 * HOUR;
-  const NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", copilot: "GitHub Copilot", "google-gemini-cli": "Gemini", xai: "xAI", deepseek: "DeepSeek" };
+  export const NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", copilot: "GitHub Copilot", "google-gemini-cli": "Gemini", xai: "xAI", deepseek: "DeepSeek" };
   const PLANS: Record<string, string> = { prolite: "Pro Lite", max: "Max", pro: "Pro", plus: "Plus", free: "Free", team: "Team", business: "Business", enterprise: "Enterprise", edu: "Edu" };
-  const planName = (p: string) => PLANS[p.toLowerCase()] ?? p.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  export const planName = (p: string) => PLANS[p.toLowerCase()] ?? p.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-  function windowName(w: LimitWindow): string {
+  export function windowName(w: LimitWindow): string {
     const ms = w.windowMs;
     const base =
       w.id === "premium" ? t("live.window.premium")
@@ -55,6 +48,13 @@
       : (w.label ?? w.id);
     return w.scope ? `${base} · ${w.scope}` : base;
   }
+</script>
+
+<script lang="ts">
+  import { colorFor } from "../lib/colors.svelte.ts";
+  import { compact, relative, until } from "../lib/format.ts";
+
+  let { data, now }: { data: LimitsResult; now: number } = $props();
 
   // The bar is what's left, like a battery, in the provider's color. Only when little is left does it turn to a
   // warning color, and the number with it.

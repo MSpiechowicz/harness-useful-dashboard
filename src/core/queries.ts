@@ -91,6 +91,21 @@ export function relativeTo(file: string, project: string | null, home = homedir(
   return home && inside(home) ? `~${file.slice(home.length)}` : file;
 }
 
+/**
+ * A session's title as SQL: the one its harness gave it, else its first prompt on one line, else, for a subagent, its
+ * name. Many sessions never get a title (omp leaves it empty until it names the session, Codex often has none), and
+ * the first prompt says what they were about. Subagents have no prompts of their own (their brief comes from the
+ * parent), but harnesses name them after their task ("TriggerDurability"). `alias` is the sessions table's alias.
+ */
+export function sessionTitle(alias: string): string {
+  // A pasted image is logged as "[Image #1, 1481x890]" ahead of the words: up to two of them are left out of the title.
+  const noImage = (x: string) => `ltrim(CASE WHEN ${x} LIKE '[Image #%]%' THEN substr(${x}, instr(${x}, ']') + 1) ELSE ${x} END)`;
+  const text = noImage(noImage("trim(fp.text)"));
+  return `COALESCE(NULLIF(${alias}.title, ''), (SELECT NULLIF(trim(replace(replace(substr(${text}, 1, 160), char(10), ' '), char(13), ' ')), '')
+    FROM prompts fp WHERE fp.session_id = ${alias}.id AND fp.text IS NOT NULL AND trim(fp.text) <> '' ORDER BY fp.ts LIMIT 1),
+    NULLIF(${alias}.agent, ''))`;
+}
+
 export function projectLabel(path: string | null): string {
   if (!path) return "(none)";
   const parts = path.split(/[\\/]+/).filter(Boolean);
@@ -98,7 +113,7 @@ export function projectLabel(path: string | null): string {
 }
 
 const LOCAL = "'unixepoch', 'localtime'";
-function bucketExpr(bucket: Bucket, col = "u.ts"): string {
+export function bucketExpr(bucket: Bucket, col = "u.ts"): string {
   const t = `${col} / 1000`;
   switch (bucket) {
     case "hour":
@@ -325,7 +340,7 @@ export class Queries {
          SELECT DISTINCT COALESCE(s.parent_session_id, u.session_id) AS id
          FROM usage u LEFT JOIN sessions s ON s.id = u.session_id ${w.sql}
        )
-       SELECT a.id, root.title, root.project, root.provider, root.git_branch AS gitBranch,
+       SELECT a.id, ${sessionTitle("root")} AS title, root.project, root.provider, root.git_branch AS gitBranch,
               COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost, COUNT(u.id) AS messages,
               COUNT(DISTINCT CASE WHEN u.session_id <> a.id THEN u.session_id END) AS subagents,
               (SELECT u2.model FROM usage u2 WHERE u2.session_id = a.id ORDER BY u2.ts DESC LIMIT 1) AS model,
@@ -354,12 +369,12 @@ export class Queries {
     const params: Params = { ...w.params, limit: opts.limit ?? 50, offset: opts.offset ?? 0 };
     let having = "";
     if (opts.q) {
-      having = "HAVING s.title LIKE $q OR s.project LIKE $q OR s.id LIKE $q";
+      having = "HAVING title LIKE $q OR s.project LIKE $q OR s.id LIKE $q";
       params.q = `%${opts.q}%`;
     }
     const sortCol = { cost: "cost", tokens: "tokens", recent: "lastTs", messages: "messages", prompts: "prompts" }[opts.sort ?? "recent"] ?? "lastTs";
     const rows = this.all<Totals & Record<string, unknown> & { id: string }>(
-      `SELECT u.session_id AS id, s.title, s.project, s.provider, s.user, s.host, s.git_branch AS gitBranch,
+      `SELECT u.session_id AS id, ${sessionTitle("s")} AS title, s.project, s.provider, s.user, s.host, s.git_branch AS gitBranch,
               s.agent AS sessionAgent, s.parent_session_id AS parentSessionId, s.client,
               ${TOKEN_SUMS},
               COUNT(DISTINCT u.prompt_id) AS prompts,
@@ -382,6 +397,21 @@ export class Queries {
 
   sessionDetail(id: string) {
     const session = this.get<Record<string, unknown>>(`SELECT * FROM sessions WHERE id = $id`, { id });
+    const titleOf = (sid: string) => this.get<{ title: string | null }>(`SELECT ${sessionTitle("s")} AS title FROM sessions s WHERE s.id = $id`, { id: sid })?.title ?? null;
+    if (session) {
+      session.title = titleOf(id);
+      // A subagent's page names the session that started it.
+      if (typeof session.parent_session_id === "string") {
+        const parentId = session.parent_session_id;
+        const parent = this.get<{ provider: string; started_at: number | null }>(`SELECT provider, started_at FROM sessions WHERE id = $id`, { id: parentId });
+        // The parent's whole cost, its subagents included: what this subagent's share is of.
+        const cost = this.get<{ cost: number }>(
+          `SELECT COALESCE(SUM(u.cost_usd), 0) AS cost FROM usage u JOIN sessions s ON s.id = u.session_id WHERE s.id = $id OR s.parent_session_id = $id`,
+          { id: parentId },
+        )!.cost;
+        session.parent = { id: parentId, title: titleOf(parentId), provider: parent?.provider ?? null, startedAt: parent?.started_at ?? null, cost };
+      }
+    }
     const totals = this.get<Totals>(`SELECT ${TOKEN_SUMS} FROM usage u WHERE u.session_id = $id`, { id });
     const prompts = this.all<Record<string, unknown>>(
       `SELECT p.id, p.ts, p.text, p.skill, p.is_command AS isCommand,
@@ -392,7 +422,7 @@ export class Queries {
       { id },
     );
     const timeline = this.all<Record<string, unknown>>(
-      `SELECT u.ts, u.model, u.agent, u.input_tokens AS input, u.output_tokens AS output,
+      `SELECT u.ts, u.model, u.agent, COALESCE(u.spawn_ref, u.session_id) AS run, u.input_tokens AS input, u.output_tokens AS output,
               u.cache_read_tokens AS cacheRead, (u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite,
               u.cost_usd AS cost, u.prompt_id AS promptId
        FROM usage u WHERE u.session_id = $id ORDER BY u.ts`,
@@ -406,11 +436,11 @@ export class Queries {
     );
     const files = this.all(
       `SELECT file_path AS key, COUNT(*) AS calls FROM tool_calls WHERE session_id = $id AND file_path IS NOT NULL
-       GROUP BY file_path ORDER BY calls DESC LIMIT 25`,
+       GROUP BY file_path ORDER BY calls DESC LIMIT 500`,
       { id },
     );
     const children = this.all(
-      `SELECT s.id, s.agent, s.title, COALESCE(SUM(u.total_tokens),0) AS tokens, COALESCE(SUM(u.cost_usd),0) AS cost
+      `SELECT s.id, s.agent, ${sessionTitle("s")} AS title, COALESCE(SUM(u.total_tokens),0) AS tokens, COALESCE(SUM(u.cost_usd),0) AS cost
        FROM sessions s LEFT JOIN usage u ON u.session_id = s.id WHERE s.parent_session_id = $id GROUP BY s.id ORDER BY cost DESC`,
       { id },
     );
@@ -441,7 +471,7 @@ export class Queries {
     const rows = this.all<Record<string, unknown> & { id: string }>(
       `SELECT page.*, (SELECT COUNT(*) FROM tool_calls t WHERE t.prompt_id = page.id) AS toolCalls
        FROM (SELECT p.id, p.ts, p.text, p.skill, p.is_command AS isCommand, p.session_id AS sessionId, p.provider,
-                    s.project, s.title AS sessionTitle,
+                    s.project, ${sessionTitle("s")} AS sessionTitle,
                     agg.tokens, agg.cost, agg.messages, agg.input, agg.output, agg.cacheRead, agg.cacheWrite, agg.models, agg.subagentCost
              FROM (SELECT u.prompt_id, SUM(u.total_tokens) AS tokens, SUM(u.cost_usd) AS cost, COUNT(*) AS messages,
                           SUM(u.input_tokens) AS input, SUM(u.output_tokens) AS output, SUM(u.cache_read_tokens) AS cacheRead,
@@ -466,19 +496,19 @@ export class Queries {
 
   promptDetail(id: string) {
     const prompt = this.get<Record<string, unknown>>(
-      `SELECT p.*, s.project, s.title AS sessionTitle FROM prompts p LEFT JOIN sessions s ON s.id = p.session_id WHERE p.id = $id`,
+      `SELECT p.*, s.project, ${sessionTitle("s")} AS sessionTitle FROM prompts p LEFT JOIN sessions s ON s.id = p.session_id WHERE p.id = $id`,
       { id },
     );
     const totals = this.get<Totals>(`SELECT ${TOKEN_SUMS} FROM usage u WHERE u.prompt_id = $id`, { id });
     const timeline = this.all(
-      `SELECT u.ts, u.model, u.agent, u.input_tokens AS input, u.output_tokens AS output, u.cache_read_tokens AS cacheRead,
+      `SELECT u.ts, u.model, u.agent, COALESCE(u.spawn_ref, u.session_id) AS run, u.input_tokens AS input, u.output_tokens AS output, u.cache_read_tokens AS cacheRead,
               (u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite, u.cost_usd AS cost
        FROM usage u WHERE u.prompt_id = $id ORDER BY u.ts`,
       { id },
     );
     const tools = this.all(`SELECT tool AS key, COUNT(*) AS calls FROM tool_calls WHERE prompt_id = $id GROUP BY tool ORDER BY calls DESC`, { id });
     const files = this.all(
-      `SELECT file_path AS key, COUNT(*) AS calls FROM tool_calls WHERE prompt_id = $id AND file_path IS NOT NULL GROUP BY file_path ORDER BY calls DESC LIMIT 25`,
+      `SELECT file_path AS key, COUNT(*) AS calls FROM tool_calls WHERE prompt_id = $id AND file_path IS NOT NULL GROUP BY file_path ORDER BY calls DESC LIMIT 500`,
       { id },
     );
     const agents = this.all(`SELECT u.agent AS key, ${TOKEN_SUMS} FROM usage u WHERE u.prompt_id = $id GROUP BY u.agent ORDER BY cost DESC`, { id });

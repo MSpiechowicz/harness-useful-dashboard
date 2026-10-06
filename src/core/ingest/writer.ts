@@ -1,5 +1,6 @@
 import type { Database, Statement } from "bun:sqlite";
 import type { PriceBook } from "../pricing.ts";
+import { readingParams, readingStatement } from "../plans.ts";
 import { projectResolver } from "../project.ts";
 import type { IngestSink, LimitRecord, OutcomeRecord, PromptRecord, ResponseMetaRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
 
@@ -21,6 +22,7 @@ export class DbWriter implements IngestSink {
   private sLimit: Statement;
   private sMeta: Statement;
   private sOutcome: Statement;
+  private sReading: Statement;
 
   constructor(
     db: Database,
@@ -29,9 +31,9 @@ export class DbWriter implements IngestSink {
   ) {
     this.sSession = db.prepare(`
       INSERT INTO sessions (id, provider, native_id, project, user, host, title, git_branch, client, client_version,
-                            parent_session_id, agent, started_at, ended_at)
+                            parent_session_id, agent, brief, started_at, ended_at)
       VALUES ($id, $provider, $nativeId, $project, $user, $host, $title, $gitBranch, $client, $clientVersion,
-              $parentSessionId, $agent, $startedAt, $endedAt)
+              $parentSessionId, $agent, $brief, $startedAt, $endedAt)
       ON CONFLICT(id) DO UPDATE SET
         project           = COALESCE(sessions.project, excluded.project),
         title             = COALESCE(excluded.title, sessions.title),
@@ -40,6 +42,7 @@ export class DbWriter implements IngestSink {
         client_version    = COALESCE(excluded.client_version, sessions.client_version),
         parent_session_id = COALESCE(sessions.parent_session_id, excluded.parent_session_id),
         agent             = COALESCE(sessions.agent, excluded.agent),
+        brief             = COALESCE(sessions.brief, excluded.brief),
         started_at        = MIN(COALESCE(sessions.started_at, excluded.started_at), COALESCE(excluded.started_at, sessions.started_at)),
         ended_at          = MAX(COALESCE(sessions.ended_at, excluded.ended_at), COALESCE(excluded.ended_at, sessions.ended_at))
     `);
@@ -97,6 +100,7 @@ export class DbWriter implements IngestSink {
         effort      = COALESCE(response_meta.effort, excluded.effort),
         stop_reason = COALESCE(excluded.stop_reason, response_meta.stop_reason)
     `);
+    this.sReading = readingStatement(db);
     this.sOutcome = db.prepare(`
       INSERT INTO outcomes (id, provider, session_id, ts, project, user, host, model, agent, effort, kind)
       VALUES ($id, $provider, $sessionId, $ts, $project, $user, $host, $model, $agent, $effort, $kind)
@@ -112,6 +116,7 @@ export class DbWriter implements IngestSink {
       project: this.project(s.project),
       user: this.identity.user,
       host: this.identity.host,
+      brief: s.brief ?? null,
       title: s.title ?? null,
       gitBranch: s.gitBranch ?? null,
       client: s.client ?? null,
@@ -232,6 +237,18 @@ export class DbWriter implements IngestSink {
       plan: l.plan,
       ts: l.ts,
     });
+    this.sReading.run(
+      readingParams(this.identity.host, {
+        reportKey: `${l.provider}:logs`,
+        provider: l.provider,
+        plan: l.plan,
+        windowId: l.windowId,
+        windowMs: l.windowMinutes != null ? l.windowMinutes * 60_000 : null,
+        usedFraction: l.usedPercent / 100,
+        resetsAt: l.resetsAt,
+        observedAt: l.ts,
+      }),
+    );
   }
 }
 

@@ -80,7 +80,7 @@
       <div class="card"><Empty /></div>
     {:else if d.data}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi hero label={t("cache.hitRate")} value={percent(d.data.totals.hitRate, 1)} />
+        <Kpi label={t("cache.hitRate")} value={percent(d.data.totals.hitRate, 1)} hint={t("cache.hitRateKpiHint")} />
         <Kpi label={t("cache.savings")} value={usd(d.data.totals.savings)} hint={t("cache.savingsHint")} />
         <Kpi label={t("cache.writeCost")} value={usd(d.data.totals.writeCost)} hint={`${compact(d.data.totals.cacheWrite + d.data.totals.cacheWrite1h)} ${t("metric.tokens")}`} />
         <Kpi label={t("cache.readCost")} value={usd(d.data.totals.readCost)} hint={`${compact(d.data.totals.cacheRead)} ${t("metric.tokens")}`} />

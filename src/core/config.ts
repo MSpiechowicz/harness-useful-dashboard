@@ -45,6 +45,8 @@ export interface AppConfig {
   sources: SourceConfig;
   /** Where the Live view reads how much of each plan limit is left (see limits.ts). */
   limits: { claude: boolean; omp: boolean; codex: boolean; pi: boolean; opencode: boolean };
+  /** What each plan or account costs a month in USD, keyed like the billing breakdown ("claude", "openai-codex", …). */
+  planPrices: Record<string, number>;
 }
 
 export function defaultConfig(): AppConfig {
@@ -76,6 +78,7 @@ export function defaultConfig(): AppConfig {
       enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true },
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
+    planPrices: {},
   };
 }
 

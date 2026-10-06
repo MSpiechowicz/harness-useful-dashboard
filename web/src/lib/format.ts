@@ -1,4 +1,4 @@
-import { i18n, t } from "./i18n.svelte.ts";
+import { i18n, t, type MessageKey } from "./i18n.svelte.ts";
 
 const cache = new Map<string, Intl.NumberFormat>();
 function nf(opts: Intl.NumberFormatOptions): Intl.NumberFormat {
@@ -35,12 +35,13 @@ export function integer(n: number | null | undefined): string {
   return nf({ maximumFractionDigits: 0 }).format(n);
 }
 
-export function usd(n: number | null | undefined, opts: { compact?: boolean } = {}): string {
+export function usd(n: number | null | undefined, opts: { compact?: boolean; whole?: boolean } = {}): string {
   if (n == null || !Number.isFinite(n)) return "–";
   const abs = Math.abs(n);
   // The short "$" in every language: "1198 $" rather than "1198 USD" (Polish) or "1 198 $US" (French).
   if (opts.compact && abs >= 10_000) return nf({ style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", notation: "compact", maximumFractionDigits: 1 }).format(n);
-  const digits = abs > 0 && abs < 0.01 ? 4 : abs < 100 ? 2 : 0;
+  // Round amounts such as thresholds read as "$5", not "$5.00".
+  const digits = opts.whole ? 0 : abs > 0 && abs < 0.01 ? 4 : abs < 100 ? 2 : 0;
   return nf({ style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 }
 
@@ -100,9 +101,26 @@ export function relative(ts: number | null | undefined): string {
   return shortDate(ts);
 }
 
+/** A count with the language's singular or plural message: "1 prompt", "12 prompts". */
+export function count(n: number, one: MessageKey, other: MessageKey): string {
+  return t(new Intl.PluralRules(i18n.locale).select(n) === "one" ? one : other, { n: nf({ maximumFractionDigits: 0 }).format(n) });
+}
+
 /** A count of days by the language's plural rules: "1 day", "12 days". */
 export function days(n: number): string {
   return t(new Intl.PluralRules(i18n.locale).select(n) === "one" ? "common.day" : "common.days", { n: nf({ maximumFractionDigits: 0 }).format(n) });
+}
+
+/** A length of time in its two largest units, hours at most: "12 s", "4 min 10 s", "157 h 20 min". */
+export function duration(ms: number | null | undefined): string {
+  if (ms == null) return "–";
+  const unit = (n: number, u: "hour" | "minute" | "second", digits = 0) => nf({ style: "unit", unit: u, unitDisplay: "narrow", maximumFractionDigits: digits }).format(n);
+  const s = ms / 1000;
+  if (s < 60) return unit(s, "second", s < 10 ? 1 : 0);
+  const minutes = Math.round(s / 60);
+  if (minutes < 60) return s < 600 && Math.round(s % 60) ? `${unit(Math.floor(s / 60), "minute")} ${unit(Math.round(s % 60), "second")}` : unit(minutes, "minute");
+  const h = Math.floor(minutes / 60);
+  return minutes % 60 && h < 100 ? `${unit(h, "hour")} ${unit(minutes % 60, "minute")}` : unit(h, "hour");
 }
 
 /** How long until a moment, in its two largest units: "4h 30m", "1d 10h", "12m". */
@@ -115,6 +133,32 @@ export function until(ts: number | null | undefined, now = Date.now()): string {
   // Units in the UI's language, as short as it writes them: "3h 22m", "3 h 22 min", "3 Std. 22 Min.".
   const unit = (n: number, u: "day" | "hour" | "minute") => nf({ style: "unit", unit: u, unitDisplay: "narrow" }).format(n);
   return d ? `${unit(d, "day")} ${unit(h, "hour")}` : h ? `${unit(h, "hour")} ${unit(m, "minute")}` : unit(m, "minute");
+}
+
+/**
+ * Each path shortened to its last two parts, or more where that is needed to tell it apart from another in the list:
+ * "tests/a.rs" and "src/a.rs" stay short, "x/tests/a.rs" and "y/tests/a.rs" keep a third part.
+ */
+export function shortPaths(paths: string[]): string[] {
+  const parts = paths.map((p) => p.split(/[\\/]/).filter(Boolean));
+  const keep = parts.map(() => 2);
+  for (let round = 0; round < 32; round++) {
+    const tails = parts.map((ps, i) => ps.slice(-keep[i]!).join("/"));
+    const seen = new Map<string, number[]>();
+    tails.forEach((tail, i) => seen.set(tail, [...(seen.get(tail) ?? []), i]));
+    let grew = false;
+    for (const idx of seen.values()) {
+      if (idx.length < 2) continue;
+      for (const i of idx) {
+        if (keep[i]! < parts[i]!.length) {
+          keep[i]!++;
+          grew = true;
+        }
+      }
+    }
+    if (!grew) return tails;
+  }
+  return parts.map((ps, i) => ps.slice(-keep[i]!).join("/"));
 }
 
 export function shortPath(p: string | null | undefined, keep = 2): string {

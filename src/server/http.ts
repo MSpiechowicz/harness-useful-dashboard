@@ -2,12 +2,16 @@ import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { importCursorCsv } from "../core/ingest/cursor.ts";
 import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
+import { branchDetail, branches } from "../core/branches.ts";
 import { drift } from "../core/drift.ts";
+import { friction } from "../core/friction.ts";
 import { defaultDbPath } from "../core/paths.ts";
 import type { Bucket, Dimension, Filters, Metric, SeriesGroup } from "../core/queries.ts";
 import { SHARED_FOLDER, dbTarget, findSyncFolders } from "../core/syncFolders.ts";
-import { activePlans, LimitsCache } from "../core/limits.ts";
+import { activePlans } from "../core/limits.ts";
+import { limitHistory, planValue } from "../core/plans.ts";
 import { generateTips } from "../core/tips.ts";
+import { timing } from "../core/timing.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
 import { applyUpdate, checkForUpdate, isCompiledBinary } from "./update.ts";
@@ -112,7 +116,6 @@ function isAllowed(req: Request, url: URL): boolean {
 }
 
 export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks) {
-  const limits = new LimitsCache();
   return async function handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (!isAllowed(req, url)) return error("forbidden", 403);
@@ -181,6 +184,16 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           return json(q.fileList(f, { sort: sp.get("sort") ?? undefined, limit: Math.min(200, Number(sp.get("limit") ?? 50)), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
         case "/api/cache":
           return json(q.cache(f, pick(sp.get("bucket"), BUCKETS, "day")));
+        case "/api/branches":
+          return json(branches(app.db, f));
+        case "/api/branch":
+          return json(branchDetail(app.db, sp.get("id") ?? ""));
+        case "/api/friction":
+          return json(friction(app.db, f, pick(sp.get("bucket"), BUCKETS, "day")));
+        case "/api/time":
+          return json(timing(app.db, f, pick(sp.get("bucket"), BUCKETS, "day")));
+        case "/api/plans":
+          return json({ ...planValue(app.db, f, pick(sp.get("bucket"), BUCKETS, "day"), app.cfg.planPrices), history: limitHistory(app.db, f) });
         case "/api/tips":
           return json(generateTips(app.db, f, app.priceBook()));
         case "/api/live": {
@@ -193,7 +206,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           // With `minutes`, only the plans the sessions of that window ran on are asked about.
           const minutes = Number(sp.get("minutes"));
           const active = minutes > 0 ? activePlans(app.db, Date.now() - minutes * 60_000) : undefined;
-          return json({ ...(await limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active)), active: active ?? null });
+          return json({ ...(await app.limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active)), active: active ?? null });
         }
         case "/api/filters":
           return json(q.filters(f));
@@ -234,6 +247,11 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           }
           if (body.sources) patch.sources = body.sources;
           if (body.limits && typeof body.limits === "object") patch.limits = body.limits;
+          if (body.planPrices && typeof body.planPrices === "object") {
+            const prices: Record<string, number> = {};
+            for (const [k, v] of Object.entries(body.planPrices)) if (typeof v === "number" && Number.isFinite(v) && v >= 0) prices[k] = v;
+            patch.planPrices = prices;
+          }
           app.updateConfig(patch);
           if (typeof body.dbPath === "string") {
             const target = dbTarget(body.dbPath, app.dbPath, defaultDbPath());

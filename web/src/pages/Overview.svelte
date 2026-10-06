@@ -69,7 +69,6 @@
       <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <div class="col-span-2 md:col-span-1 xl:col-span-2">
           <Kpi
-            hero
             label={store.metric === "cost" ? t("kpi.cost") : t("kpi.tokens")}
             value={s ? (store.metric === "cost" ? usd(s.cost) : compact(s.tokens)) : "…"}
             current={s ? (store.metric === "cost" ? s.cost : s.tokens) : undefined}

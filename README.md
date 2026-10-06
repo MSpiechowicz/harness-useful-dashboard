@@ -13,6 +13,10 @@ everything in a local SQLite database and shows clear, interactive charts of whe
 - **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads, OpenCode subagent sessions and omp subagents are tied back to the spawning prompt or parent session
 - **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
 - **Cache analytics**: hit rate over time, money saved by caching, and what cache writes cost
+- **Branches**: what each piece of work cost, per git branch, with its sessions and the files it changed
+- **Time**: how long the agents worked, how many sessions ran at once, and the cost per active hour
+- **Friction**: failed and declined tool calls and interrupted prompts, by tool, model and session
+- **Plans**: what each subscription is worth at API prices against what you pay, and how full its limits got over time
 - **Rule-based tips**: low cache hit rate, context bloat, premium models on small prompts, tool loops, spikes, and more
 - **Live view**: tokens per minute as you work, the sessions running right now, and how much of your plan limits is left
   (Claude's 5-hour and weekly limits, Codex, and every plan omp is logged in to, such as GitHub Copilot)
@@ -254,7 +258,7 @@ Requires [Bun](https://bun.sh) ≥ 1.2.
 
 ```sh
 bun install
-bun run dev        # API on :4317 (watch mode) + Vite UI on http://localhost:5173
+bun run dev        # API on :4318 (watch mode) + Vite UI on http://localhost:5173
 bun test           # unit + integration tests
 bun run check      # TypeScript + svelte-check
 bun run build      # standalone binary for this platform → dist/

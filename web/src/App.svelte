@@ -1,7 +1,7 @@
 <script lang="ts">
   import Link from "./components/Link.svelte";
   import {
-    Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
+    Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
     Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
@@ -12,17 +12,22 @@
   import { t, type MessageKey } from "./lib/i18n.svelte.ts";
   import { live } from "./lib/live.svelte.ts";
   import { store } from "./lib/state.svelte.ts";
+  import BranchDetail from "./pages/BranchDetail.svelte";
+  import Branches from "./pages/Branches.svelte";
   import Breakdown from "./pages/Breakdown.svelte";
   import Cache from "./pages/Cache.svelte";
   import Files from "./pages/Files.svelte";
+  import Friction from "./pages/Friction.svelte";
   import Live from "./pages/Live.svelte";
   import ModelDrift from "./pages/ModelDrift.svelte";
   import Overview from "./pages/Overview.svelte";
+  import Plans from "./pages/Plans.svelte";
   import PromptDetail from "./pages/PromptDetail.svelte";
   import Prompts from "./pages/Prompts.svelte";
   import SessionDetail from "./pages/SessionDetail.svelte";
   import Sessions from "./pages/Sessions.svelte";
   import Settings from "./pages/Settings.svelte";
+  import Time from "./pages/Time.svelte";
   import Tips from "./pages/Tips.svelte";
   import Tools from "./pages/Tools.svelte";
   import Trends from "./pages/Trends.svelte";
@@ -40,6 +45,7 @@
     ] },
     { label: "nav.group.analyze", items: [
       { page: "projects", label: "nav.projects", icon: FolderKanban },
+      { page: "branches", label: "nav.branches", icon: GitBranch },
       { page: "models", label: "nav.models", icon: Cpu },
       { page: "drift", label: "nav.drift", icon: ChartSpline },
       { page: "providers", label: "nav.providers", icon: Boxes },
@@ -50,10 +56,13 @@
     { label: "nav.group.activity", items: [
       { page: "sessions", label: "nav.sessions", icon: Layers },
       { page: "prompts", label: "nav.prompts", icon: MessageSquareText },
+      { page: "time", label: "nav.time", icon: Timer },
       { page: "tools", label: "nav.tools", icon: Wrench },
       { page: "files", label: "nav.files", icon: FileCode },
     ] },
     { label: "nav.group.optimize", items: [
+      { page: "plans", label: "nav.plans", icon: Wallet },
+      { page: "friction", label: "nav.friction", icon: OctagonAlert },
       { page: "cache", label: "nav.cache", icon: Database },
       { page: "tips", label: "nav.tips", icon: Lightbulb },
     ] },
@@ -70,9 +79,9 @@
   // Live shows the last minutes as they happen: the range and filters don't apply to it.
   /** Why a page has no filters, shown where they would be. */
   const noFiltersNote = $derived<MessageKey>(
-    page === "live" ? "filters.none.live" : page === "settings" ? "filters.none.settings" : page === "prompts" ? "filters.none.prompt" : "filters.none.session",
+    page === "live" ? "filters.none.live" : page === "settings" ? "filters.none.settings" : page === "prompts" ? "filters.none.prompt" : page === "branches" ? "filters.none.branch" : "filters.none.session",
   );
-  const showFilters = $derived(page !== "settings" && page !== "live" && !(page === "sessions" && id) && !(page === "prompts" && id));
+  const showFilters = $derived(page !== "settings" && page !== "live" && !(page === "sessions" && id) && !(page === "prompts" && id) && !(page === "branches" && id));
   // For the Live menu icon below. A minute is precise enough.
   let now = $state(Date.now());
   $effect(() => {
@@ -117,15 +126,15 @@
     <nav class="flex-1 overflow-y-auto px-2 py-2">
       {#each groups as g, gi (gi)}
         {#if g.label}
-          <div class="mt-4 mb-1 px-3 text-[11px] font-medium tracking-wide text-muted uppercase" class:lg:hidden={collapsed}>{t(g.label)}</div>
-          <!-- Collapsed, a rule takes the place of the group's name, at the same height. -->
-          {#if collapsed}<div class="mx-3 hidden h-[34px] items-center lg:flex"><div class="h-px w-full bg-line"></div></div>{/if}
+          <div class="mt-3 mb-1 h-4 px-3 text-[11px] leading-4 font-medium tracking-wide text-muted uppercase" class:lg:hidden={collapsed}>{t(g.label)}</div>
+          <!-- Collapsed, a rule takes the place of the group's name, at the same height (12 + 16 + 4). -->
+          {#if collapsed}<div class="mx-3 hidden h-8 items-center lg:flex"><div class="h-px w-full bg-line"></div></div>{/if}
         {/if}
         {#each g.items as item (item.page)}
           <Link
             to="#/{item.page}"
             onclick={() => (menuOpen = false)}
-            class="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors {collapsed ? 'lg:justify-center lg:px-0' : ''} {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
+            class="flex h-7 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors {collapsed ? 'lg:justify-center lg:px-0' : ''} {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
             aria-current={isActive(item.page) ? "page" : undefined}
             aria-label={collapsed ? t(item.label) : undefined}
             title={collapsed ? t(item.label) : undefined}
@@ -137,7 +146,7 @@
       <!-- The last menu item, under Settings: collapse to icons, or expand again. Wide screens only: small ones use the drawer. -->
       <button
         type="button"
-        class="hidden w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink lg:flex {collapsed ? 'lg:justify-center lg:px-0' : ''}"
+        class="hidden h-7 w-full items-center gap-2.5 rounded-lg px-3 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink lg:flex {collapsed ? 'lg:justify-center lg:px-0' : ''}"
         aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
         title={collapsed ? t("nav.expand") : t("nav.collapse")}
         aria-expanded={!collapsed}
@@ -155,14 +164,15 @@
           <ThemeToggle />
         </div>
       </div>
-      <div class="flex items-center gap-2 px-1 text-[11px] text-muted {collapsed ? 'lg:justify-center' : ''}" title={collapsed ? `${live.connected ? updated : t("status.offline")} · v${live.status?.version ?? ""}` : live.status?.dbPath}>
+      <!-- A fixed height: the scanning icon must not grow the footer, which would push the menu above it. -->
+      <div class="flex h-4 items-center gap-2 px-1 text-[11px] text-muted {collapsed ? 'lg:justify-center' : ''}" title={collapsed ? `${live.connected ? updated : t("status.offline")} · v${live.status?.version ?? ""}` : live.status?.dbPath}>
         <!-- Connected, the dot pulses: the dashboard keeps updating on its own. Offline it stays still and red. -->
         <span class="relative flex size-2 shrink-0">
           {#if live.connected}<span class="absolute inline-flex size-full animate-ping rounded-full opacity-60" style:background="var(--status-good)"></span>{/if}
           <span class="relative inline-flex size-2 rounded-full" style:background={live.connected ? "var(--status-good)" : "var(--status-critical)"}></span>
         </span>
         <span class="flex min-w-0 flex-1 items-center gap-2" class:lg:hidden={collapsed}>
-          <span class="min-w-0 truncate" title={live.connected ? updated : undefined}>
+          <span class="flex min-w-0 items-center gap-1 truncate" title={live.connected ? updated : undefined}>
           {#if live.scanning && longScan}
             <Gauge size={12} class="animate-pulse" />{t("status.scanning", live.scanning)}
           {:else if live.connected}
@@ -203,6 +213,8 @@
         {:else if page === "live"}<Live />
         {:else if page === "trends"}<Trends />
         {:else if page === "projects"}<Breakdown dim="project" />
+        {:else if page === "branches" && id}<BranchDetail {id} />
+        {:else if page === "branches"}<Branches />
         {:else if page === "models"}<Breakdown dim="model" />
         {:else if page === "drift"}<ModelDrift />
         {:else if page === "providers"}<Breakdown dim="provider" />
@@ -215,6 +227,9 @@
         {:else if page === "prompts"}<Prompts />
         {:else if page === "tools"}<Tools />
         {:else if page === "files"}<Files />
+        {:else if page === "time"}<Time />
+        {:else if page === "friction"}<Friction />
+        {:else if page === "plans"}<Plans />
         {:else if page === "cache"}<Cache />
         {:else if page === "tips"}<Tips />
         {:else if page === "settings"}<Settings />

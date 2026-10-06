@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { recordReports } from "./plans.ts";
 
 /**
  * How much of their plan limits the user has left, from the places that know:
@@ -567,6 +568,15 @@ export class LimitsCache {
     if (on("codex")) {
       const codex = codexLimits(db, host, now);
       if (codex) reports.push(codex);
+    }
+    // Fresh readings go into the history the plans view draws. A reading kept from earlier is already there.
+    const fresh = reports.filter((r) => now - r.observedAt < FRESH_MS);
+    if (fresh.length) {
+      try {
+        recordReports(db, host, fresh);
+      } catch (e) {
+        console.error("[limits] could not keep the readings:", e);
+      }
     }
     const shown = active ? reports.filter((r) => active.some((a) => a.provider === r.provider && a.source === r.source)) : reports;
     return { reports: shown, problems, fetchedAt: now };
