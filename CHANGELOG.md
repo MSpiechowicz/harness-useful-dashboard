@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.1...v1.3.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* offer the update install in Settings and keep the sidebar notice current ([bb6cff4](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/bb6cff463a6950896fa59d811e7d52d1dfcdc744))
+
 ## [1.3.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.0...v1.3.1) (2026-10-06)
 
 
