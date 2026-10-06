@@ -1,3 +1,11 @@
+## [1.3.6](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.5...v1.3.6) (2026-10-06)
+
+
+### Bug Fixes
+
+* keep the menu button level with the first row of filters ([122de64](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/122de640e39725b0249e02550b310519dfe99a7f))
+* show averages under the overview tiles when there is nothing to compare ([d684689](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/d684689bd410c739a43ebb4aba996f85b89192db))
+
 ## [1.3.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.4...v1.3.5) (2026-10-06)
 
 
