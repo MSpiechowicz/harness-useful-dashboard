@@ -1,3 +1,10 @@
+## [1.3.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.2...v1.3.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* install updates where the app lives, and restart it after a CLI update ([68ab0de](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/68ab0dec9ec4bd7e6295d55bca5fd4247e09d8a9))
+
 ## [1.3.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.1...v1.3.2) (2026-10-06)
 
 
