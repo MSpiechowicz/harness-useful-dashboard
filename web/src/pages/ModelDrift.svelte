@@ -5,6 +5,7 @@
   import Dropdown from "../components/Dropdown.svelte";
   import Empty from "../components/Empty.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import Switch from "../components/Switch.svelte";
   import TableCard from "../components/TableCard.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch, type Drift, type DriftComparison, type DriftMetric } from "../lib/api.svelte.ts";
@@ -74,7 +75,7 @@
           counts: s.counts,
           band: s.comparison.band,
           recentFrom,
-          versions: data.versions,
+          versions: store.showDriftUpdates ? data.versions : [],
           name: label(s.key),
           format: FORMAT[s.key],
           labels: { samples: t("drift.samples"), usual: t("drift.usualRange"), update: t("drift.update"), recent: t("drift.recent"),
@@ -148,7 +149,11 @@
         <span class="flex items-center gap-1.5"><span class="h-0.5 w-3.5 rounded-full bg-accent"></span>{t("drift.legend.daily")}</span>
         <span class="flex items-center gap-1.5"><span class="h-3 w-3.5 rounded-sm bg-accent/20"></span>{t("drift.usualRange")}</span>
         <span class="flex items-center gap-1.5"><span class="h-3 w-3.5 rounded-sm bg-ink-2/20"></span>{t("drift.legend.recent", { n: d.data.window.recentDays })}</span>
-        <span class="flex items-center gap-1.5"><span class="h-3.5 w-0 border-l border-dashed border-muted"></span>{t("drift.update")}</span>
+        <!-- Client updates can crowd a chart: a switch hides their lines (remembered in this browser). -->
+        <span class="flex items-center gap-1.5">
+          <Switch checked={store.showDriftUpdates} label={t("drift.showUpdates")} onchange={(v) => store.setShowDriftUpdates(v)} />
+          <span class="h-3.5 w-0 border-l border-dashed border-muted"></span>{t("drift.update")}
+        </span>
       </div>
 
       <div class="grid gap-5 xl:grid-cols-2">

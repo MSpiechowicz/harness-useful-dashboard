@@ -378,6 +378,7 @@ export const en = {
   "drift.window.baseline": "{n} days before",
   "drift.window.recent": "Last {n} days",
   "drift.update": "Client update",
+  "drift.showUpdates": "Show client updates",
   "drift.recent": "compared",
   "drift.allModels": "All models",
   "drift.allModelsHint": "Change of each measure against the model's usual level. Pick a row to see its charts.",

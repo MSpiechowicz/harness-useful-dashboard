@@ -380,6 +380,7 @@ export const fr: Record<MessageKey, string> = {
   "drift.window.baseline": "{n} jours précédents",
   "drift.window.recent": "{n} derniers jours",
   "drift.update": "Mise à jour du client",
+  "drift.showUpdates": "Afficher les mises à jour du client",
   "drift.recent": "comparé",
   "drift.allModels": "Tous les modèles",
   "drift.allModelsHint": "Évolution de chaque mesure par rapport au niveau habituel du modèle. Choisissez une ligne pour voir ses graphiques.",
