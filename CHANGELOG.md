@@ -1,3 +1,15 @@
+# [1.6.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.5.2...v1.6.0) (2026-10-06)
+
+
+### Bug Fixes
+
+* show times on a 24-hour clock in every language ([3780d23](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/3780d23eddb20ae23d4b1533abad1c94923fe426))
+
+
+### Features
+
+* animate the Live menu icon while new usage comes in, refresh pages calmly ([be14f9b](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/be14f9b41ac0d3538e48f970b3de08b3ee81582b))
+
 ## [1.5.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.5.1...v1.5.2) (2026-10-06)
 
 
