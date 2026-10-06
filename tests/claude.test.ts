@@ -115,6 +115,18 @@ describe("Claude Code ingest", () => {
     expect(tools.find((t) => t.tool === "Grep").agent).toBe("Explore");
   });
 
+  test("keeps fast mode when only a later streamed copy of a message reports it", async () => {
+    const root = tempDir();
+    writeJsonl(join(root, "claude", "projects", "-work-alpha", `${CLAUDE_SESSION}.jsonl`), [
+      claudeUser("Go", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }),
+      claudeAssistant({ id: "msg_f", ts: "2026-09-01T10:00:01.000Z", usage: { output_tokens: 100 } }),
+      claudeAssistant({ id: "msg_f", ts: "2026-09-01T10:00:02.000Z", usage: { output_tokens: 100, speed: "fast" } }),
+    ]);
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    expect(db.query<any, []>("SELECT speed FROM usage").get().speed).toBe("fast");
+  });
+
   test("rescanning is idempotent", async () => {
     const { root } = setup();
     const db = memDb();

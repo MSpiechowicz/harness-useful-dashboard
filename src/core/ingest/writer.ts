@@ -67,6 +67,7 @@ export class DbWriter implements IngestSink {
         prompt_id             = COALESCE(usage.prompt_id, excluded.prompt_id),
         skill                 = COALESCE(usage.skill, excluded.skill),
         billing               = COALESCE(usage.billing, excluded.billing),
+        speed                 = COALESCE(usage.speed, excluded.speed),
         premium_requests      = MAX(usage.premium_requests, excluded.premium_requests)
     `);
     // Only a newer reading replaces the one kept, so rereading an old log can't roll a limit back.
