@@ -496,14 +496,16 @@ export function driftLine(o: {
   const lo = known.length ? Math.min(...known) : 0;
   const hi = known.length ? Math.max(...known) : 1;
   // Rounded to a step of 1, 2, 2.5 or 5 × 10ⁿ so the axis labels stay even.
-  const pad = (hi - lo || Math.abs(hi) || 1) * 0.1;
-  const raw = (hi - lo + 2 * pad) / 4;
+  // A flat line (all zeros, say) still gets an axis at least one unit tall.
+  const span = Math.max(hi - lo, 1);
+  const pad = span * 0.1;
+  const raw = (span + 2 * pad) / 4;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = ([1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) ?? 10) * mag;
   const extent = { min: Math.max(0, Math.floor((lo - pad) / step) * step), max: Math.ceil((hi + pad) / step) * step };
   const areas: unknown[] = [];
   if (o.band) areas.push([{ yAxis: o.band.lo, itemStyle: { color: withAlpha(color, 0.1) } }, { yAxis: o.band.hi }]);
-  if (recentIdx >= 0) areas.push([{ xAxis: recentIdx, itemStyle: { color: withAlpha(cssVar("--data"), 0.08) } }, { xAxis: o.days.length - 1 }]);
+  if (recentIdx >= 0) areas.push([{ xAxis: recentIdx, itemStyle: { color: withAlpha(cssVar("--ink-2"), 0.1) } }, { xAxis: o.days.length - 1 }]);
   return {
     animationDuration: 300,
     textStyle: c.text,

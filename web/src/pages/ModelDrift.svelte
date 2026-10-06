@@ -9,7 +9,7 @@
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch, type Drift, type DriftComparison, type DriftMetric } from "../lib/api.svelte.ts";
   import { driftLine } from "../lib/charts.ts";
-  import { compact, decimal, integer, percent } from "../lib/format.ts";
+  import { compact, decimal, percent } from "../lib/format.ts";
   import { t, type MessageKey } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -107,7 +107,7 @@
 </script>
 
 <div class="flex flex-col gap-5">
-  <PageHeader title={t("drift.title")} subtitle={t("drift.subtitle")}>
+  <PageHeader title={t("drift.title")} subtitle={t("drift.subtitle", { recent: d.data?.window.recentDays ?? 7, baseline: d.data?.window.baselineDays ?? 28 })}>
     {#if modelOptions.length}
       <Dropdown prefix label={t("drift.model")} value={model} options={modelOptions} onchange={pick} />
       <Dropdown prefix label={t("drift.effort")} bind:value={effort} options={effortOptions} />
@@ -117,11 +117,6 @@
     {#if d.data && !d.data.model}
       <div class="card"><Empty body={t("drift.empty")} /></div>
     {:else if d.data}
-      {@const w = d.data.window}
-      <p class="text-sm text-muted" title={t("drift.windowHint", { n: integer(w.minSamples) })}>
-        {t("drift.window", { recent: w.recentDays, baseline: w.baselineDays })} {t("drift.caveat")}
-      </p>
-
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
         {#each METRICS as m (m)}
           {@const c = series.get(m)?.comparison}
@@ -135,12 +130,22 @@
                   {#if c.change >= 0}<ArrowUpRight size={13} />{:else}<ArrowDownRight size={13} />{/if}
                   <span class="tabular">{signed(c.change)}</span>
                 {/if}
-                <span class="truncate">{statusText(c)}</span>
+                <span class="truncate">{c.baseline == null ? t("drift.noBaseline") : statusText(c)}</span>
               </div>
-              <div class="truncate text-xs text-muted">{c.baseline == null ? t("drift.noBaseline") : t("drift.usual", { value: fmt(m, c.baseline) })}</div>
+              <!-- Always there, so every tile is the same height. The usual value only when it adds something: what a
+                   changed measure moved from, or what to expect when the last days are too thin to judge. -->
+              <div class="h-4 truncate text-xs leading-4 text-muted">{c.baseline != null && c.status !== "stable" ? t("drift.usual", { value: fmt(m, c.baseline) }) : ""}</div>
             </div>
           {/if}
         {/each}
+      </div>
+
+      <!-- What the marks on every chart mean. -->
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-2">
+        <span class="flex items-center gap-1.5"><span class="h-0.5 w-3.5 rounded-full bg-accent"></span>{t("drift.legend.daily")}</span>
+        <span class="flex items-center gap-1.5"><span class="h-3 w-3.5 rounded-sm bg-accent/20"></span>{t("drift.usualRange")}</span>
+        <span class="flex items-center gap-1.5"><span class="h-3 w-3.5 rounded-sm bg-ink-2/20"></span>{t("drift.legend.recent", { n: d.data.window.recentDays })}</span>
+        <span class="flex items-center gap-1.5"><span class="h-3.5 w-0 border-l border-dashed border-muted"></span>{t("drift.update")}</span>
       </div>
 
       <div class="grid gap-5 xl:grid-cols-2">
