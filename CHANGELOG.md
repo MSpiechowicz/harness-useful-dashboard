@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.4.0...v1.5.0) (2026-10-06)
+
+
+### Features
+
+* show every tool's color above the active sessions on Live ([586a0db](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/586a0dbf026a81c728309126bc4c22883deb7687))
+
 # [1.4.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.7...v1.4.0) (2026-10-06)
 
 
