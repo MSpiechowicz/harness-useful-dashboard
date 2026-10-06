@@ -1,7 +1,8 @@
 # Harness Dashboard
 
 **Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the sessions that
-Claude Code, Codex, OpenCode, pi and omp (oh-my-pi) already write to disk, plus Cursor usage exports. It stores
+Claude Code, Codex, OpenCode, pi, omp (oh-my-pi), Zed and the Cline, Roo Code and Kilo Code extensions already write to
+disk, plus Cursor usage exports. It stores
 everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
@@ -142,6 +143,8 @@ Starting it again while it's running just opens another window. Use **Settings �
 | omp (oh-my-pi) | `~/.omp/agent/sessions/**/*.jsonl` (or `$PI_CODING_AGENT_DIR/sessions`) | per-message usage with the plan or account it was billed through (ChatGPT plan, GitHub Copilot, API keys), Copilot premium requests, prompts, tools, `skill://` reads, subagent transcripts |
 | OpenCode | `~/.local/share/opencode/opencode.db` (or `$XDG_DATA_HOME/opencode`, also on macOS and Windows) | the SQLite database OpenCode keeps since v1.2: one row per model call with the provider it was billed through, prompts, tools (files from `apply_patch` too), and subagent sessions tied back to the task call that started them. Read-only, from where the last scan stopped. Older JSON storage is moved into the database by OpenCode itself |
 | pi | `~/.pi/agent/sessions/**/*.jsonl` | the same format as omp (omp is a fork of pi): per-message usage with the plan or account it was billed through, usage logged outside messages (cache warming, compactions), prompts, tools and session names. History copied into a fork counts once. A folder set up for both pi and omp (they share `$PI_CODING_AGENT_DIR`) is read once, as omp's |
+| Zed | `~/.local/share/zed/threads/threads.db` (macOS `~/Library/Application Support/Zed`, Windows `%LOCALAPPDATA%\Zed`, also the Flatpak's) | threads of Zed's own agent: model, prompts, tools and their errors, subagent threads. Zed keeps one running total of tokens per thread and no times per message, so a thread counts as one row, on the day it started. Claude Code or Codex run inside Zed write their own logs and count under those |
+| Cline, Roo Code, Kilo Code | VS Code's extension storage (`~/.config/Code/User/globalStorage`, also Insiders, VSCodium, Cursor and Windsurf), `~/.cline/data` (or `$CLINE_DATA_DIR`) and `~/.local/share/kilo` | one provider for the three. Task folders (`tasks/<id>/ui_messages.json`) of Cline up to 3.x, Roo Code and Kilo Code up to 5.x, Cline 4's session store and Kilo Code 7's database: a row per model call with the cost the extension worked out, prompts, tools and subtasks. A session's client says which extension it was |
 | Cursor | CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Import the CSV in **Settings** or with `import-cursor` |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
@@ -190,7 +193,8 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
 - **Cost** is the *API-equivalent* list price: what the tokens would cost on the provider's API.
   Subscription plans (Claude Max, ChatGPT Pro, Cursor Pro) don't bill this way, but it is the fairest way to compare.
   Cache writes are priced at 1.25× input (5-minute TTL) or 2× input (1-hour TTL), and cache reads use the model's read price.
-  Claude fast mode is priced at 2×. Cursor rows use the cost from the export when present. Model ids are priced as the
+  Claude fast mode is priced at 2×. Cursor rows use the cost from the export when present, and Cline, Roo Code and Kilo
+  Code rows the cost the extension worked out for each call (Roo and Kilo don't always record the model). Model ids are priced as the
   model they name, whatever router they came through: `github-copilot/claude-opus-5.5` is `claude-opus-5-5`.
   GitHub Copilot doesn't bill per token either. Its calls keep their premium-request count, shown per plan or account
   under **Providers → Billed via**.
@@ -220,8 +224,8 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
 
 Every data color comes from one palette (`web/src/lib/palette.ts`), and each color means one thing:
 
-- **Reserved.** Each harness has its own color: Claude Code orange, Codex blue, Cursor gold, omp plum, pi teal and
-  OpenCode crimson. Models wear their maker's color whichever harness or plan they ran under (a Claude model through
+- **Reserved.** Each harness has its own color: Claude Code orange, Codex blue, Cursor gold, omp plum, pi teal,
+  OpenCode crimson, Zed indigo and the Cline family lime. Models wear their maker's color whichever harness or plan they ran under (a Claude model through
   omp or Copilot is still Claude orange), with shades generated from it so models of one maker stay apart in a stacked
   chart. The four token types have their own set (green-teal, olive, lilac, purple).
 - **General pool.** Projects, users, skills, agents and sources take the top values' colors by hue first (green, sky,

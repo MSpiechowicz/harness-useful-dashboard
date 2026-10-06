@@ -29,7 +29,9 @@ export function testConfig(root: string, patch: Partial<AppConfig> = {}): AppCon
       ompDirs: [join(root, "omp", "sessions")],
       piDirs: [join(root, "pi", "sessions")],
       opencodeDirs: [join(root, "opencode")],
-      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true },
+      zedDirs: [join(root, "zed")],
+      clineDirs: [join(root, "vscode", "globalStorage"), join(root, "cline"), join(root, "kilo")],
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true },
     },
     ...patch,
   };

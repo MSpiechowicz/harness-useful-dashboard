@@ -39,6 +39,8 @@
     omp: "settings.source.omp",
     pi: "settings.source.pi",
     opencode: "settings.source.opencode",
+    zed: "settings.source.zed",
+    cline: "settings.source.cline",
   };
   const providerName = (p: string) => (PROVIDERS[p] ? t(PROVIDERS[p]) : p);
 

@@ -17,7 +17,14 @@ export interface SourceConfig {
   piDirs: string[];
   /** OpenCode data directories (contain storage/ or opencode.db). */
   opencodeDirs: string[];
-  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean };
+  /** Zed data directories (contain threads/threads.db). */
+  zedDirs: string[];
+  /**
+   * Read for Cline, Roo Code and Kilo Code: where VS Code and its forks keep extension data (globalStorage), Cline's own
+   * data folder, and Kilo Code's.
+   */
+  clineDirs: string[];
+  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean; zed: boolean; cline: boolean };
 }
 
 export interface AppConfig {
@@ -61,7 +68,9 @@ export function defaultConfig(): AppConfig {
       ompDirs: [join(ompAgent, "sessions")],
       piDirs: [join(piAgent, "sessions")],
       opencodeDirs: [opencodeDataDir(home)],
-      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true },
+      zedDirs: zedDataDirs(home),
+      clineDirs: [...editorStorageDirs(home), clineDataDir(home), join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "kilo")],
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true },
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
   };
@@ -70,6 +79,33 @@ export function defaultConfig(): AppConfig {
 /** Where OpenCode keeps its data: the XDG data directory on every OS, as it uses xdg-basedir. */
 function opencodeDataDir(home: string): string {
   return join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "opencode");
+}
+
+/** Zed's data folder on each OS, and on Linux also the one of its Flatpak. */
+function zedDataDirs(home: string): string[] {
+  if (process.platform === "darwin") return [join(home, "Library", "Application Support", "Zed")];
+  if (process.platform === "win32") return [join(process.env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Zed")];
+  return [join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "zed"), join(home, ".var", "app", "dev.zed.Zed", "data", "zed")];
+}
+
+/** Cline 4's data folder (also its CLI's and its JetBrains plugin's). Kilo Code 7 keeps its database in the XDG data
+ *  folder on every OS, like OpenCode, which it is built on. */
+function clineDataDir(home: string): string {
+  return process.env.CLINE_DATA_DIR ?? join(process.env.CLINE_DIR ?? join(home, ".cline"), "data");
+}
+
+/** Editors that run VS Code extensions, by the folder they keep their settings in. */
+const VSCODE_EDITORS = ["Code", "Code - Insiders", "VSCodium", "Cursor", "Windsurf"];
+
+/** Where VS Code and its forks keep extension data: <settings folder>/<editor>/User/globalStorage. */
+function editorStorageDirs(home: string): string[] {
+  const base =
+    process.platform === "darwin"
+      ? join(home, "Library", "Application Support")
+      : process.platform === "win32"
+        ? (process.env.APPDATA ?? join(home, "AppData", "Roaming"))
+        : (process.env.XDG_CONFIG_HOME ?? join(home, ".config"));
+  return VSCODE_EDITORS.map((e) => join(base, e, "User", "globalStorage"));
 }
 
 function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {

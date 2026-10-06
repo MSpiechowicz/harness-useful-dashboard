@@ -248,7 +248,7 @@ export function resolveSpawnRefs(db: Database): void {
   }
 }
 
-/** Re-prices every usage row (after pricing edits). Provider-reported costs (Cursor) are kept. */
+/** Re-prices every usage row (after pricing edits). Provider-reported costs (Cursor, the Cline family) are kept. */
 export function recomputeCosts(db: Database, prices: PriceBook): number {
   const rows = db
     .query<
@@ -256,7 +256,7 @@ export function recomputeCosts(db: Database, prices: PriceBook): number {
       []
     >(
       `SELECT id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, speed
-       FROM usage WHERE provider != 'cursor' OR cost_estimated = 1`,
+       FROM usage WHERE provider NOT IN ('cursor', 'cline') OR cost_estimated = 1`,
     )
     .all();
   const upd = db.prepare("UPDATE usage SET cost_usd = ?, cost_estimated = ? WHERE id = ?");

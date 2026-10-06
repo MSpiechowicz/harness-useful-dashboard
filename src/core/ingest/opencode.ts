@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { type IngestSink, num, truncate } from "./types.ts";
+import { type IngestSink, num, type Provider, truncate } from "./types.ts";
 
 /**
  * OpenCode keeps its sessions in a SQLite database in its data folder (~/.local/share/opencode/opencode.db, or
@@ -26,7 +26,7 @@ export function opencodeDatabases(dir: string): string[] {
 }
 
 /** Size and change time of the database together with its write-ahead log, where recent writes are until checkpointed. */
-export function opencodeStamp(path: string): { size: number; mtime: number } {
+export function sqliteStamp(path: string): { size: number; mtime: number } {
   let size = 0;
   let mtime = 0;
   for (const f of [path, `${path}-wal`]) {
@@ -75,13 +75,25 @@ const SUBAGENT_TITLE_RE = /\(@([\w.-]+) subagent\)\s*$/;
 /** Rows updated a little before the last read are read again: a write in progress then may have been half-seen. */
 const OVERLAP_MS = 5 * 60_000;
 
-const oc = (id: string) => `opencode:${id}`;
+/**
+ * Who wrote the database. Kilo Code 7 keeps its sessions in the same schema (kilo.db): read as the Cline family's,
+ * under ids of its own, with the cost Kilo worked out for each model call.
+ */
+export interface OpencodeFlavor {
+  provider: Provider;
+  prefix: string;
+  client: string;
+  reportedCost: boolean;
+}
+const OPENCODE: OpencodeFlavor = { provider: "opencode", prefix: "opencode", client: "opencode", reportedCost: false };
 
 /**
  * Reads what changed in one OpenCode database since `since` (epoch ms, 0 for everything) into the sink. Returns the
  * latest update time seen, to start from next time.
  */
-export function ingestOpencode(path: string, sink: IngestSink, opts: { since: number; promptTextLimit: number }): number {
+export function ingestOpencode(path: string, sink: IngestSink, opts: { since: number; promptTextLimit: number; flavor?: OpencodeFlavor }): number {
+  const flavor = opts.flavor ?? OPENCODE;
+  const oc = (id: string) => `${flavor.prefix}:${id}`;
   const src = new Database(path, { readonly: true });
   try {
     src.exec("PRAGMA busy_timeout = 5000");
@@ -124,11 +136,11 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
         seenSessions.add(session.id);
         sink.session({
           id: sessionId,
-          provider: "opencode",
+          provider: flavor.provider,
           nativeId: session.id,
           project: session.directory,
           title: session.title,
-          client: "opencode",
+          client: flavor.client,
           clientVersion: session.version,
           parentSessionId: session.parent_id ? oc(session.parent_id) : null,
           agent: isSub ? agent : null,
@@ -149,7 +161,7 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
         sink.prompt({
           id: oc(row.id),
           sessionId,
-          provider: "opencode",
+          provider: flavor.provider,
           ts,
           text: truncate(text || null, opts.promptTextLimit),
           skill: null,
@@ -168,7 +180,7 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
 
       const model = typeof m.modelID === "string" ? m.modelID : null;
       if (m.error?.name === "MessageAbortedError") {
-        sink.outcome?.({ id: `${oc(row.id)}:interrupt`, provider: "opencode", sessionId, ts, project, model, agent, kind: "interrupt" });
+        sink.outcome?.({ id: `${oc(row.id)}:interrupt`, provider: flavor.provider, sessionId, ts, project, model, agent, kind: "interrupt" });
       }
 
       for (const p of parts) {
@@ -178,7 +190,7 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
         const stopped = status === "error" && /rejected|denied|aborted/i.test(String(p.state?.error ?? ""));
         sink.outcome?.({
           id: oc(typeof p.callID === "string" ? p.callID : p.id),
-          provider: "opencode",
+          provider: flavor.provider,
           sessionId,
           ts: typeof p.state?.time?.end === "number" ? p.state.time.end : ts,
           project,
@@ -201,7 +213,7 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
             usageId,
             sessionId,
             promptId,
-            provider: "opencode",
+            provider: flavor.provider,
             ts: typeof p.state?.time?.start === "number" ? p.state.time.start : ts,
             project,
             tool: p.tool,
@@ -225,20 +237,21 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
         }
       }
       const calls = steps.length
-        ? steps.map((p) => ({ id: oc(p.id), ts: p.ts ?? ts, tokens: p.tokens, start: starts.get(p.id) ?? null, end: p.ts ?? null }))
-        : [{ id: oc(row.id), ts, tokens: m.tokens, start: ts, end: typeof m.time?.completed === "number" ? m.time.completed : null }];
+        ? steps.map((p) => ({ id: oc(p.id), ts: p.ts ?? ts, tokens: p.tokens, cost: p.cost, model: p.model?.modelID, start: starts.get(p.id) ?? null, end: p.ts ?? null }))
+        : [{ id: oc(row.id), ts, tokens: m.tokens, cost: m.cost, model: undefined, start: ts, end: typeof m.time?.completed === "number" ? m.time.completed : null }];
       const excludesReasoning = outputExcludesReasoning(session?.version ?? null);
       for (const call of calls) {
         const t = call.tokens ?? {};
         const reasoning = num(t.reasoning);
         sink.usage({
           id: call.id,
-          provider: "opencode",
+          provider: flavor.provider,
           sessionId,
           promptId,
           ts: call.ts,
           project,
-          model,
+          // Kilo names the model on each call, which can differ from the message's.
+          model: typeof call.model === "string" ? call.model : model,
           skill: promptId ? (skillOf.get(promptId) ?? null) : null,
           agent,
           isSubagent: isSub,
@@ -251,6 +264,7 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
           cacheWrite1h: 0,
           reasoning,
           billing: typeof m.providerID === "string" ? m.providerID : null,
+          costUsd: flavor.reportedCost && typeof call.cost === "number" ? call.cost : null,
         });
         sink.responseMeta?.({ usageId: call.id, startTs: call.start, endTs: call.end });
       }

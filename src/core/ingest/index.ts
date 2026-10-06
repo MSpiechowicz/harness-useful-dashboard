@@ -9,7 +9,9 @@ import { normalizeProjects } from "../project.ts";
 import { claudeParser } from "./claude.ts";
 import { codexParser } from "./codex.ts";
 import { ompParser, piParser } from "./omp.ts";
-import { ingestOpencode, opencodeDatabases, opencodeStamp } from "./opencode.ts";
+import { ingestOpencode, opencodeDatabases, sqliteStamp } from "./opencode.ts";
+import { ingestZed, zedDatabases } from "./zed.ts";
+import { clineSessionFiles, clineSessionIndex, fileStamp, findClineSources, ingestClineSession, ingestClineTask, KILO, taskLastTs } from "./cline.ts";
 import type { LineParser } from "./types.ts";
 import { DbWriter, resolveSpawnRefs } from "./writer.ts";
 
@@ -156,18 +158,27 @@ export async function scan(
     opts.onProgress?.(done, files.length);
   }
 
-  // OpenCode keeps a database rather than log files: read what changed since the last scan, when it changed at all.
-  if (cfg.sources.enabled.opencode) {
-    for (const dir of cfg.sources.opencodeDirs ?? []) {
-      for (const path of opencodeDatabases(expandHome(dir))) {
+  // OpenCode and Zed keep a database rather than log files: read what changed since the last scan, when it changed
+  // at all.
+  // Kilo Code 7 writes OpenCode's schema: read with the OpenCode reader, as the Cline family's.
+  const cline = cfg.sources.enabled.cline ? (cfg.sources.clineDirs ?? []).map((d) => findClineSources(expandHome(d))) : [];
+  const databases: { enabled: boolean; dirs: string[]; find: (dir: string) => string[]; ingest: typeof ingestOpencode }[] = [
+    { enabled: cfg.sources.enabled.opencode, dirs: cfg.sources.opencodeDirs ?? [], find: opencodeDatabases, ingest: ingestOpencode },
+    { enabled: cfg.sources.enabled.zed, dirs: cfg.sources.zedDirs ?? [], find: zedDatabases, ingest: ingestZed },
+    { enabled: cline.length > 0, dirs: ["kilo"], find: () => [...new Set(cline.flatMap((c) => c.kiloDatabases))], ingest: (path, sink, o) => ingestOpencode(path, sink, { ...o, flavor: KILO }) },
+  ];
+  for (const source of databases) {
+    if (!source.enabled) continue;
+    for (const dir of source.dirs) {
+      for (const path of source.find(expandHome(dir))) {
         result.filesSeen++;
         try {
-          const stamp = opencodeStamp(path);
+          const stamp = sqliteStamp(path);
           const prev = getState.get(identity.host, path);
           if (prev && prev.size === stamp.size && prev.mtime === stamp.mtime) continue;
           let latest = 0;
           db.transaction(() => {
-            latest = ingestOpencode(path, writer, { since: prev?.offset ?? 0, promptTextLimit: cfg.promptTextLimit });
+            latest = source.ingest(path, writer, { since: prev?.offset ?? 0, promptTextLimit: cfg.promptTextLimit });
           })();
           putState.run(identity.host, path, stamp.size, stamp.mtime, latest, null);
           result.filesParsed++;
@@ -175,6 +186,40 @@ export async function scan(
           result.errors.push({ path, error: (err as Error).message });
         }
       }
+    }
+  }
+
+  // Cline, Roo Code and Kilo Code task folders and Cline 4 sessions: whole JSON files, read again when they change.
+  const tasks = cline.flatMap((c) => c.tasks);
+  const legacyTasks = new Map(tasks.map((t) => [t.dir.split(/[\\/]/).pop()!, t.dir]));
+  const jsonFiles: { path: string; ingest: () => void }[] = tasks.map((task) => ({
+    path: join(task.dir, "ui_messages.json"),
+    ingest: () => void ingestClineTask(task, writer, { promptTextLimit: cfg.promptTextLimit }),
+  }));
+  for (const root of new Set(cline.flatMap((c) => c.sessionRoots))) {
+    const index = clineSessionIndex(root);
+    for (const file of clineSessionFiles(root)) {
+      jsonFiles.push({
+        path: file.path,
+        ingest: () => {
+          const legacy = legacyTasks.get(file.sessionId);
+          ingestClineSession(file, index.get(file.sessionId), writer, { promptTextLimit: cfg.promptTextLimit, legacyUntil: legacy ? taskLastTs(legacy) : 0 });
+        },
+      });
+    }
+  }
+  for (const file of jsonFiles) {
+    result.filesSeen++;
+    try {
+      const stamp = fileStamp(file.path);
+      if (!stamp) continue;
+      const prev = getState.get(identity.host, file.path);
+      if (prev && prev.size === stamp.size && prev.mtime === stamp.mtime) continue;
+      db.transaction(file.ingest)();
+      putState.run(identity.host, file.path, stamp.size, stamp.mtime, 0, null);
+      result.filesParsed++;
+    } catch (err) {
+      result.errors.push({ path: file.path, error: (err as Error).message });
     }
   }
 

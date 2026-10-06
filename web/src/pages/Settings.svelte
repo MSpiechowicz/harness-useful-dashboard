@@ -14,8 +14,8 @@
   import { live } from "../lib/live.svelte.ts";
   import { checkUpdate, installUpdate, updater } from "../lib/update.svelte.ts";
 
-  type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode";
-  type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs";
+  type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "zed" | "cline";
+  type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs" | "zedDirs" | "clineDirs";
   type LimitKey = "claude" | "codex" | "omp" | "pi" | "opencode";
   interface Config {
     dbPath: string;
@@ -52,6 +52,8 @@
     { key: "opencode", dirs: "opencodeDirs" },
     { key: "pi", dirs: "piDirs" },
     { key: "omp", dirs: "ompDirs" },
+    { key: "zed", dirs: "zedDirs" },
+    { key: "cline", dirs: "clineDirs" },
   ];
   /** Where plan limits can be read from (see Live). */
   const LIMIT_SOURCES: LimitKey[] = ["claude", "codex", "opencode", "pi", "omp"];
@@ -64,7 +66,7 @@
   let dbInput = $state("");
   let target = $state<{ file: string; state: DbState } | null>(null);
   let copyDb = $state(true);
-  let dirs = $state<Record<SourceKey, string[]>>({ claude: [""], codex: [""], omp: [""], pi: [""], opencode: [""] });
+  let dirs = $state<Record<SourceKey, string[]>>({ claude: [""], codex: [""], omp: [""], pi: [""], opencode: [""], zed: [""], cline: [""] });
   let saved = $state<string | null>(null);
   let errorMsg = $state<string | null>(null);
   let busy = $state(false);
