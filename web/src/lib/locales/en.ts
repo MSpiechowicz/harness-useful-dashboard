@@ -350,7 +350,7 @@ export const en = {
   "drift.effort": "Effort",
   "drift.allEfforts": "All levels",
   "drift.empty": "No model has enough activity in this range to compare.",
-  "drift.metric.speed": "Output speed",
+  "drift.metric.speed": "Output token speed",
   "drift.metric.speedHint": "Median output tokens per second, for responses of at least 200 tokens, the wait for the first token included",
   "drift.metric.ttft": "Time to first token",
   "drift.metric.ttftHint": "Median wait for the first token of a response",
@@ -383,7 +383,7 @@ export const en = {
   "drift.allModels": "All models",
   "drift.allModelsHint": "Change of each measure against the model's usual level. Pick a row to see its charts.",
   "drift.responses": "Responses",
-  "drift.unit.tps": "{v} tok/s",
+  "drift.unit.tps": "{v}/s",
   "drift.unit.s": "{v} s",
 
   "tips.title": "Tips",

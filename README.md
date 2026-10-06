@@ -204,7 +204,7 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
   and omp by reading `skill://<name>`.
 - **Users.** The name in **Settings → Your name** (defaults to your OS user name), stored with every row this machine
   ingests.
-- **Model drift.** Each model's last 7 days are compared with the 28 days before, one measure at a time: output speed,
+- **Model drift.** Each model's last 7 days are compared with the 28 days before, one measure at a time: output token speed,
   time to first token, tool error rate, interrupts, steps per prompt and output per response. Every measure is taken per
   response, tool call or prompt, so doing more or less work doesn't read as a change. A median is flagged when the last
   days fall outside the range its days usually spread over (median ± 3 median absolute deviations) and it moved at least
