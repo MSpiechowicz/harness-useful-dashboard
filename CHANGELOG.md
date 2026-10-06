@@ -1,3 +1,10 @@
+## [1.3.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.3...v1.3.4) (2026-10-06)
+
+
+### Bug Fixes
+
+* open the macOS app window natively instead of under Rosetta ([28bf196](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/28bf1963a46823add332dfa46a231c37c773281c))
+
 ## [1.3.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.2...v1.3.3) (2026-10-06)
 
 
