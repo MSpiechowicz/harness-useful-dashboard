@@ -39,6 +39,10 @@ export const de: Record<MessageKey, string> = {
   "range.to": "Bis",
   "range.apply": "Übernehmen",
 
+  "filters.none.live": "Live zeigt alles, was gerade passiert, daher gelten die Filter hier nicht",
+  "filters.none.settings": "Die Einstellungen gelten für das ganze Dashboard, daher gibt es nichts zu filtern",
+  "filters.none.session": "Eine Sitzung vollständig, daher gelten die Filter hier nicht",
+  "filters.none.prompt": "Ein Prompt vollständig, daher gelten die Filter hier nicht",
   "filter.provider": "Anbieter",
   "filter.project": "Projekt",
   "filter.user": "Benutzer",

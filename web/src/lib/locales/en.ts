@@ -37,6 +37,10 @@ export const en = {
   "range.to": "To",
   "range.apply": "Apply",
 
+  "filters.none.live": "Live shows everything happening right now, so the filters don't apply",
+  "filters.none.settings": "Settings apply to the whole dashboard, so there is nothing to filter",
+  "filters.none.session": "One session in full, so the filters don't apply",
+  "filters.none.prompt": "One prompt in full, so the filters don't apply",
   "filter.provider": "Provider",
   "filter.project": "Project",
   "filter.user": "User",

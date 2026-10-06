@@ -39,6 +39,10 @@ export const fr: Record<MessageKey, string> = {
   "range.to": "Au",
   "range.apply": "Appliquer",
 
+  "filters.none.live": "La vue En direct montre tout ce qui se passe maintenant, les filtres ne s'appliquent donc pas",
+  "filters.none.settings": "Les réglages valent pour tout le tableau de bord, il n'y a donc rien à filtrer",
+  "filters.none.session": "Une session en entier, les filtres ne s'appliquent donc pas",
+  "filters.none.prompt": "Un prompt en entier, les filtres ne s'appliquent donc pas",
   "filter.provider": "Fournisseur",
   "filter.project": "Projet",
   "filter.user": "Utilisateur",

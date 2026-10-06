@@ -2,7 +2,7 @@
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
-    PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
+    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
@@ -69,6 +69,10 @@
   const page = $derived(store.route.page);
   const id = $derived(store.route.id);
   // Live shows the last minutes as they happen: the range and filters don't apply to it.
+  /** Why a page has no filters, shown where they would be. */
+  const noFiltersNote = $derived<MessageKey>(
+    page === "live" ? "filters.none.live" : page === "settings" ? "filters.none.settings" : page === "prompts" ? "filters.none.prompt" : "filters.none.session",
+  );
   const showFilters = $derived(page !== "settings" && page !== "live" && !(page === "sessions" && id) && !(page === "prompts" && id));
   // Re-render relative "updated x ago" text periodically.
   let now = $state(Date.now());
@@ -185,8 +189,10 @@
         {#if showFilters}
           <div class="min-w-0 flex-1"><FilterBar /></div>
         {:else}
-          <!-- As tall as a row of controls (2rem), so the bar keeps its height. -->
-          <div class="h-8 flex-1"></div>
+          <!-- As tall as a row of controls (2rem), so the bar keeps its height, with why there are no filters here. -->
+          <div class="flex h-8 min-w-0 flex-1 items-center gap-1.5 text-xs text-muted">
+            <Info size={14} class="shrink-0" /><span class="truncate" title={t(noFiltersNote)}>{t(noFiltersNote)}</span>
+          </div>
         {/if}
       </div>
     </header>

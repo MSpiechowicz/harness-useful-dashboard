@@ -39,6 +39,10 @@ export const pl: Record<MessageKey, string> = {
   "range.to": "Do",
   "range.apply": "Zastosuj",
 
+  "filters.none.live": "Na żywo pokazuje wszystko, co dzieje się teraz, więc filtry tu nie działają",
+  "filters.none.settings": "Ustawienia dotyczą całego panelu, więc nie ma czego filtrować",
+  "filters.none.session": "Jedna sesja w całości, więc filtry tu nie działają",
+  "filters.none.prompt": "Jeden prompt w całości, więc filtry tu nie działają",
   "filter.provider": "Dostawca",
   "filter.project": "Projekt",
   "filter.user": "Użytkownik",
