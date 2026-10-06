@@ -3,6 +3,7 @@ import { normalizeModel, type PriceBook } from "./pricing.ts";
 import { EDIT_TOOLS, type Filters, projectLabel, READ_TOOLS, whereClause } from "./queries.ts";
 
 export type Severity = "info" | "warn" | "critical";
+export type TipCategory = "cache" | "context" | "models" | "workflow" | "spend";
 
 /** Tips carry an id + params; the UI owns the (translated) wording. */
 export interface Tip {
@@ -13,6 +14,41 @@ export interface Tip {
   link?: string;
   /** Rough monthly USD impact used for ordering. */
   impact: number;
+  category: TipCategory;
+  /** The rule and what it points at (a day, a prompt, a session): marking a tip read covers this key, so the same
+   *  rule firing for another day or prompt shows as new again. */
+  key: string;
+}
+
+const CATEGORY: Record<string, TipCategory> = {
+  "low-cache-hit": "cache",
+  "cache-write-heavy": "cache",
+  "cache-expired": "cache",
+  "model-switch": "cache",
+  "context-bloat": "context",
+  "long-session": "context",
+  "repeated-reads": "context",
+  "premium-small-prompts": "models",
+  "reasoning-heavy": "models",
+  "output-heavy": "models",
+  "estimated-pricing": "models",
+  "copilot-premium-pace": "models",
+  "subagent-share": "workflow",
+  "guardian-overhead": "workflow",
+  "tool-loops": "workflow",
+  "edit-churn": "workflow",
+  "repeated-prompt": "workflow",
+  spike: "spend",
+  "outlier-prompt": "spend",
+  "prompt-cost-rising": "spend",
+  "project-concentration": "spend",
+};
+
+/** What a tip is about, beyond its rule: the day of a spike, the prompt or session it links to, the file or project. */
+function subject(tip: Pick<Tip, "id" | "params" | "link">): string {
+  const parts: (string | number | null | undefined)[] = [tip.params.day, tip.params.project, tip.params.file];
+  if (tip.link && /^#\/(sessions|prompts)\/./.test(tip.link)) parts.push(tip.link.replace(/^#\//, ""));
+  return parts.filter((p) => p != null && p !== "").join("|");
 }
 
 const PREMIUM = /fable|mythos|opus|gpt-6|o3-pro/;
@@ -37,7 +73,7 @@ export function generateTips(db: Database, f: Filters, prices: PriceBook): Tip[]
      FROM usage u ${w.sql}`,
   )!;
   if (!t || t.messages === 0) return [];
-  const tips: Tip[] = [];
+  const tips: Omit<Tip, "category" | "key">[] = [];
   const spanDays = Math.max(1, (t.maxTs - t.minTs) / 86_400_000);
   const monthly = (usd: number) => (usd / spanDays) * 30;
   const pct = (x: number) => Math.round(x * 100);
@@ -264,7 +300,9 @@ export function generateTips(db: Database, f: Filters, prices: PriceBook): Tip[]
   }
 
   const rank: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };
-  return tips.sort((a, b) => rank[a.severity] - rank[b.severity] || b.impact - a.impact);
+  return tips
+    .map((tip) => ({ ...tip, category: CATEGORY[tip.id] ?? "spend", key: [tip.id, subject(tip)].filter(Boolean).join(":") }))
+    .sort((a, b) => rank[a.severity] - rank[b.severity] || b.impact - a.impact);
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;

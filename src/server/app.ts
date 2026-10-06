@@ -160,6 +160,12 @@ export class App {
     return this.cfg;
   }
 
+  /** Saves which tips are read or hidden, without restarting the background scan like a settings change does. */
+  saveTipState(tips: AppConfig["tips"]): void {
+    this.cfg = { ...this.cfg, tips };
+    saveConfig(this.cfg);
+  }
+
   close(): void {
     this.stopBackgroundScan();
     this.db.close();

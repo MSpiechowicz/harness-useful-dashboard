@@ -47,6 +47,13 @@ export interface AppConfig {
   limits: { claude: boolean; omp: boolean; codex: boolean; pi: boolean; opencode: boolean };
   /** What each plan or account costs a month in USD, keyed like the billing breakdown ("claude", "openai-codex", …). */
   planPrices: Record<string, number>;
+  /** Tips the user put away: `hidden` holds rule ids (never shown again), `read` holds tip keys (seen, kept on the Tips page). */
+  tips: TipState;
+}
+
+export interface TipState {
+  hidden: string[];
+  read: string[];
 }
 
 export function defaultConfig(): AppConfig {
@@ -79,6 +86,7 @@ export function defaultConfig(): AppConfig {
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
     planPrices: {},
+    tips: { hidden: [], read: [] },
   };
 }
 
@@ -145,6 +153,7 @@ function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {
       enabled: { ...base.sources.enabled, ...(patch.sources?.enabled ?? {}) },
     },
     limits: { ...base.limits, ...(patch.limits ?? {}) },
+    tips: { ...base.tips, ...(patch.tips ?? {}) },
   };
 }
 

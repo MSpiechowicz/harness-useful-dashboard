@@ -116,6 +116,16 @@ describe("HTTP API", () => {
     expect(ok.status).toBe(200);
   });
 
+  test("tip state: hides rules and marks keys read, and keeps them in the config", async () => {
+    const post = (body: unknown) =>
+      handle(new Request("http://localhost/api/tips/state", { method: "POST", headers: { host: "localhost", "x-harness-dashboard": "1", "content-type": "application/json" }, body: JSON.stringify(body) }));
+    expect(await (await get("/api/tips/state")).json()).toEqual({ hidden: [], read: [] });
+    await post({ hide: ["spike", "spike"], read: ["low-cache-hit", "spike:2026-09-01"] });
+    expect(await (await post({ unread: ["low-cache-hit"], read: [42] })).json()).toEqual({ hidden: ["spike"], read: ["spike:2026-09-01"] });
+    expect(app.cfg.tips).toEqual({ hidden: ["spike"], read: ["spike:2026-09-01"] });
+    await post({ unhide: ["spike"], unread: ["spike:2026-09-01"] });
+  });
+
   test("pricing updates re-price history", async () => {
     const before = ((await (await get("/api/summary")).json()) as { cost: number }).cost;
     const res = await handle(

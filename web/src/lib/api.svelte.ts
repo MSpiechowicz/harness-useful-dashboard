@@ -172,7 +172,12 @@ export interface Tip {
   params: Record<string, string | number | null>;
   link?: string;
   impact: number;
+  category: TipCategory;
+  key: string;
 }
+
+export type TipCategory = "cache" | "context" | "models" | "workflow" | "spend";
+export const TIP_CATEGORIES: TipCategory[] = ["cache", "context", "models", "workflow", "spend"];
 
 export interface Status {
   version: string;

@@ -216,5 +216,8 @@ describe("tips", () => {
     for (const id of ["cache-expired", "model-switch", "output-heavy", "prompt-cost-rising", "repeated-prompt", "edit-churn", "copilot-premium-pace"]) expect(ids).toContain(id);
     expect(tips.find((t) => t.id === "repeated-prompt")!.params).toMatchObject({ count: 10 });
     expect(tips.find((t) => t.id === "edit-churn")!.params).toMatchObject({ file: "app.ts", count: 16 });
+    // A read mark covers what the tip is about: the file and session of an edit churn, nothing more for a whole-range rule.
+    expect(tips.find((t) => t.id === "edit-churn")).toMatchObject({ category: "workflow", key: "edit-churn:app.ts|sessions/claude%3Ad0" });
+    expect(tips.find((t) => t.id === "output-heavy")).toMatchObject({ category: "models", key: "output-heavy" });
   });
 });

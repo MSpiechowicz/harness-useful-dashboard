@@ -21,6 +21,7 @@
   import { bucketLabel, compact, integer, metricValue, percent, trimmed, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { tipStore } from "../lib/tips.svelte.ts";
 
   type Group = "type" | "provider" | "model" | "project";
   let group = $state<Group>("type");
@@ -37,6 +38,8 @@
   const span = $derived(daySpan(calendar.data ?? [], store.filters));
   const activity = $derived(calendar.data ? activityStats(calendar.data, span, (d) => (store.metric === "cost" ? d.cost : d.tokens)) : null);
   const tips = useFetch<Tip[]>(() => apiUrl("/api/tips"));
+  // Read and hidden tips stay on the Tips page only (and none show until it's known which those are).
+  const activeTips = $derived(tipStore.loaded ? (tips.data ?? []).filter((tip) => tipStore.status(tip) === "active") : []);
 
   const s = $derived(summary.data);
   const days = $derived(Math.max(s?.activeDays ?? 1, 1));
@@ -164,14 +167,14 @@
         </div>
       {/if}
 
-      {#if tips.data && tips.data.length}
+      {#if activeTips.length}
         <div>
           <div class="mb-2 flex items-center justify-between">
             <h2 class="text-sm font-semibold">{t("nav.tips")}</h2>
-            {@render more("#/tips", t("tips.open"))}
+            {@render more("#/tips", t("tips.viewAll"))}
           </div>
           <div class="grid gap-3 lg:grid-cols-3">
-            {#each tips.data.slice(0, 3) as tip (tip.id)}<TipCard {tip} />{/each}
+            {#each activeTips.slice(0, 3) as tip (tip.key)}<TipCard {tip} />{/each}
           </div>
         </div>
       {/if}

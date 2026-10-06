@@ -196,6 +196,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           return json({ ...planValue(app.db, f, pick(sp.get("bucket"), BUCKETS, "day"), app.cfg.planPrices), history: limitHistory(app.db, f) });
         case "/api/tips":
           return json(generateTips(app.db, f, app.priceBook()));
+        case "/api/tips/state":
+          return json(app.cfg.tips);
         case "/api/live": {
           // The page polls this once a minute: scan first, so the answer includes what was written since the last scan.
           if (Date.now() - (app.lastScanAt ?? 0) > 10_000) await app.scanNow().catch(() => {});
@@ -261,6 +263,19 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           }
           if (body.sources) app.scanNow().catch(() => {});
           return json({ config: app.cfg, dbPath: app.dbPath });
+        }
+        case "/api/tips/state": {
+          // Lists of ids to add to or take out of each set: { hide, unhide, read, unread }.
+          const body = (await req.json()) as Record<string, unknown>;
+          const ids = (k: string) => (Array.isArray(body[k]) ? (body[k] as unknown[]).filter((v): v is string => typeof v === "string" && v.length <= 300) : []);
+          const apply = (list: string[], add: string[], remove: string[]) => {
+            const drop = new Set(remove);
+            // Newest last, and capped, so tips that stopped firing long ago age out of the file.
+            return [...new Set([...list.filter((v) => !drop.has(v) && !add.includes(v)), ...add])].slice(-500);
+          };
+          const tips = { hidden: apply(app.cfg.tips.hidden, ids("hide"), ids("unhide")), read: apply(app.cfg.tips.read, ids("read"), ids("unread")) };
+          app.saveTipState(tips);
+          return json(tips);
         }
         case "/api/pricing": {
           const rules = (await req.json()) as { pattern: string; input: number; output: number; cacheRead?: number | null; cacheWrite5m?: number | null; cacheWrite1h?: number | null }[];
