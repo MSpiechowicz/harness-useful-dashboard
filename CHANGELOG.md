@@ -1,3 +1,10 @@
+## [1.5.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.5.1...v1.5.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* pulse the sidebar's status dot and drop the Live page's own notice ([f03abaa](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/f03abaaac84c059c130a703b077522b10be18c92))
+
 ## [1.5.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.5.0...v1.5.1) (2026-10-06)
 
 
