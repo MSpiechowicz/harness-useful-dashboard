@@ -574,7 +574,7 @@ export const de: Record<MessageKey, string> = {
   "update.failed": "Update fehlgeschlagen: {error}",
 
   "status.scanning": "Scanne {done}/{total}",
-  "status.lastScan": "Aktualisiert {ago}",
+  "status.updatedAt": "Aktualisiert um {time}",
   "status.live": "Live",
   "status.offline": "Getrennt",
 

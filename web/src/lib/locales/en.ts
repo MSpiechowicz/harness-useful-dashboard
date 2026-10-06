@@ -572,7 +572,7 @@ export const en = {
   "update.failed": "Update failed: {error}",
 
   "status.scanning": "Scanning {done}/{total}",
-  "status.lastScan": "Updated {ago}",
+  "status.updatedAt": "Updated at {time}",
   "status.live": "Live",
   "status.offline": "Disconnected",
 

@@ -8,8 +8,7 @@
   import LangPicker from "./components/LangPicker.svelte";
   import ThemeToggle from "./components/ThemeToggle.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
-  import { network } from "./lib/api.svelte.ts";
-  import { relative } from "./lib/format.ts";
+  import { time } from "./lib/format.ts";
   import { t, type MessageKey } from "./lib/i18n.svelte.ts";
   import { live } from "./lib/live.svelte.ts";
   import { store } from "./lib/state.svelte.ts";
@@ -74,37 +73,35 @@
     page === "live" ? "filters.none.live" : page === "settings" ? "filters.none.settings" : page === "prompts" ? "filters.none.prompt" : "filters.none.session",
   );
   const showFilters = $derived(page !== "settings" && page !== "live" && !(page === "sessions" && id) && !(page === "prompts" && id));
-  // Re-render relative "updated x ago" text periodically.
+  // For the Live menu icon below. A minute is precise enough.
   let now = $state(Date.now());
   $effect(() => {
     const h = setInterval(() => (now = Date.now()), 15_000);
     return () => clearInterval(h);
   });
 
-  const ago = $derived.by(() => {
-    void now;
-    return relative(live.lastScanAt);
-  });
+  // When the data on screen was loaded. A clock time, so it changes only when the page reloads, at most once a minute.
+  const updated = $derived(live.updatedAt ? t("status.updatedAt", { time: time(live.updatedAt) }) : "");
 
-  // Show the top progress bar only for loads that take a moment, so quick refreshes don't flicker it.
-  let busy = $state(false);
+  // Background scans take a moment and need no notice. Only one that runs longer, such as the first, shows its progress.
+  let longScan = $state(false);
+  const scanning = $derived(live.scanning !== null);
   $effect(() => {
-    if (network.inflight === 0) {
-      busy = false;
+    if (!scanning) {
+      longScan = false;
       return;
     }
-    const h = setTimeout(() => (busy = true), 150);
+    const h = setTimeout(() => (longScan = true), 3_000);
     return () => clearTimeout(h);
   });
+
+  // New usage came in during the last few minutes: the Live menu icon animates.
+  const receiving = $derived(live.connected && live.lastDataAt !== null && now - live.lastDataAt < 3 * 60_000);
 
   function isActive(p: string): boolean {
     return page === p;
   }
 </script>
-
-{#if busy}
-  <div class="progress-bar" role="progressbar" aria-label={t("common.loading")}></div>
-{/if}
 
 <div class="flex min-h-screen">
   <!-- Sidebar -->
@@ -133,7 +130,7 @@
             aria-label={collapsed ? t(item.label) : undefined}
             title={collapsed ? t(item.label) : undefined}
           >
-            <item.icon size={16} class="shrink-0" /><span class="truncate" class:lg:hidden={collapsed}>{t(item.label)}</span>
+            <item.icon size={16} class="shrink-0 {item.page === 'live' && receiving ? 'live-trace' : ''}" /><span class="truncate" class:lg:hidden={collapsed}>{t(item.label)}</span>
           </Link>
         {/each}
       {/each}
@@ -158,18 +155,18 @@
           <ThemeToggle />
         </div>
       </div>
-      <div class="flex items-center gap-2 px-1 text-[11px] text-muted {collapsed ? 'lg:justify-center' : ''}" title={collapsed ? `${live.connected ? t("status.lastScan", { ago }) : t("status.offline")} · v${live.status?.version ?? ""}` : live.status?.dbPath}>
+      <div class="flex items-center gap-2 px-1 text-[11px] text-muted {collapsed ? 'lg:justify-center' : ''}" title={collapsed ? `${live.connected ? updated : t("status.offline")} · v${live.status?.version ?? ""}` : live.status?.dbPath}>
         <!-- Connected, the dot pulses: the dashboard keeps updating on its own. Offline it stays still and red. -->
         <span class="relative flex size-2 shrink-0">
           {#if live.connected}<span class="absolute inline-flex size-full animate-ping rounded-full opacity-60" style:background="var(--status-good)"></span>{/if}
           <span class="relative inline-flex size-2 rounded-full" style:background={live.connected ? "var(--status-good)" : "var(--status-critical)"}></span>
         </span>
         <span class="flex min-w-0 flex-1 items-center gap-2" class:lg:hidden={collapsed}>
-          <span class="min-w-0 truncate" title={live.connected ? t("status.lastScan", { ago }) : undefined}>
-          {#if live.scanning}
+          <span class="min-w-0 truncate" title={live.connected ? updated : undefined}>
+          {#if live.scanning && longScan}
             <Gauge size={12} class="animate-pulse" />{t("status.scanning", live.scanning)}
           {:else if live.connected}
-            {t("status.lastScan", { ago })}
+            {updated}
           {:else}
             {t("status.offline")}
           {/if}
