@@ -1,3 +1,26 @@
+# [1.3.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.2.0...v1.3.0) (2026-10-06)
+
+
+### Bug Fixes
+
+* chart exactly the two windows the drift view compares ([d296202](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/d2962021290c56ac4d701b0f21116b878f12b0f1))
+* drop needless decimals from the drift measures ([b7c676b](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b7c676bbd76c79a2230c705cda3418734381c69b))
+* explain the drift chart marks and trim repeated tile text ([f0d195b](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/f0d195b007abc8cff025fd3c863e49d926c24433))
+* keep the client update switch apart from the drift chart legend ([c34f423](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/c34f4236093cd1718b7a12ec18e16f436652c03c))
+* keep the fast-mode flag when a response streams over several lines ([b8e26d4](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b8e26d4b533e7c84c9b56b5c89cfd6b155dde568))
+* name the drift speed measure output token speed and show it per second ([1397520](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/1397520a11f0273738de145c06a994e3ac8cd6a2))
+* show drift output speed in tok/s, the usual unit for model speed ([5e3336e](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/5e3336ec1df61d118f82c1f684efaa92fbc16944))
+* show drift output speed in tokens per minute, as on the Live view ([d24bde2](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/d24bde2179e30a9748236b67e808fd3c9577aff9))
+* show drift output speed in whole tokens per second ([59acfa3](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/59acfa30915499224f53f0e97dac92e2435f2d35))
+
+
+### Features
+
+* add a model drift view comparing each model with its own baseline ([74df896](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/74df89630fb94ee286868dadddd5866929f7800c))
+* compare each model's recent responses with its own baseline ([16c3d8d](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/16c3d8ddbe593b62e8add88d0541ab0b2074defc))
+* let the drift charts hide client update lines ([9af0935](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9af0935276a267a33b20eb3437d48dbf12dc89a2))
+* record response timing, effort, tool outcomes and interrupts ([be2e729](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/be2e729c53e6c17a40f8020f8a7656ea26aa7c4f))
+
 # [1.2.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.1.0...v1.2.0) (2026-10-06)
 
 
