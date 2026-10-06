@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.6.1...v1.7.0) (2026-10-06)
+
+
+### Features
+
+* add Branches, Time, Friction and Plans views ([9055497](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/905549755ae0d041b7b5ab8d55b67a404e007af0))
+
 ## [1.6.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.6.0...v1.6.1) (2026-10-06)
 
 
