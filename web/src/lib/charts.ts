@@ -764,6 +764,8 @@ export function sparkBars(values: number[], labels: string[], name: string, fmt:
   const c = chrome();
   const color = cssVar("--data");
   const last = values.length - 1;
+  // Background to the number beside it: muted bars with only the latest at full strength, and the first and last day
+  // under them.
   return {
     animation: false,
     textStyle: c.text,
@@ -787,7 +789,15 @@ export function sparkBars(values: number[], labels: string[], name: string, fmt:
       axisLabel: { color: c.muted, fontSize: 10, margin: 6, hideOverlap: false, interval: (i: number) => i === 0 || i === last, alignMinLabel: "left", alignMaxLabel: "right" },
     },
     yAxis: { type: "value", show: false, min: 0 },
-    series: [{ type: "bar", data: values.map((v) => v || null), color, barCategoryGap: "30%", itemStyle: { borderRadius: [2, 2, 0, 0] } }],
+    series: [
+      {
+        type: "bar",
+        data: values.map((v, i) => (v ? { value: v, itemStyle: { opacity: i === last ? 1 : 0.35 } } : null)),
+        color,
+        barCategoryGap: "30%",
+        itemStyle: { borderRadius: [2, 2, 0, 0] },
+      },
+    ],
   };
 }
 

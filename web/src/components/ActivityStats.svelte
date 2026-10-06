@@ -62,7 +62,7 @@
   {#each tiles as tile (tile.label)}
     <div class="flex flex-col justify-between gap-2 rounded-xl bg-surface-2 p-3.5">
       <div class="flex items-center gap-1.5 text-xs text-muted">
-        <tile.icon size={13} class="text-ink-2" />
+        <tile.icon size={13} class="shrink-0 text-ink-2" />
         {tile.label}
       </div>
       <div>
