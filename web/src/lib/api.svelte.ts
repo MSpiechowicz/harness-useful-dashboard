@@ -201,3 +201,25 @@ export interface UpdateStatus {
   error?: string;
   disabled?: boolean;
 }
+
+export type DriftMetric = "speed" | "ttft" | "toolErrors" | "interrupts" | "steps" | "output";
+export interface DriftComparison {
+  recent: number | null;
+  baseline: number | null;
+  recentN: number;
+  baselineN: number;
+  change: number | null;
+  status: "stable" | "changed" | "insufficient";
+  better: boolean | null;
+  band: { lo: number; mid: number; hi: number } | null;
+}
+export interface Drift {
+  window: { baselineFrom: number; recentFrom: number; to: number; recentDays: number; baselineDays: number; minSamples: number };
+  models: { model: string; provider: string; responses: number; metrics: Record<DriftMetric, DriftComparison> }[];
+  model: string | null;
+  effort: string | null;
+  efforts: string[];
+  days: string[];
+  series: { key: DriftMetric; values: (number | null)[]; counts: number[]; comparison: DriftComparison; providers: string[] }[];
+  versions: { day: string; label: string }[];
+}

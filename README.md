@@ -34,6 +34,9 @@ Everything runs locally. Your usage is never uploaded anywhere.
     <td width="50%"><img src="docs/screenshots/models.png" alt="Models: which models do the work and what they cost"><br><sub><b>Models</b>: which models do the work and what they cost</sub></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/screenshots/model-drift.png" alt="Model drift: whether a model got slower or clumsier than it usually is"><br><sub><b>Model drift</b>: whether a model got slower or clumsier than it usually is</sub></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/screenshots/providers.png" alt="Providers: Claude Code, Codex, omp, OpenCode and pi side by side"><br><sub><b>Providers</b>: Claude Code, Codex, omp, OpenCode and pi side by side</sub></td>
     <td width="50%"><img src="docs/screenshots/users.png" alt="Users: everyone on a shared database"><br><sub><b>Users</b>: everyone on a shared database</sub></td>
   </tr>
@@ -201,6 +204,15 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
   and omp by reading `skill://<name>`.
 - **Users.** The name in **Settings → Your name** (defaults to your OS user name), stored with every row this machine
   ingests.
+- **Model drift.** Each model's last 7 days are compared with the 28 days before, one measure at a time: output speed,
+  time to first token, tool error rate, interrupts, steps per prompt and output per response. Every measure is taken per
+  response, tool call or prompt, so doing more or less work doesn't read as a change. A median is flagged when the last
+  days fall outside the range its days usually spread over (median ± 3 median absolute deviations) and it moved at least
+  10%. A rate is flagged when its counts differ by 3 standard errors and it moved at least 20%. Each window needs 50
+  samples. Response time is exact for omp, pi and OpenCode. For Claude Code and Codex it runs from the last input the
+  model got to the end of its response. Tool calls the user or the harness stopped don't count as errors. Client
+  updates are marked on the charts, since a new harness version can change these numbers too. Cursor's export has
+  none of this.
 
 ### Colors
 

@@ -20,6 +20,10 @@ const MIN_BASELINE_DAYS = 7;
 const MIN_DAY_SAMPLES = 5;
 /** The usual range is the baseline's median day ± this many (scaled) median absolute deviations. */
 const BAND_MADS = 3;
+/** Smallest relative change worth flagging: a median must move 10%, a rate 20% (rates are small and noisy). */
+const MIN_CHANGE = { median: 0.1, rate: 0.2 };
+/** A rate changes when the two windows' proportions differ by this many standard errors. */
+const RATE_Z = 3;
 /** Output a response needs for its speed to count, so the wait for the first token doesn't dominate. */
 const MIN_SPEED_OUTPUT = 200;
 /** Longer spans are a stalled or resumed session, not a response. */
@@ -134,6 +138,25 @@ function dayList(from: number, to: number): string[] {
   return out;
 }
 
+function windowCounts(s: Samples & { kind: "rate" }, inWindow: (day: string) => boolean): { num: number; den: number } {
+  let num = 0;
+  let den = 0;
+  for (const [day, v] of s.days) {
+    if (!inWindow(day)) continue;
+    num += v.num;
+    den += v.den;
+  }
+  return { num, den };
+}
+
+/** Two-proportion z statistic: how many standard errors apart the two rates are. */
+export function rateZ(a: { num: number; den: number }, b: { num: number; den: number }): number {
+  if (!a.den || !b.den) return 0;
+  const p = (a.num + b.num) / (a.den + b.den);
+  const se = Math.sqrt(p * (1 - p) * (1 / a.den + 1 / b.den));
+  return se ? (a.num / a.den - b.num / b.den) / se : 0;
+}
+
 function windowValue(s: Samples, inWindow: (day: string) => boolean): { value: number | null; n: number } {
   if (s.kind === "median") {
     const all: number[] = [];
@@ -164,9 +187,20 @@ export function compare(s: Samples, metric: DriftMetric, recentDays: Set<string>
   const baseline = windowValue(s, (d) => baselineDays.has(d));
   const daily = [...baselineDays].map((d) => dayValue(s, d)).filter((d) => d.value != null && d.n >= MIN_DAY_SAMPLES).map((d) => d.value!);
   const band = daily.length >= MIN_BASELINE_DAYS ? usualRange(daily) : null;
-  const enough = recent.n >= MIN_SAMPLES && baseline.n >= MIN_SAMPLES && band != null && recent.value != null;
-  const changed = enough && (recent.value! < band!.lo || recent.value! > band!.hi);
   const change = recent.value != null && baseline.value ? (recent.value - baseline.value) / baseline.value : null;
+  // A median is judged against how its days usually spread. A rate is judged on its counts, since most days
+  // see only a handful of failures or interrupts and their daily spread says little.
+  let enough: boolean;
+  let changed: boolean;
+  if (s.kind === "median") {
+    enough = recent.n >= MIN_SAMPLES && baseline.n >= MIN_SAMPLES && band != null && recent.value != null;
+    changed = enough && (recent.value! < band!.lo || recent.value! > band!.hi) && Math.abs(change ?? 0) >= MIN_CHANGE.median;
+  } else {
+    enough = recent.n >= MIN_SAMPLES && baseline.n >= MIN_SAMPLES && recent.value != null;
+    const z = rateZ(windowCounts(s, (d) => recentDays.has(d)), windowCounts(s, (d) => baselineDays.has(d)));
+    const moved = change != null ? Math.abs(change) >= MIN_CHANGE.rate : (recent.value ?? 0) > 0;
+    changed = enough && Math.abs(z) >= RATE_Z && moved;
+  }
   const dir = HIGHER_IS_BETTER[metric];
   return {
     recent: recent.value,
@@ -310,7 +344,17 @@ export function drift(db: Database, f: Filters, opts: { model?: string | null; e
   }
   models.sort((a, b) => b.responses - a.responses);
 
-  const model = opts.model || f.model || models[0]?.model || null;
+  // Without a pick, the model used most in the recent window: one idle lately has nothing to compare.
+  const recentCount = new Map<string, number>();
+  for (const r of responses) if (r.ts >= recentFrom) recentCount.set(r.model, (recentCount.get(r.model) ?? 0) + 1);
+  // A model with a flagged measure comes first, then one with something to compare, so the page opens where it
+  // has something to say.
+  const rank = new Map(models.map((m) => {
+    const statuses = DRIFT_METRICS.map((k) => m.metrics[k].status);
+    return [m.model, statuses.includes("changed") ? 2 : statuses.includes("stable") ? 1 : 0];
+  }));
+  const busiest = [...recentCount].sort((a, b) => (rank.get(b[0]) ?? 0) - (rank.get(a[0]) ?? 0) || b[1] - a[1])[0]?.[0];
+  const model = opts.model || f.model || busiest || models[0]?.model || null;
   const days = dayList(chartFrom, to);
   let series: DriftSeries[] = [];
   let efforts: string[] = [];

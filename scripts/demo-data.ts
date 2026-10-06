@@ -100,6 +100,19 @@ const MODELS: Record<Provider, [string, number][]> = {
   opencode: [["claude-sonnet-5-5", 3], ["gpt-5-codex", 2]],
   cursor: [["claude-sonnet-5-5", 1]],
 };
+/** Output tokens per second each model usually streams at, for the drift view. */
+const SPEED: Record<string, number> = {
+  "claude-opus-5-5": 55, "claude-sonnet-5-5": 80, "claude-haiku-4-5": 140, "gpt-5-codex": 50, "gpt-5": 60, "gpt-5-mini": 120,
+};
+const EFFORT: Partial<Record<Provider, [string, number][]>> = {
+  claude: [["high", 3], ["xhigh", 2]],
+  codex: [["medium", 2], ["high", 3]],
+  omp: [["high", 1]],
+  pi: [["medium", 1]],
+};
+/** One model quietly gets slower and clumsier in the last days, so the drift view has something to flag. */
+const DRIFTING = "claude-sonnet-5-5";
+const DRIFT_DAYS = 6;
 const BILLING: Record<string, [string, number][]> = {
   omp: [["github-copilot", 5], ["anthropic", 3], ["openai-codex", 2]],
   pi: [["anthropic", 3], ["openai-codex", 1]],
@@ -120,13 +133,18 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
   const billing = BILLING[provider] ? pick(BILLING[provider]!.map((b) => b[0]), BILLING[provider]!.map((b) => b[1])) : null;
   const native = id();
   const sessionId = `${provider}:${native}`;
+  const ago = (NOW - start) / DAY;
+  const drifting = model === DRIFTING && ago < DRIFT_DAYS;
+  const effort = EFFORT[provider] ? pick(EFFORT[provider]!.map((e) => e[0]), EFFORT[provider]!.map((e) => e[1])) : null;
+  // Claude Code updated a little over two weeks ago: a client update marker on the drift charts.
+  const clientVersion = provider === "claude" ? (ago < 16 ? "2.1.42" : "2.1.38") : provider === "codex" ? "0.150.0" : null;
   // A session still running at `until` keeps prompting up to that moment.
   const prompts = opts.until ? Infinity : (opts.prompts ?? int(2, 9));
   const pace = opts.pace ?? 1;
   let ts = start;
   let context = int(8_000, 20_000);
   const first = pick(PROMPTS);
-  w.session({ id: sessionId, provider, nativeId: native, project: project.path, title: first, gitBranch: pick(BRANCHES), client: provider, startedAt: start });
+  w.session({ id: sessionId, provider, nativeId: native, project: project.path, title: first, gitBranch: pick(BRANCHES), client: provider, clientVersion, startedAt: start });
 
   for (let p = 0; p < prompts && !(opts.until && ts >= opts.until); p++) {
     const promptId = `${sessionId}:p${p}`;
@@ -134,10 +152,15 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
     w.prompt({ id: promptId, sessionId, provider, ts, text: p === 0 ? first : pick(PROMPTS), skill, isCommand: false });
     const calls = int(3, 22);
     for (let c = 0; c < calls; c++) {
-      ts += int(4, 40) * 1000 * pace;
+      const output = int(150, 2_500);
+      // How long the response took to stream, and (where the harness measures it) the wait for its first token.
+      const ttft = (drifting ? 2.2 : 1.2) * (0.6 + rand() * 0.8);
+      const speed = (SPEED[model] ?? 60) * (drifting ? 0.62 : 1) * (0.8 + rand() * 0.4);
+      const took = Math.round((ttft + output / speed) * 1000);
+      const started = ts + int(1, 8) * 1000 * pace;
+      ts = started + took;
       if (opts.until && ts > opts.until) break;
       const usageId = `${sessionId}:u${p}.${c}`;
-      const output = int(150, 2_500);
       const write = c === 0 ? int(2_000, 12_000) : int(200, 3_000);
       w.usage({
         id: usageId, provider, sessionId, promptId, ts, project: project.path, model, skill, agent: "main", isSubagent: false,
@@ -145,6 +168,7 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
         billing, premiumRequests: billing === "github-copilot" && c === 0 ? 1 : 0,
       });
       context += write + output;
+      w.responseMeta({ usageId, startTs: started, endTs: ts, ttftMs: provider === "omp" || provider === "pi" ? Math.round(ttft * 1000) : null, effort });
       const tools = int(0, 3);
       for (let k = 0; k < tools; k++) {
         const tool = pick(TOOLS, TOOLS.map((x) => x.w));
@@ -152,8 +176,12 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
           id: `${usageId}:t${k}`, usageId, sessionId, promptId, provider, ts, project: project.path, tool: tool.name,
           filePath: tool.file ? `${project.path}/${pick(project.files)}` : null, skill, agent: "main",
         });
+        const roll = rand();
+        const kind = roll < (drifting ? 0.11 : 0.04) ? "tool_error" : roll < (drifting ? 0.12 : 0.05) ? "tool_rejected" : "tool_ok";
+        w.outcome({ id: `${usageId}:t${k}`, provider, sessionId, ts, project: project.path, model, agent: "main", effort, kind });
       }
     }
+    if (rand() < (drifting ? 0.06 : 0.025)) w.outcome({ id: `${promptId}:interrupt`, provider, sessionId, ts, project: project.path, model, agent: "main", effort, kind: "interrupt" });
     // Now and then a prompt hands work to a subagent with its own, smaller context.
     if (provider === "claude" && rand() < 0.25) {
       const agent = pick(AGENTS);

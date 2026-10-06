@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    Activity, Bot, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
+    Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
     PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
@@ -16,6 +16,7 @@
   import Cache from "./pages/Cache.svelte";
   import Files from "./pages/Files.svelte";
   import Live from "./pages/Live.svelte";
+  import ModelDrift from "./pages/ModelDrift.svelte";
   import Overview from "./pages/Overview.svelte";
   import PromptDetail from "./pages/PromptDetail.svelte";
   import Prompts from "./pages/Prompts.svelte";
@@ -40,6 +41,7 @@
     { label: "nav.group.analyze", items: [
       { page: "projects", label: "nav.projects", icon: FolderKanban },
       { page: "models", label: "nav.models", icon: Cpu },
+      { page: "drift", label: "nav.drift", icon: ChartSpline },
       { page: "providers", label: "nav.providers", icon: Boxes },
       { page: "users", label: "nav.users", icon: Users },
       { page: "skills", label: "nav.skills", icon: Sparkles },
@@ -191,6 +193,7 @@
         {:else if page === "trends"}<Trends />
         {:else if page === "projects"}<Breakdown dim="project" />
         {:else if page === "models"}<Breakdown dim="model" />
+        {:else if page === "drift"}<ModelDrift />
         {:else if page === "providers"}<Breakdown dim="provider" />
         {:else if page === "users"}<Breakdown dim="user" />
         {:else if page === "skills"}<Breakdown dim="skill" />

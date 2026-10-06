@@ -1,7 +1,7 @@
 import type { BreakdownRow, TimeSeries } from "./api.svelte.ts";
 import { colorFor, cssVar, isColored, seqRamp } from "./colors.svelte.ts";
 import type { EChartsOption } from "./echarts.ts";
-import { bucketLabel, compact, entityLabel, metricValue, percent, usd } from "./format.ts";
+import { bucketLabel, compact, entityLabel, integer, metricValue, percent, usd } from "./format.ts";
 import { i18n, t } from "./i18n.svelte.ts";
 
 export function escapeHtml(s: string): string {
@@ -469,6 +469,85 @@ export function percentLine(buckets: string[], values: (number | null)[], bucket
     yAxis: { type: "value", min: floor, max: 1, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => percent(v) } },
     // Idle buckets have no rate: the line bridges them, and a dot marks each bucket that was measured.
     series: [{ type: "line", data: values, color, connectNulls: true, showSymbol: true, symbol: "circle", symbolSize: 6, itemStyle: { borderColor: c.surface, borderWidth: 1.5 }, lineStyle: { width: 2 }, smooth: 0.15 }],
+  };
+}
+
+/**
+ * One model metric day by day, over the range it usually spreads in (shaded band), with the recent window it is
+ * judged on tinted and client updates marked as dashed lines.
+ */
+export function driftLine(o: {
+  days: string[];
+  values: (number | null)[];
+  counts: number[];
+  band: { lo: number; hi: number } | null;
+  recentFrom: string;
+  versions: { day: string; label: string }[];
+  name: string;
+  format: (v: number) => string;
+  labels: { samples: string; usual: string; update: string; recent: string };
+}): EChartsOption {
+  const c = chrome();
+  const color = cssVar("--accent");
+  const recentIdx = o.days.findIndex((d) => d >= o.recentFrom);
+  const updates = new Map<string, string[]>();
+  for (const v of o.versions) updates.set(v.day, [...(updates.get(v.day) ?? []), v.label]);
+  const known = [...o.values.filter((v): v is number => v != null), ...(o.band ? [o.band.lo, o.band.hi] : [])];
+  const lo = known.length ? Math.min(...known) : 0;
+  const hi = known.length ? Math.max(...known) : 1;
+  // Rounded to a step of 1, 2, 2.5 or 5 × 10ⁿ so the axis labels stay even.
+  const pad = (hi - lo || Math.abs(hi) || 1) * 0.1;
+  const raw = (hi - lo + 2 * pad) / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = ([1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) ?? 10) * mag;
+  const extent = { min: Math.max(0, Math.floor((lo - pad) / step) * step), max: Math.ceil((hi + pad) / step) * step };
+  const areas: unknown[] = [];
+  if (o.band) areas.push([{ yAxis: o.band.lo, itemStyle: { color: withAlpha(color, 0.1) } }, { yAxis: o.band.hi }]);
+  if (recentIdx >= 0) areas.push([{ xAxis: recentIdx, itemStyle: { color: withAlpha(cssVar("--data"), 0.08) } }, { xAxis: o.days.length - 1 }]);
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 12, top: 12, bottom: 4, containLabel: true },
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: c.axis } },
+      formatter: (params: { dataIndex: number }[]) => {
+        const i = params[0]?.dataIndex ?? 0;
+        const v = o.values[i];
+        const notes: TooltipRow[] = [{ color: "transparent", name: o.labels.samples, value: integer(o.counts[i]) }];
+        if (o.band) notes.push({ color: withAlpha(color, 0.35), name: o.labels.usual, value: `${o.format(o.band.lo)} – ${o.format(o.band.hi)}` });
+        for (const u of updates.get(o.days[i]!) ?? []) notes.push({ color: c.muted, name: o.labels.update, value: u });
+        const head = bucketLabel(o.days[i]!, "day") + (recentIdx >= 0 && i >= recentIdx ? ` · ${o.labels.recent}` : "");
+        return tooltipRows(head, v == null ? [] : [{ color, name: o.name, value: o.format(v) }], undefined, notes);
+      },
+    },
+    xAxis: { type: "category", data: o.days.map((d) => bucketLabel(d, "day")), axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel, boundaryGap: false },
+    // The axis spans the values and the usual range, so the band's edges stay in view.
+    yAxis: { type: "value", min: extent.min, max: extent.max, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => o.format(v) } },
+    series: [
+      {
+        type: "line",
+        name: o.name,
+        data: o.values,
+        color,
+        connectNulls: true,
+        showSymbol: true,
+        symbol: "circle",
+        symbolSize: 5,
+        itemStyle: { borderColor: c.surface, borderWidth: 1.5 },
+        lineStyle: { width: 2 },
+        smooth: 0.15,
+        markArea: { silent: true, data: areas },
+        markLine: {
+          silent: true,
+          symbol: "none",
+          label: { show: false },
+          lineStyle: { color: c.muted, type: "dashed", width: 1 },
+          data: [...updates.keys()].map((d) => ({ xAxis: o.days.indexOf(d) })).filter((d) => d.xAxis >= 0),
+        },
+      },
+    ],
   };
 }
 

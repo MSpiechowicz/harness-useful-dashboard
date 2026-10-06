@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { drift, median, usualRange } from "../src/core/drift.ts";
+import { drift, median, rateZ, usualRange } from "../src/core/drift.ts";
 import { DbWriter } from "../src/core/ingest/writer.ts";
 import { PriceBook } from "../src/core/pricing.ts";
 import { ID, memDb } from "./helpers.ts";
@@ -39,6 +39,12 @@ describe("drift statistics", () => {
     expect(median([])).toBeNull();
     expect(median([3, 1, 2])).toBe(2);
     expect(median([4, 1, 3, 2])).toBe(2.5);
+  });
+
+  test("rates are compared on their counts", () => {
+    expect(rateZ({ num: 2, den: 100 }, { num: 6, den: 400 })).toBeLessThan(1); // a couple of interrupts more is noise
+    expect(rateZ({ num: 25, den: 100 }, { num: 20, den: 400 })).toBeGreaterThan(3);
+    expect(rateZ({ num: 0, den: 0 }, { num: 5, den: 100 })).toBe(0);
   });
 
   test("the usual range has a floor when the baseline is flat", () => {
