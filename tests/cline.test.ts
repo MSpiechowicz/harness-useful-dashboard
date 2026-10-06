@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { netInput } from "../src/core/ingest/cline.ts";
 import { scan } from "../src/core/ingest/index.ts";
 import { ID, memDb, tempDir, testConfig } from "./helpers.ts";
@@ -21,7 +21,7 @@ describe("Cline, Roo Code and Kilo Code ingest", () => {
     write(join(storage, "saoudrizwan.claude-dev", "tasks", "c1", "ui_messages.json"), []);
     write(join(storage, "rooveterinaryinc.roo-cline", "tasks", "r1", "ui_messages.json"), []);
     write(join(root, ".cline", "data", "tasks", "c2", "ui_messages.json"), []);
-    const ids = (dir: string, family: "cline" | "roo" | "kilo") => findClineSources(dir, family).tasks.map((t) => `${t.provider}/${t.dir.split("/").pop()}`);
+    const ids = (dir: string, family: "cline" | "roo" | "kilo") => findClineSources(dir, family).tasks.map((t) => `${t.provider}/${basename(t.dir)}`);
     expect(ids(storage, "cline")).toEqual(["cline/c1"]);
     expect(ids(storage, "roo")).toEqual(["roo/r1"]);
     expect(ids(join(storage, "rooveterinaryinc.roo-cline"), "roo")).toEqual(["roo/r1"]);
