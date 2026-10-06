@@ -1,3 +1,18 @@
+# [1.4.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.7...v1.4.0) (2026-10-06)
+
+
+### Bug Fixes
+
+* draw the trend line on weekly and monthly charts too ([19abe8d](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/19abe8d99ff9ac3b07e07aeedc23e4f0e8669c16))
+* keep Settings working when the server is an older version ([6c4004f](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/6c4004f44cfa38bee5c93f1e8aab4b8a69e7d37b))
+* show the total so far on Trends when there is nothing to compare ([d31c2bd](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/d31c2bd2d13aa2913256b44deee943bd7c804550))
+
+
+### Features
+
+* give Cline, Roo Code and Kilo Code each a source and a color of their own ([fe03228](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/fe032285cc906add2b1e2817f3ec95a8b7ee3287))
+* read Zed's agent threads and the Cline, Roo Code and Kilo Code extensions ([b5a62e7](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b5a62e7854fc36a6a1c42317f43b708202ee0a04))
+
 ## [1.3.7](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.6...v1.3.7) (2026-10-06)
 
 
