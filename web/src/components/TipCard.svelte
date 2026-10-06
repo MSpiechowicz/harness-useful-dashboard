@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Link from "./Link.svelte";
   import { ArrowRight, CircleAlert, Info, TriangleAlert } from "@lucide/svelte";
   import type { Tip } from "../lib/api.svelte.ts";
   import { compact, integer, usd } from "../lib/format.ts";
@@ -33,7 +34,7 @@
     </div>
     <p class="mt-1 text-sm leading-relaxed text-ink-2">{body}</p>
     {#if tip.link}
-      <a href={tip.link} class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent-ink hover:underline">{t("tips.open")}<ArrowRight size={12} /></a>
+      <Link to={tip.link} class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent-ink hover:underline">{t("tips.open")}<ArrowRight size={12} /></Link>
     {/if}
   </div>
 </article>

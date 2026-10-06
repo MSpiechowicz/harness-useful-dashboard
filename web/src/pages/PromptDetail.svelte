@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Link from "../components/Link.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import { ArrowLeft, Sparkles } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
@@ -35,7 +36,7 @@
 
 <div class="flex flex-col gap-5">
   <ViewGate ready={settled(d)}>
-    <a href="#/prompts" class="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted hover:text-ink"><ArrowLeft size={13} />{t("prompts.back")}</a>
+    <Link to="#/prompts" class="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted hover:text-ink"><ArrowLeft size={13} />{t("prompts.back")}</Link>
 
     {#if d.data && !p}
       <div class="card"><Empty title={t("prompts.notFound")} compact /></div>
@@ -43,7 +44,7 @@
       <Card>
         <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
           <span>{dateTime(p.ts)}</span>
-          <a class="text-accent-ink hover:underline" href="#/sessions/{encodeURIComponent(p.session_id)}">{p.sessionTitle ?? p.session_id}</a>
+          <Link class="text-accent-ink hover:underline" to="#/sessions/{encodeURIComponent(p.session_id)}">{p.sessionTitle ?? p.session_id}</Link>
           <span class="font-mono">{p.project}</span>
           {#if p.skill}<span class="inline-flex items-center gap-1 text-accent-ink"><Sparkles size={11} />{p.skill}</span>{/if}
         </div>

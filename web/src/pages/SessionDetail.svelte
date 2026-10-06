@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Link from "../components/Link.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import { ArrowLeft, GitBranch, Sparkles } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
@@ -40,7 +41,7 @@
 
 <div class="flex flex-col gap-5">
   <ViewGate ready={settled(d)}>
-    <a href="#/sessions" class="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted hover:text-ink"><ArrowLeft size={13} />{t("sessions.back")}</a>
+    <Link to="#/sessions" class="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted hover:text-ink"><ArrowLeft size={13} />{t("sessions.back")}</Link>
 
     {#if d.data && !s && !d.data.timeline.length}
       <div class="card"><Empty title={t("sessions.notFound")} compact /></div>
@@ -53,7 +54,7 @@
           <span>{s?.provider}{s?.client ? ` · ${s.client}` : ""}{s?.client_version ? ` ${s.client_version}` : ""}</span>
           <span>{dateTime(s?.started_at)} – {s?.ended_at ? time(s.ended_at) : ""}</span>
           <span>{s?.user}@{s?.host}</span>
-          {#if s?.parent_session_id}<a class="text-accent-ink hover:underline" href="#/sessions/{encodeURIComponent(s.parent_session_id)}">↖ {t("sessions.parent")}</a>{/if}
+          {#if s?.parent_session_id}<Link class="text-accent-ink hover:underline" to="#/sessions/{encodeURIComponent(s.parent_session_id)}">↖ {t("sessions.parent")}</Link>{/if}
         </div>
       </div>
 
@@ -109,7 +110,7 @@
             <Card title={t("sessions.children")}>
               <ul class="flex flex-col gap-1 text-sm">
                 {#each d.data.children as c (c.id)}
-                  <li class="flex justify-between gap-2"><a class="truncate text-accent-ink hover:underline" href="#/sessions/{encodeURIComponent(c.id)}">{c.agent ?? c.title ?? c.id}</a><span class="tabular text-xs">{usd(c.cost)}</span></li>
+                  <li class="flex justify-between gap-2"><Link class="truncate text-accent-ink hover:underline" to="#/sessions/{encodeURIComponent(c.id)}">{c.agent ?? c.title ?? c.id}</Link><span class="tabular text-xs">{usd(c.cost)}</span></li>
                 {/each}
               </ul>
             </Card>

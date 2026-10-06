@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, Lightbulb, Menu, MessageSquareText,
     PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
@@ -120,8 +121,8 @@
           {#if collapsed}<div class="mx-3 hidden h-[34px] items-center lg:flex"><div class="h-px w-full bg-line"></div></div>{/if}
         {/if}
         {#each g.items as item (item.page)}
-          <a
-            href="#/{item.page}"
+          <Link
+            to="#/{item.page}"
             onclick={() => (menuOpen = false)}
             class="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors {collapsed ? 'lg:justify-center lg:px-0' : ''} {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
             aria-current={isActive(item.page) ? "page" : undefined}
@@ -129,7 +130,7 @@
             title={collapsed ? t(item.label) : undefined}
           >
             <item.icon size={16} class="shrink-0" /><span class="truncate" class:lg:hidden={collapsed}>{t(item.label)}</span>
-          </a>
+          </Link>
         {/each}
       {/each}
       <!-- The last menu item, under Settings: collapse to icons, or expand again. Wide screens only: small ones use the drawer. -->

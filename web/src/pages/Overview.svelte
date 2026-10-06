@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Link from "../components/Link.svelte";
   import { ArrowRight } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
@@ -53,8 +54,8 @@
   ]);
 </script>
 
-{#snippet more(href: string, label: string)}
-  <a {href} class="inline-flex items-center gap-1 text-xs font-medium text-accent-ink hover:underline">{label}<ArrowRight size={12} /></a>
+{#snippet more(to: string, label: string)}
+  <Link {to} class="inline-flex items-center gap-1 text-xs font-medium text-accent-ink hover:underline">{label}<ArrowRight size={12} /></Link>
 {/snippet}
 
 <div class="flex flex-col gap-5">
