@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -141,6 +141,34 @@ const MIGRATIONS: Record<number, string> = {
     -- Read the Codex logs (rollout-*.jsonl) once more for the readings ingested before this table existed. Records are
     -- keyed by their place in the file, so reading again changes nothing else.
     DELETE FROM ingest_files WHERE path LIKE '%rollout-%.jsonl';
+  `,
+  // What the model drift view compares: how long each response took and at what effort, and how tool calls ended.
+  5: /* sql */ `
+    CREATE TABLE IF NOT EXISTS response_meta (
+      usage_id    TEXT PRIMARY KEY,
+      start_ts    INTEGER,           -- when the model got its input, epoch ms
+      end_ts      INTEGER,           -- when the response was done, epoch ms
+      ttft_ms     REAL,
+      effort      TEXT,
+      stop_reason TEXT
+    );
+    CREATE TABLE IF NOT EXISTS outcomes (
+      id         TEXT PRIMARY KEY,
+      provider   TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      ts         INTEGER NOT NULL,
+      project    TEXT,
+      user       TEXT,
+      host       TEXT,
+      model      TEXT,
+      agent      TEXT NOT NULL DEFAULT 'main',
+      effort     TEXT,
+      kind       TEXT NOT NULL      -- tool_ok, tool_error, tool_rejected, interrupt
+    );
+    CREATE INDEX IF NOT EXISTS idx_outcomes_model ON outcomes(model, ts);
+    -- Read every log once more to fill both for the history already ingested. Records are keyed by their place in
+    -- the logs, so reading again changes nothing else.
+    DELETE FROM ingest_files;
   `,
 };
 

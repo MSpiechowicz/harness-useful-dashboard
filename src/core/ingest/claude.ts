@@ -27,6 +27,15 @@ interface ClaudeState {
   /** Subagent identity, derived from the file location / meta.json. */
   agent: string | null;
   spawnRef: string | null;
+  /** Model of the last response, which the tool results that follow belong to. */
+  model?: string | null;
+  effort?: string | null;
+  /** Time of the last user record (a prompt or tool results), where the next response starts. */
+  inputTs?: number | null;
+  /** The response being streamed, and when it started. */
+  responseId?: string | null;
+  responseStart?: number | null;
+  responseEnd?: number | null;
 }
 
 interface ContentBlock {
@@ -35,6 +44,18 @@ interface ContentBlock {
   name?: string;
   id?: string;
   input?: Record<string, unknown>;
+  tool_use_id?: string;
+  is_error?: boolean;
+  content?: unknown;
+}
+
+/** A failed tool result that only says the user (or a permission rule) stopped the call. */
+const REJECTED_RE = /^The user doesn't want to (proceed|take this action)|tool use was rejected|^Permission to use .* (has been|was) denied|^<tool_use_error>Blocked/i;
+
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return (content as ContentBlock[]).map((b) => (typeof b?.text === "string" ? b.text : "")).join("\n");
 }
 
 function textOf(content: unknown): string | null {
@@ -136,6 +157,20 @@ export const claudeParser: LineParser<ClaudeState> = {
       }
 
       if (rec.type === "user") {
+        if (ts != null) {
+          state.inputTs = ts;
+          const blocks: ContentBlock[] = Array.isArray(rec.message?.content) ? rec.message.content : [];
+          const texts = typeof rec.message?.content === "string" ? [rec.message.content as string] : blocks.filter((b) => b?.type === "text").map((b) => b.text ?? "");
+          const outcome = { provider: "claude" as const, sessionId, ts, project: rec.cwd ?? null, model: state.model ?? null, agent, effort: state.effort ?? null };
+          for (const b of blocks) {
+            if (b?.type !== "tool_result" || !b.tool_use_id) continue;
+            const kind = !b.is_error ? "tool_ok" : REJECTED_RE.test(resultText(b.content).trim()) ? "tool_rejected" : "tool_error";
+            sink.outcome?.({ ...outcome, id: `claude:${b.tool_use_id}`, kind });
+          }
+          if (texts.some((t) => t.trim().startsWith("[Request interrupted by user"))) {
+            sink.outcome?.({ ...outcome, id: `${sessionId}:${rec.uuid ?? ts}:interrupt`, kind: "interrupt" });
+          }
+        }
         if (sidechain || rec.isMeta || ts == null) continue;
         const parsed = parseClaudePrompt(rec.message?.content);
         if (!parsed) continue;
@@ -191,6 +226,24 @@ export const claudeParser: LineParser<ClaudeState> = {
         cacheWrite1h: write1h,
         reasoning: num(usage.output_tokens_details?.thinking_tokens),
         speed: typeof usage.speed === "string" ? usage.speed : null,
+      });
+
+      // One response is logged as a line per content block: it started when its input arrived (or the response
+      // before it ended) and ended with its last line.
+      if (state.responseId !== usageId) {
+        const prevEnd = state.responseEnd ?? null;
+        state.responseId = usageId;
+        state.responseStart = Math.max(state.inputTs ?? 0, prevEnd ?? 0) || null;
+      }
+      state.responseEnd = ts;
+      state.model = msg.model ?? state.model ?? null;
+      if (typeof rec.effort === "string") state.effort = rec.effort;
+      sink.responseMeta?.({
+        usageId,
+        startTs: state.responseStart ?? null,
+        endTs: ts,
+        effort: typeof rec.effort === "string" ? rec.effort : null,
+        stopReason: typeof msg.stop_reason === "string" ? msg.stop_reason : null,
       });
 
       const content: ContentBlock[] = Array.isArray(msg.content) ? msg.content : [];

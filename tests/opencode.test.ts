@@ -87,6 +87,36 @@ describe("OpenCode ingest", () => {
     ]);
   });
 
+  test("model call timing, tool outcomes and aborted replies", async () => {
+    const root = tempDir();
+    const oc = opencodeDb(root);
+    session(oc, "ses_main");
+    message(oc, "msg_u1", "ses_main", T, { role: "user", time: { created: T } });
+    message(oc, "msg_a1", "ses_main", T + 1000, assistant("msg_u1"));
+    part(oc, "prt_t1", "msg_a1", "ses_main", T + 2000, { type: "tool", callID: "call_ok", tool: "read", state: { status: "completed", input: {}, time: { start: T + 2000, end: T + 2100 } } });
+    part(oc, "prt_t2", "msg_a1", "ses_main", T + 2200, { type: "tool", callID: "call_err", tool: "bash", state: { status: "error", input: {}, error: "exit 1", time: { start: T + 2200, end: T + 2300 } } });
+    part(oc, "prt_t3", "msg_a1", "ses_main", T + 2400, { type: "tool", callID: "call_no", tool: "bash", state: { status: "error", input: {}, error: "The user rejected permission to use this specific tool call.", time: { start: T + 2400, end: T + 2500 } } });
+    part(oc, "prt_s1", "msg_a1", "ses_main", T + 3000, { type: "step-finish", tokens: tokens(100, 200) });
+    part(oc, "prt_b2", "msg_a1", "ses_main", T + 3500, { type: "step-start" });
+    part(oc, "prt_s2", "msg_a1", "ses_main", T + 6000, { type: "step-finish", tokens: tokens(100, 200) });
+    message(oc, "msg_a2", "ses_main", T + 7000, assistant("msg_u1", { time: { created: T + 7000 }, error: { name: "MessageAbortedError" } }));
+    oc.close();
+
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    expect(db.query<any, []>("SELECT usage_id, start_ts, end_ts FROM response_meta ORDER BY usage_id").all()).toEqual([
+      { usage_id: "opencode:msg_a2", start_ts: T + 7000, end_ts: null },
+      { usage_id: "opencode:prt_s1", start_ts: T + 1000, end_ts: T + 3000 },
+      { usage_id: "opencode:prt_s2", start_ts: T + 3500, end_ts: T + 6000 },
+    ]);
+    expect(db.query<any, []>("SELECT id, kind FROM outcomes ORDER BY id").all()).toEqual([
+      { id: "opencode:call_err", kind: "tool_error" },
+      { id: "opencode:call_no", kind: "tool_rejected" },
+      { id: "opencode:call_ok", kind: "tool_ok" },
+      { id: "opencode:msg_a2:interrupt", kind: "interrupt" },
+    ]);
+  });
+
   test("reads only what changed, and counts a reply once it is done", async () => {
     const root = tempDir();
     let oc = opencodeDb(root);

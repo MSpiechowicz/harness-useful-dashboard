@@ -166,10 +166,26 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
       const steps = parts.filter((p) => p.type === "step-finish" && p.tokens);
       const usageId = steps[0] ? oc(steps[0].id) : oc(row.id);
 
+      const model = typeof m.modelID === "string" ? m.modelID : null;
+      if (m.error?.name === "MessageAbortedError") {
+        sink.outcome?.({ id: `${oc(row.id)}:interrupt`, provider: "opencode", sessionId, ts, project, model, agent, kind: "interrupt" });
+      }
+
       for (const p of parts) {
         if (p.type !== "tool" || typeof p.tool !== "string") continue;
         const status = p.state?.status;
         if (status !== "completed" && status !== "error") continue;
+        const stopped = status === "error" && /rejected|denied|aborted/i.test(String(p.state?.error ?? ""));
+        sink.outcome?.({
+          id: oc(typeof p.callID === "string" ? p.callID : p.id),
+          provider: "opencode",
+          sessionId,
+          ts: typeof p.state?.time?.end === "number" ? p.state.time.end : ts,
+          project,
+          model,
+          agent,
+          kind: status === "completed" ? "tool_ok" : stopped ? "tool_rejected" : "tool_error",
+        });
         const input = p.state?.input ?? {};
         if (p.tool === "skill" && typeof input.name === "string" && promptId) skillOf.set(promptId, input.name);
         const files =
@@ -198,7 +214,19 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
       }
 
       // One row per model call (step-finish). A message without them (older versions) is one call.
-      const calls = steps.length ? steps.map((p) => ({ id: oc(p.id), ts: p.ts ?? ts, tokens: p.tokens })) : [{ id: oc(row.id), ts, tokens: m.tokens }];
+      // A model call starts at its step-start part (or the message, for its first call) and ends at its step-finish.
+      const starts = new Map<string, number>();
+      let stepStart: number | null = ts;
+      for (const p of parts) {
+        if (p.type === "step-start") stepStart = p.ts ?? null;
+        else if (p.type === "step-finish" && p.tokens) {
+          if (stepStart != null) starts.set(p.id, stepStart);
+          stepStart = null;
+        }
+      }
+      const calls = steps.length
+        ? steps.map((p) => ({ id: oc(p.id), ts: p.ts ?? ts, tokens: p.tokens, start: starts.get(p.id) ?? null, end: p.ts ?? null }))
+        : [{ id: oc(row.id), ts, tokens: m.tokens, start: ts, end: typeof m.time?.completed === "number" ? m.time.completed : null }];
       const excludesReasoning = outputExcludesReasoning(session?.version ?? null);
       for (const call of calls) {
         const t = call.tokens ?? {};
@@ -210,7 +238,7 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
           promptId,
           ts: call.ts,
           project,
-          model: typeof m.modelID === "string" ? m.modelID : null,
+          model,
           skill: promptId ? (skillOf.get(promptId) ?? null) : null,
           agent,
           isSubagent: isSub,
@@ -224,6 +252,7 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
           reasoning,
           billing: typeof m.providerID === "string" ? m.providerID : null,
         });
+        sink.responseMeta?.({ usageId: call.id, startTs: call.start, endTs: call.end });
       }
     }
     return latest;

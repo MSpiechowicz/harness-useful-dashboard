@@ -82,12 +82,48 @@ export interface LimitRecord {
   ts: number;
 }
 
+/**
+ * Timing and settings of one model response, keyed by its usage row. A response streamed over several log lines
+ * reports more than once: the earliest start and the latest end are kept.
+ */
+export interface ResponseMetaRecord {
+  usageId: string;
+  /** When the model got its input (exact, or the previous logged event), epoch ms. */
+  startTs: number | null;
+  /** When the response was done, epoch ms. */
+  endTs: number | null;
+  /** Time to the first token, when the harness measures it. */
+  ttftMs?: number | null;
+  /** Reasoning effort or thinking level the response ran at ("low", "high", …). */
+  effort?: string | null;
+  stopReason?: string | null;
+}
+
+/** How a tool call ended, or a prompt the user interrupted. */
+export type OutcomeKind = "tool_ok" | "tool_error" | "tool_rejected" | "interrupt";
+
+export interface OutcomeRecord {
+  id: string;
+  provider: Provider;
+  sessionId: string;
+  ts: number;
+  project: string | null;
+  /** The model whose response led to it. */
+  model: string | null;
+  agent: string;
+  /** Effort the model was running at. */
+  effort?: string | null;
+  kind: OutcomeKind;
+}
+
 export interface IngestSink {
   session(s: SessionRecord): void;
   prompt(p: PromptRecord): void;
   usage(u: UsageRecord): void;
   tool(t: ToolRecord): void;
   limit?(l: LimitRecord): void;
+  responseMeta?(m: ResponseMetaRecord): void;
+  outcome?(o: OutcomeRecord): void;
 }
 
 export interface FileContext {

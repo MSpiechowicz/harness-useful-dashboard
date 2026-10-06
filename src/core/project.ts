@@ -93,6 +93,7 @@ export function normalizeProjects(db: Database, host: string, resolveFn: (p: str
       changed++;
       db.query("UPDATE usage SET project = ? WHERE host = ? AND project = ?").run(to, host, from);
       db.query("UPDATE sessions SET project = ? WHERE host = ? AND project = ?").run(to, host, from);
+      db.query("UPDATE outcomes SET project = ? WHERE host = ? AND project = ?").run(to, host, from);
       db.query("UPDATE tool_calls SET project = ? WHERE project = ? AND session_id IN (SELECT id FROM sessions WHERE host = ?)").run(to, from, host);
     }
   })();

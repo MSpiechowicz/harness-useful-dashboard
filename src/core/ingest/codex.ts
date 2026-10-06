@@ -11,7 +11,18 @@ interface CodexState {
   lastTotal: number;
   promptId: string | null;
   skill: string | null;
+  /** Reasoning effort of the current turn. */
+  effort?: string | null;
+  /** Time of the last input to the model (a prompt or a tool's output), and when the last response ended. */
+  inputTs?: number | null;
+  responseEnd?: number | null;
+  /** The file reports tool outcomes as item_completed events, so the older *_end events are not counted too. */
+  itemOutcomes?: boolean;
 }
+
+/** item_completed item types that are tool calls, and how their status maps to an outcome. */
+const TOOL_ITEMS = new Set(["CommandExecution", "McpToolCall", "FileChange", "CollabAgentToolCall"]);
+const ITEM_OUTCOME: Record<string, "tool_ok" | "tool_error" | "tool_rejected"> = { completed: "tool_ok", failed: "tool_error", declined: "tool_rejected" };
 
 const SKILL_PATH_RE = /[\\/]skills[\\/]([\w.:@-]+)[\\/]SKILL\.md/;
 const SKILL_TAG_RE = /<skill>\s*<name>([^<]+)<\/name>/;
@@ -104,6 +115,8 @@ export const codexParser: LineParser<CodexState> = {
 
       if (rec.type === "turn_context") {
         if (p.model) state.model = p.model;
+        const effort = p.effort ?? p.collaboration_mode?.settings?.reasoning_effort;
+        if (typeof effort === "string") state.effort = effort;
         if (p.cwd) state.cwd = p.cwd;
         continue;
       }
@@ -112,8 +125,17 @@ export const codexParser: LineParser<CodexState> = {
         state.mode = "records";
         const u = p.usage ?? {};
         const cached = num(u.cached_input_tokens);
+        const usageId = `codex:${state.threadId}:${p.response_id ?? rec.ordinal ?? offset}`;
+        // Written as the response ends. It started with the last input, or when the response before it ended.
+        sink.responseMeta?.({
+          usageId,
+          startTs: Math.max(state.inputTs ?? 0, state.responseEnd ?? 0) || null,
+          endTs: ts,
+          effort: state.effort ?? null,
+        });
+        if (ts != null) state.responseEnd = ts;
         sink.usage({
-          id: `codex:${state.threadId}:${p.response_id ?? rec.ordinal ?? offset}`,
+          id: usageId,
           provider: "codex",
           sessionId,
           promptId: state.promptId,
@@ -160,8 +182,11 @@ export const codexParser: LineParser<CodexState> = {
           state.lastTotal = total;
           const u = p.info.last_token_usage ?? {};
           const cached = num(u.cached_input_tokens);
+          const usageId = `codex:${state.threadId}:${rec.ordinal ?? `o${offset}`}`;
+          // Counts are logged after the tools ran, so there is no response time here.
+          sink.responseMeta?.({ usageId, startTs: null, endTs: null, effort: state.effort ?? null });
           sink.usage({
-            id: `codex:${state.threadId}:${rec.ordinal ?? `o${offset}`}`,
+            id: usageId,
             provider: "codex",
             sessionId,
             promptId: state.promptId,
@@ -181,6 +206,23 @@ export const codexParser: LineParser<CodexState> = {
           continue;
         }
 
+        const outcome = { provider: "codex" as const, sessionId, ts: ts ?? Date.now(), project: state.cwd, model: state.model, agent, effort: state.effort ?? null };
+        if (p.type === "item_completed" && TOOL_ITEMS.has(p.item?.type)) {
+          state.itemOutcomes = true;
+          const kind = ITEM_OUTCOME[p.item.status];
+          if (kind) sink.outcome?.({ ...outcome, id: `codex:${state.threadId}:${p.item.id ?? `o${offset}`}`, kind });
+          continue;
+        }
+        if ((p.type === "exec_command_end" || p.type === "patch_apply_end" || p.type === "mcp_tool_call_end") && !state.itemOutcomes) {
+          const failed = p.type === "exec_command_end" ? num(p.exit_code) !== 0 : p.type === "patch_apply_end" ? p.success === false : !!p.result?.Err;
+          sink.outcome?.({ ...outcome, id: `codex:${state.threadId}:${p.call_id ?? `o${offset}`}:end`, kind: failed ? "tool_error" : "tool_ok" });
+          continue;
+        }
+        if (p.type === "turn_aborted") {
+          if (p.reason === "interrupted") sink.outcome?.({ ...outcome, id: `${sessionId}:${p.turn_id ?? `o${offset}`}:interrupt`, kind: "interrupt" });
+          continue;
+        }
+
         let promptText: string | null = null;
         let promptSkill: string | null = null;
         let promptKey: string | null = null;
@@ -193,6 +235,7 @@ export const codexParser: LineParser<CodexState> = {
           promptText = p.message;
           promptKey = rec.ordinal != null ? String(rec.ordinal) : `o${offset}`;
         }
+        if (promptKey && ts != null) state.inputTs = ts;
         if (promptKey && ts != null && !isSub) {
           const skill = promptSkill ?? (promptText ? skillFrom(promptText) : null);
           const promptId = `${sessionId}:${promptKey}`;
@@ -212,6 +255,10 @@ export const codexParser: LineParser<CodexState> = {
       }
 
       if (rec.type === "response_item") {
+        if (p.type === "function_call_output" || p.type === "custom_tool_call_output" || p.type === "local_shell_call_output") {
+          if (ts != null) state.inputTs = ts;
+          continue;
+        }
         if (p.type === "message" && p.role === "user" && !state.skill) {
           // Skill bodies are injected as user messages in some Codex versions.
           const body = Array.isArray(p.content) ? p.content.map((c: any) => c?.text ?? "").join("\n") : "";

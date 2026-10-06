@@ -26,7 +26,14 @@ interface OmpState {
   billing?: string | null;
   promptId: string | null;
   skill: string | null;
+  /** Thinking level of the last thinking_level_change. */
+  effort?: string | null;
+  /** Model of the last answer, which the tool results that follow belong to. */
+  answeredBy?: string | null;
 }
+
+/** Failed tool results that only say the user or the harness stopped the call, not that it went wrong. */
+const STOPPED_RE = /^Skipped due to|^The user (rejected|denied|doesn't want)|^Tool (call|execution) (was )?(aborted|cancelled|rejected)/i;
 
 const SESSION_FILE_RE = /_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 const SUBAGENT_FILE_RE = /_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[\\/]([^\\/]+)\.jsonl$/i;
@@ -146,6 +153,10 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
           sessions.touch({ id: sessionId, provider: harness, nativeId: state.sessionId, title }, ts);
           continue;
         }
+        if (rec.type === "thinking_level_change") {
+          if (typeof rec.thinkingLevel === "string") state.effort = rec.thinkingLevel;
+          continue;
+        }
         if (rec.type === "model_change") {
           // omp names "openai-codex/gpt-6-sol" (messages name it bare), pi the provider and modelId apart.
           const model = typeof rec.modelId === "string" ? rec.modelId : typeof rec.model === "string" ? rec.model : null;
@@ -177,6 +188,22 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
             text: truncate(promptText, ctx.promptTextLimit),
             skill: null,
             isCommand: /^\s*\/[\w:-]+/.test(promptText ?? ""),
+          });
+          continue;
+        }
+        if (m.role === "toolResult") {
+          if (typeof m.toolCallId !== "string" || ts == null) continue;
+          const kind = m.isError !== true ? "tool_ok" : STOPPED_RE.test(textOf(m.content)?.trim() ?? "") ? "tool_rejected" : "tool_error";
+          sink.outcome?.({
+            id: harness === "pi" ? `pi:${m.toolCallId}` : `${sessionId}:${m.toolCallId}`,
+            provider: harness,
+            sessionId,
+            ts,
+            project: state.cwd,
+            model: state.answeredBy ?? state.model,
+            agent,
+            effort: state.effort ?? null,
+            kind,
           });
           continue;
         }
@@ -217,7 +244,23 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
         if (!u || typeof u !== "object") continue;
         // The model that answered, when it differs from the one asked for (pi's responseModel).
         const model = typeof m.responseModel === "string" ? m.responseModel : typeof m.model === "string" ? m.model : state.model;
-        usageRow(u, { id: key(entry, m.timestamp ?? ts), ts: ts ?? parseTs(m.timestamp) ?? Date.now(), model, billing, agent, isSub });
+        const usageId = key(entry, m.timestamp ?? ts);
+        const at = ts ?? parseTs(m.timestamp) ?? Date.now();
+        if (model) state.answeredBy = model;
+        usageRow(u, { id: usageId, ts: at, model, billing, agent, isSub });
+        // The message carries its own request start, completion and time to first token.
+        const start = typeof m.timestamp === "number" ? m.timestamp : null;
+        sink.responseMeta?.({
+          usageId,
+          startTs: start,
+          endTs: typeof m.completedAt === "number" ? m.completedAt : start != null && typeof m.duration === "number" ? start + m.duration : at,
+          ttftMs: typeof m.ttft === "number" ? m.ttft : null,
+          effort: state.effort ?? null,
+          stopReason: typeof m.stopReason === "string" ? m.stopReason : null,
+        });
+        if (m.stopReason === "aborted" && !String(m.errorMessage ?? "").includes("silent_abort")) {
+          sink.outcome?.({ id: `${usageId}:interrupt`, provider: harness, sessionId, ts: at, project: state.cwd, model, agent, effort: state.effort ?? null, kind: "interrupt" });
+        }
       }
       sessions.flush(sink);
       return state;

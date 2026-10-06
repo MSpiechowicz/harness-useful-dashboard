@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import type { PriceBook } from "../pricing.ts";
 import { projectResolver } from "../project.ts";
-import type { IngestSink, LimitRecord, PromptRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
+import type { IngestSink, LimitRecord, OutcomeRecord, PromptRecord, ResponseMetaRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
 
 export interface WriterStats {
   usage: number;
@@ -19,6 +19,8 @@ export class DbWriter implements IngestSink {
   private sUsage: Statement;
   private sTool: Statement;
   private sLimit: Statement;
+  private sMeta: Statement;
+  private sOutcome: Statement;
 
   constructor(
     db: Database,
@@ -84,6 +86,21 @@ export class DbWriter implements IngestSink {
                                         file_path, skill, agent, spawn_ref)
       VALUES ($id, $usageId, $sessionId, $promptId, $provider, $ts, $project, $user, $tool, $filePath, $skill,
               $agent, $spawnRef)
+    `);
+    this.sMeta = db.prepare(`
+      INSERT INTO response_meta (usage_id, start_ts, end_ts, ttft_ms, effort, stop_reason)
+      VALUES ($usageId, $startTs, $endTs, $ttftMs, $effort, $stopReason)
+      ON CONFLICT(usage_id) DO UPDATE SET
+        start_ts    = MIN(COALESCE(response_meta.start_ts, excluded.start_ts), COALESCE(excluded.start_ts, response_meta.start_ts)),
+        end_ts      = MAX(COALESCE(response_meta.end_ts, excluded.end_ts), COALESCE(excluded.end_ts, response_meta.end_ts)),
+        ttft_ms     = COALESCE(response_meta.ttft_ms, excluded.ttft_ms),
+        effort      = COALESCE(response_meta.effort, excluded.effort),
+        stop_reason = COALESCE(excluded.stop_reason, response_meta.stop_reason)
+    `);
+    this.sOutcome = db.prepare(`
+      INSERT INTO outcomes (id, provider, session_id, ts, project, user, host, model, agent, effort, kind)
+      VALUES ($id, $provider, $sessionId, $ts, $project, $user, $host, $model, $agent, $effort, $kind)
+      ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, model = COALESCE(outcomes.model, excluded.model)
     `);
   }
 
@@ -175,6 +192,33 @@ export class DbWriter implements IngestSink {
       spawnRef: t.spawnRef ?? null,
     });
     this.stats.tools++;
+  }
+
+  responseMeta(m: ResponseMetaRecord): void {
+    this.sMeta.run({
+      usageId: m.usageId,
+      startTs: m.startTs,
+      endTs: m.endTs,
+      ttftMs: m.ttftMs ?? null,
+      effort: m.effort ?? null,
+      stopReason: m.stopReason ?? null,
+    });
+  }
+
+  outcome(o: OutcomeRecord): void {
+    this.sOutcome.run({
+      id: o.id,
+      provider: o.provider,
+      sessionId: o.sessionId,
+      ts: o.ts,
+      project: this.project(o.project),
+      user: this.identity.user,
+      host: this.identity.host,
+      model: o.model,
+      agent: o.agent,
+      effort: o.effort ?? null,
+      kind: o.kind,
+    });
   }
 
   limit(l: LimitRecord): void {
