@@ -68,6 +68,9 @@ export const en = {
   "kpi.vsPrev": "vs previous",
   "kpi.vsPrevHint": "Compared with the period of the same length just before",
   "kpi.estimatedNote": "{share} of cost uses estimated prices",
+  "kpi.acrossDays": "Across {n} active days",
+  "kpi.perActiveDay": "{v} per active day",
+  "kpi.perSession": "{v} per session",
 
   "tok.input": "Input",
   "tok.output": "Output",

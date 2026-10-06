@@ -17,7 +17,7 @@
   import { type ActivityDay, activityStats, daySpan } from "../lib/activity.ts";
   import { apiUrl, settled, useFetch, type Breakdown, type Summary, type Tip, type TimeSeries } from "../lib/api.svelte.ts";
   import { breakdownItems, heatMax, seriesLabel, weekHeatmap } from "../lib/charts.ts";
-  import { bucketLabel, compact, metricValue, percent, usd } from "../lib/format.ts";
+  import { bucketLabel, compact, integer, metricValue, percent, trimmed, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -38,6 +38,7 @@
   const tips = useFetch<Tip[]>(() => apiUrl("/api/tips"));
 
   const s = $derived(summary.data);
+  const days = $derived(Math.max(s?.activeDays ?? 1, 1));
   const empty = $derived(s != null && s.messages === 0);
   const sparkValues = $derived(spark.data?.series[0]?.data ?? []);
   const sparkLabels = $derived((spark.data?.buckets ?? []).map((b) => bucketLabel(b, store.bucket)));
@@ -75,7 +76,7 @@
             trend={sparkValues}
             trendLabels={sparkLabels}
             trendFormat={(v) => metricValue(v, store.metric)}
-            hint={s && s.estimatedCost > 0 ? t("kpi.estimatedNote", { share: percent(s.estimatedCost / Math.max(s.cost, 1e-9)) }) : undefined}
+            hint={s && s.estimatedCost > 0 ? t("kpi.estimatedNote", { share: percent(s.estimatedCost / Math.max(s.cost, 1e-9)) }) : s ? t("kpi.acrossDays", { n: integer(s.activeDays) }) : undefined}
           />
         </div>
         <Kpi
@@ -83,9 +84,11 @@
           value={s ? (store.metric === "cost" ? compact(s.tokens) : usd(s.cost)) : "…"}
           current={s ? (store.metric === "cost" ? s.tokens : s.cost) : undefined}
           previous={s?.previous ? (store.metric === "cost" ? s.previous.tokens : s.previous.cost) : null}
+          hint={s ? t("kpi.perActiveDay", { v: store.metric === "cost" ? compact(s.tokens / days) : usd(s.cost / days) }) : undefined}
         />
-        <Kpi label={t("kpi.sessions")} value={s ? compact(s.sessions) : "…"} current={s?.sessions} previous={s?.previous?.sessions} />
-        <Kpi label={t("kpi.prompts")} value={s ? compact(s.prompts) : "…"} current={s?.prompts} previous={s?.previous?.prompts} />
+        <!-- With no earlier period to compare (All time), each tile shows an average instead of a change. -->
+        <Kpi label={t("kpi.sessions")} value={s ? compact(s.sessions) : "…"} current={s?.sessions} previous={s?.previous?.sessions} hint={s ? t("kpi.perActiveDay", { v: trimmed(s.sessions / days) }) : undefined} />
+        <Kpi label={t("kpi.prompts")} value={s ? compact(s.prompts) : "…"} current={s?.prompts} previous={s?.previous?.prompts} hint={s ? t("kpi.perSession", { v: trimmed(s.prompts / Math.max(s.sessions, 1)) }) : undefined} />
         <Kpi label={t("kpi.cacheHit")} value={s ? percent(s.cacheHitRate, 1) : "…"} hint={s ? `${t("kpi.costPerPrompt")}: ${usd(s.costPerPrompt)}` : undefined} />
       </div>
 

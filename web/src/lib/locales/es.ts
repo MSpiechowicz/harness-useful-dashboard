@@ -70,6 +70,9 @@ export const es: Record<MessageKey, string> = {
   "kpi.vsPrev": "vs anterior",
   "kpi.vsPrevHint": "Comparado con el período anterior de la misma duración",
   "kpi.estimatedNote": "El {share} del coste usa precios estimados",
+  "kpi.acrossDays": "En {n} días activos",
+  "kpi.perActiveDay": "{v} por día activo",
+  "kpi.perSession": "{v} por sesión",
 
   "tok.input": "Entrada",
   "tok.output": "Salida",
