@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { importCursorCsv } from "../core/ingest/cursor.ts";
 import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
+import { drift } from "../core/drift.ts";
 import { defaultDbPath } from "../core/paths.ts";
 import type { Bucket, Dimension, Filters, Metric, SeriesGroup } from "../core/queries.ts";
 import { SHARED_FOLDER, dbTarget, findSyncFolders } from "../core/syncFolders.ts";
@@ -152,6 +153,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           return json(q.timeseries(f, pick(sp.get("bucket"), BUCKETS, "day"), pick(sp.get("group"), GROUPS, "type"), pick<Metric>(sp.get("metric"), ["tokens", "cost"], "tokens"), Number(sp.get("top") ?? 5)));
         case "/api/breakdown":
           return json(q.breakdown(f, pick(sp.get("dim"), DIMENSIONS, "project"), Math.min(500, Number(sp.get("limit") ?? 50)), pick(sp.get("sort"), ["tokens", "cost"] as const, "cost")));
+        case "/api/drift":
+          return json(drift(app.db, f, { model: sp.get("select"), effort: sp.get("effort") }));
         case "/api/billing":
           return json(q.billing(f));
         case "/api/heatmap":

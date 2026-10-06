@@ -78,7 +78,7 @@ describe("HTTP API", () => {
   const get = (path: string, host = "localhost:4317") => handle(new Request(`http://${host}${path}`, { headers: { host } }));
 
   test("serves JSON endpoints", async () => {
-    for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/files", "/api/files/hotspots?project=%2Fwork%2Falpha", "/api/files/list?q=a", "/api/cache", "/api/tips", "/api/filters", "/api/settings", "/api/pricing"]) {
+    for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/files", "/api/files/hotspots?project=%2Fwork%2Falpha", "/api/files/list?q=a", "/api/cache", "/api/drift", "/api/tips", "/api/filters", "/api/settings", "/api/pricing"]) {
       const res = await get(path);
       expect(res.status, path).toBe(200);
       expect(res.headers.get("content-type")).toContain("application/json");
