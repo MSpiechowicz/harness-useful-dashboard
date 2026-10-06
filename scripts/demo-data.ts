@@ -89,8 +89,8 @@ const TOOLS = [
 /** Who works where, with what: each person has their own tools and habits. */
 const PEOPLE = [
   { user: "alex", host: "alex-mbp", weight: 5, harness: [["claude", 6], ["codex", 2], ["omp", 1], ["pi", 1]] as [Provider, number][] },
-  { user: "sam", host: "sam-desktop", weight: 3, harness: [["codex", 5], ["claude", 2], ["opencode", 1], ["cline", 1]] as [Provider, number][] },
-  { user: "priya", host: "priya-laptop", weight: 2, harness: [["omp", 3], ["opencode", 2], ["claude", 2], ["zed", 1]] as [Provider, number][] },
+  { user: "sam", host: "sam-desktop", weight: 3, harness: [["codex", 5], ["claude", 2], ["opencode", 1], ["cline", 1], ["kilo", 1]] as [Provider, number][] },
+  { user: "priya", host: "priya-laptop", weight: 2, harness: [["omp", 3], ["opencode", 2], ["claude", 2], ["zed", 1], ["roo", 1]] as [Provider, number][] },
 ];
 const MODELS: Record<Provider, [string, number][]> = {
   claude: [["claude-opus-5-5", 5], ["claude-sonnet-5-5", 4], ["claude-haiku-4-5", 1]],
@@ -101,6 +101,8 @@ const MODELS: Record<Provider, [string, number][]> = {
   cursor: [["claude-sonnet-5-5", 1]],
   zed: [["claude-sonnet-5-5", 3], ["gpt-5", 1]],
   cline: [["claude-sonnet-5-5", 2], ["claude-opus-5-5", 1]],
+  roo: [["claude-sonnet-5-5", 2], ["gpt-5", 1]],
+  kilo: [["claude-sonnet-5-5", 1], ["gpt-5-codex", 1]],
 };
 /** Output tokens per second each model usually streams at, for the drift view. */
 const SPEED: Record<string, number> = {

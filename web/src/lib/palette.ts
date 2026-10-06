@@ -33,10 +33,13 @@ export const FAMILIES = {
   // a deep teal below sky and cache read, and a crimson past Claude's orange and the pool's pink.
   teal: { light: ["#007973"], dark: ["#159085"] },
   crimson: { light: ["#bd004b"], dark: ["#e60357"] },
-  // With the middle lightness band full, the editors' harnesses sit at its edges: a deep indigo, and a green that
-  // is vivid on light and pale on dark, both clear of every color above.
+  // With the middle lightness band full, the editors' harnesses sit at its edges and in the gaps left: a deep
+  // indigo, a green that is vivid on light and pale on dark, a bright magenta and a deep amber, all clear of every
+  // color above and of each other.
   indigo: { light: ["#3f00c3"], dark: ["#4923d6"] },
   lime: { light: ["#1cd135"], dark: ["#bde9bb"] },
+  magenta: { light: ["#f648ca"], dark: ["#ff56d2"] },
+  amber: { light: ["#532e01"], dark: ["#6f4005"] },
   // Token types in TOKEN_TYPES order: cache read in teal (the big part of every column), cache write olive,
   // input lilac, output purple. Each keeps its hue in both themes; the four are as far apart as the rest of the
   // palette allows, for normal vision and red-green deficiencies alike, so even thin slivers read apart.
@@ -59,16 +62,19 @@ export const RESERVED = {
   opencode: "crimson",
   zed: "indigo",
   cline: "lime",
+  roo: "magenta",
+  kilo: "amber",
   tokenType: "tokens",
 } as const satisfies Record<string, FamilyName>;
 
-export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline";
-export const PROVIDERS: readonly Provider[] = ["claude", "codex", "cursor", "omp", "pi", "opencode", "zed", "cline"];
+export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo";
+export const PROVIDERS: readonly Provider[] = ["claude", "codex", "cursor", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo"];
 
 /**
  * Models wear their maker's color - the family of the provider that makes them - whichever harness or plan
  * they ran under: a Claude model through omp or Copilot is still Claude. Only these providers hand out model
- * shades. Harnesses without models of their own (Cursor, omp, pi, OpenCode, Zed, Cline) have just their one color.
+ * shades. Harnesses without models of their own (Cursor, omp, pi, OpenCode, Zed, Cline, Roo Code,
+ * Kilo Code) have just their one color.
  */
 export const MAKER_FAMILIES: Record<Maker, Provider> = { anthropic: "claude", openai: "codex" };
 /** In the order their model shades are generated: a maker added at the end never repaints the ones before it. */

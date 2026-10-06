@@ -13,7 +13,22 @@ const write = (path: string, data: unknown) => {
 };
 const req = (ts: number, info: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ ts, type: "say", say: "api_req_started", text: JSON.stringify({ request: "…", ...info }), ...extra });
 
-describe("Cline family ingest", () => {
+describe("Cline, Roo Code and Kilo Code ingest", () => {
+  test("a folder is an extension's own, a whole globalStorage, or a data folder", async () => {
+    const { findClineSources } = await import("../src/core/ingest/cline.ts");
+    const root = tempDir();
+    const storage = join(root, "globalStorage");
+    write(join(storage, "saoudrizwan.claude-dev", "tasks", "c1", "ui_messages.json"), []);
+    write(join(storage, "rooveterinaryinc.roo-cline", "tasks", "r1", "ui_messages.json"), []);
+    write(join(root, ".cline", "data", "tasks", "c2", "ui_messages.json"), []);
+    const ids = (dir: string, family: "cline" | "roo" | "kilo") => findClineSources(dir, family).tasks.map((t) => `${t.provider}/${t.dir.split("/").pop()}`);
+    expect(ids(storage, "cline")).toEqual(["cline/c1"]);
+    expect(ids(storage, "roo")).toEqual(["roo/r1"]);
+    expect(ids(join(storage, "rooveterinaryinc.roo-cline"), "roo")).toEqual(["roo/r1"]);
+    expect(ids(join(root, ".cline", "data"), "cline")).toEqual(["cline/c2"]);
+    expect(ids(storage, "kilo")).toEqual([]);
+  });
+
   test("input tokens are made net of cache when they include it", () => {
     expect(netInput(12, 15000, 180)).toBe(12); // Cline with Anthropic: already net
     expect(netInput(15300, 15000, 180)).toBe(120); // Roo since 3.30: cache included
@@ -54,15 +69,16 @@ describe("Cline family ingest", () => {
     expect(res.errors).toEqual([]);
 
     const usage = db.query<any, []>("SELECT * FROM usage ORDER BY id").all();
+    expect(usage.map((u) => u.provider)).toEqual(["cline", "cline", "roo"]);
     expect(usage.map((u) => [u.id, u.model, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cost_usd, u.project])).toEqual([
       [`cline:1758362400000:${T + 1000}`, "claude-sonnet-5-5", 12, 340, 0, 9000, 0.039, "/work/alpha"],
       [`cline:1758362400000:${T + 5000}`, "claude-sonnet-5-5", 30, 50, 9000, 0, 0.01, "/work/alpha"],
-      [`cline:6f1c-roo:${T + 1000}`, "claude-opus-5-5", 120, 400, 15000, 180, 0.02, "/work/beta"],
+      [`roo:6f1c-roo:${T + 1000}`, "claude-opus-5-5", 120, 400, 15000, 180, 0.02, "/work/beta"],
     ]);
     expect(usage[1].prompt_id).toBe(`cline:1758362400000:${T + 4000}`);
     expect(db.query<any, []>("SELECT id, client, title FROM sessions ORDER BY id").all()).toEqual([
       { id: "cline:1758362400000", client: "cline", title: "Fix login" },
-      { id: "cline:6f1c-roo", client: "roo-code", title: "Add docs" },
+      { id: "roo:6f1c-roo", client: "roo-code", title: "Add docs" },
     ]);
     expect(db.query<any, []>("SELECT tool, file_path FROM tool_calls ORDER BY ts").all()).toEqual([
       { tool: "readFile", file_path: "src/a.ts" },
@@ -121,7 +137,7 @@ describe("Cline family ingest", () => {
     expect(db.query<any, []>("SELECT title, parent_session_id FROM sessions WHERE id = 'cline:s1:explorer'").get()).toEqual({ title: "explorer", parent_session_id: "cline:s1" });
   });
 
-  test("Kilo Code 7's database is read as the Cline family's, with Kilo's cost", async () => {
+  test("Kilo Code 7's database is read as Kilo Code's, with Kilo's cost", async () => {
     const root = tempDir();
     mkdirSync(join(root, "kilo"), { recursive: true });
     const k = new Database(join(root, "kilo", "kilo.db"), { create: true });
@@ -139,7 +155,7 @@ describe("Cline family ingest", () => {
     const db = memDb();
     expect((await scan(db, testConfig(root), ID)).errors).toEqual([]);
     expect(db.query<any, []>("SELECT id, provider, model, input_tokens, cost_usd, project FROM usage").all()).toEqual([
-      { id: "kilo:prt_s", provider: "cline", model: "claude-opus-5-5", input_tokens: 310, cost_usd: 0.0042, project: "/work/delta" },
+      { id: "kilo:prt_s", provider: "kilo", model: "claude-opus-5-5", input_tokens: 310, cost_usd: 0.0042, project: "/work/delta" },
     ]);
     expect(db.query<any, []>("SELECT client FROM sessions").get().client).toBe("kilo-code");
   });

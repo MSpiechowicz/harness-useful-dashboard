@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { configPath, defaultDbPath, expandHome, localIdentity } from "./paths.ts";
@@ -19,12 +19,13 @@ export interface SourceConfig {
   opencodeDirs: string[];
   /** Zed data directories (contain threads/threads.db). */
   zedDirs: string[];
-  /**
-   * Read for Cline, Roo Code and Kilo Code: where VS Code and its forks keep extension data (globalStorage), Cline's own
-   * data folder, and Kilo Code's.
-   */
+  /** Cline's folders in VS Code's (and its forks', and JetBrains') extension storage, and its own data folder. */
   clineDirs: string[];
-  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean; zed: boolean; cline: boolean };
+  /** Roo Code's folders in VS Code's (and its forks') extension storage. */
+  rooDirs: string[];
+  /** Kilo Code's folders in VS Code's (and its forks') extension storage, and its own data folder (kilo.db). */
+  kiloDirs: string[];
+  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean; zed: boolean; cline: boolean; roo: boolean; kilo: boolean };
 }
 
 export interface AppConfig {
@@ -69,8 +70,10 @@ export function defaultConfig(): AppConfig {
       piDirs: [join(piAgent, "sessions")],
       opencodeDirs: [opencodeDataDir(home)],
       zedDirs: zedDataDirs(home),
-      clineDirs: [...editorStorageDirs(home), clineDataDir(home), join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "kilo")],
-      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true },
+      clineDirs: extensionDirs(home, "saoudrizwan.claude-dev", [clineDataDir(home)], true),
+      rooDirs: extensionDirs(home, "rooveterinaryinc.roo-cline", []),
+      kiloDirs: extensionDirs(home, "kilocode.kilo-code", [join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "kilo")]),
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true },
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
   };
@@ -97,15 +100,36 @@ function clineDataDir(home: string): string {
 /** Editors that run VS Code extensions, by the folder they keep their settings in. */
 const VSCODE_EDITORS = ["Code", "Code - Insiders", "VSCodium", "Cursor", "Windsurf"];
 
+/** The folder apps keep their settings in: ~/.config, ~/Library/Application Support, %APPDATA%. */
+function settingsBase(home: string): string {
+  if (process.platform === "darwin") return join(home, "Library", "Application Support");
+  if (process.platform === "win32") return process.env.APPDATA ?? join(home, "AppData", "Roaming");
+  return process.env.XDG_CONFIG_HOME ?? join(home, ".config");
+}
+
 /** Where VS Code and its forks keep extension data: <settings folder>/<editor>/User/globalStorage. */
 function editorStorageDirs(home: string): string[] {
-  const base =
-    process.platform === "darwin"
-      ? join(home, "Library", "Application Support")
-      : process.platform === "win32"
-        ? (process.env.APPDATA ?? join(home, "AppData", "Roaming"))
-        : (process.env.XDG_CONFIG_HOME ?? join(home, ".config"));
-  return VSCODE_EDITORS.map((e) => join(base, e, "User", "globalStorage"));
+  return VSCODE_EDITORS.map((e) => join(settingsBase(home), e, "User", "globalStorage"));
+}
+
+/** Cline's JetBrains plugin keeps extension data per IDE: <settings folder>/JetBrains/<IDE>/globalStorage. */
+function jetbrainsStorageDirs(home: string): string[] {
+  const root = join(settingsBase(home), "JetBrains");
+  try {
+    return readdirSync(root).map((ide) => join(root, ide, "globalStorage"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * An extension's folders: in every editor's extension storage where it is installed, and its own data folders. When
+ * none exist yet, VS Code's and the data folders, so the list shows where the extension will write.
+ */
+function extensionDirs(home: string, id: string, own: string[], jetbrains = false): string[] {
+  const storages = [...editorStorageDirs(home), ...(jetbrains ? jetbrainsStorageDirs(home) : [])];
+  const found = [...storages.map((s) => join(s, id)), ...own].filter((d) => existsSync(d));
+  return found.length ? found : [join(storages[0]!, id), ...own];
 }
 
 function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {

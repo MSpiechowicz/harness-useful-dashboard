@@ -41,6 +41,8 @@
     opencode: "settings.source.opencode",
     zed: "settings.source.zed",
     cline: "settings.source.cline",
+    roo: "settings.source.roo",
+    kilo: "settings.source.kilo",
   };
   const providerName = (p: string) => (PROVIDERS[p] ? t(PROVIDERS[p]) : p);
 

@@ -160,8 +160,13 @@ export async function scan(
 
   // OpenCode and Zed keep a database rather than log files: read what changed since the last scan, when it changed
   // at all.
-  // Kilo Code 7 writes OpenCode's schema: read with the OpenCode reader, as the Cline family's.
-  const cline = cfg.sources.enabled.cline ? (cfg.sources.clineDirs ?? []).map((d) => findClineSources(expandHome(d))) : [];
+  // Kilo Code 7 writes OpenCode's schema: read with the OpenCode reader, as Kilo Code's.
+  const families = [
+    { family: "cline" as const, on: cfg.sources.enabled.cline, dirs: cfg.sources.clineDirs ?? [] },
+    { family: "roo" as const, on: cfg.sources.enabled.roo, dirs: cfg.sources.rooDirs ?? [] },
+    { family: "kilo" as const, on: cfg.sources.enabled.kilo, dirs: cfg.sources.kiloDirs ?? [] },
+  ];
+  const cline = families.flatMap((f) => (f.on ? f.dirs.map((d) => findClineSources(expandHome(d), f.family)) : []));
   const databases: { enabled: boolean; dirs: string[]; find: (dir: string) => string[]; ingest: typeof ingestOpencode }[] = [
     { enabled: cfg.sources.enabled.opencode, dirs: cfg.sources.opencodeDirs ?? [], find: opencodeDatabases, ingest: ingestOpencode },
     { enabled: cfg.sources.enabled.zed, dirs: cfg.sources.zedDirs ?? [], find: zedDatabases, ingest: ingestZed },
@@ -190,7 +195,8 @@ export async function scan(
   }
 
   // Cline, Roo Code and Kilo Code task folders and Cline 4 sessions: whole JSON files, read again when they change.
-  const tasks = cline.flatMap((c) => c.tasks);
+  // A folder listed under more than one extension is read once.
+  const tasks = [...new Map(cline.flatMap((c) => c.tasks).map((t) => [t.dir, t])).values()];
   const legacyTasks = new Map(tasks.map((t) => [t.dir.split(/[\\/]/).pop()!, t.dir]));
   const jsonFiles: { path: string; ingest: () => void }[] = tasks.map((task) => ({
     path: join(task.dir, "ui_messages.json"),

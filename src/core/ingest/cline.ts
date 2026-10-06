@@ -2,37 +2,38 @@ import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { OpencodeFlavor } from "./opencode.ts";
-import { type IngestSink, num, truncate } from "./types.ts";
+import { type IngestSink, num, type Provider, truncate } from "./types.ts";
 
 /**
- * Cline and its forks Roo Code and Kilo Code, read as one provider ("cline"); a session's client says which one. Three
- * formats, depending on the version:
+ * Cline and its forks Roo Code and Kilo Code, each a provider of its own ("cline", "roo", "kilo"), in three formats
+ * depending on the version:
  *  - Task folders (Cline up to 3.x, every Roo Code, Kilo Code up to 5.x): tasks/<id>/ui_messages.json, the task as the
  *    extension showed it, with an "api_req_started" message per model call carrying its tokens and cost. In VS Code
  *    (and its forks) under <globalStorage>/<extension id>/, for Cline's CLI under ~/.cline/data.
  *  - Cline 4's session store (~/.cline/data): sessions/<id>/<id>.messages.json, each assistant message with the
  *    model, tokens and cost of its turn, and db/sessions.db with the folder each session worked in.
  *  - Kilo Code 7 (~/.local/share/kilo/kilo.db): OpenCode's schema, read by the OpenCode reader (KILO below).
+ * A configured folder can be an extension's own folder in globalStorage, a whole globalStorage folder, or one of the
+ * extensions' data folders: findClineSources works out which.
  * The extensions price every call themselves (from the provider's bill when it reports one), and Roo and Kilo don't
  * record which model answered, so their cost is used as it is.
  */
 
-/** Extension folders in globalStorage, and the client each one is. */
-export const CLINE_EXTENSIONS: Record<string, string> = {
-  "saoudrizwan.claude-dev": "cline",
-  "rooveterinaryinc.roo-cline": "roo-code",
-  "rooveterinaryinc.roo-code": "roo-code",
-  "rooveterinaryinc.roo-code-nightly": "roo-code",
-  "roovscode.roo-cline": "roo-code",
-  "roovscode.roo-code": "roo-code",
-  "kilocode.kilo-code": "kilo-code",
+export type ClineFamily = "cline" | "roo" | "kilo";
+
+/** Each extension's folders in globalStorage (Roo Code's id changed over time), and the client it is. */
+export const CLINE_EXTENSIONS: Record<ClineFamily, { ids: string[]; client: string }> = {
+  cline: { ids: ["saoudrizwan.claude-dev"], client: "cline" },
+  roo: { ids: ["rooveterinaryinc.roo-cline", "rooveterinaryinc.roo-code", "rooveterinaryinc.roo-code-nightly", "roovscode.roo-cline", "roovscode.roo-code"], client: "roo-code" },
+  kilo: { ids: ["kilocode.kilo-code"], client: "kilo-code" },
 };
 
-export const KILO: OpencodeFlavor = { provider: "cline", prefix: "kilo", client: "kilo-code", reportedCost: true };
+export const KILO: OpencodeFlavor = { provider: "kilo", prefix: "kilo", client: "kilo-code", reportedCost: true };
 
 export interface ClineTask {
   /** The task's folder: tasks/<id>. */
   dir: string;
+  provider: ClineFamily;
   client: string;
   /** What the extension's own task list knows about it: the folder it worked in, its parent task, its title. */
   info: TaskInfo | undefined;
@@ -105,31 +106,34 @@ function taskIndex(storage: string, extension: string | null): Map<string, TaskI
   return out;
 }
 
-function clientFor(dir: string): string {
-  const d = dir.toLowerCase();
-  return d.includes("roo") ? "roo-code" : d.includes("kilo") ? "kilo-code" : "cline";
-}
-
-/** What a configured folder holds: an editor's globalStorage, an extension's own folder, Cline 4's data, Kilo 7's. */
-export function findClineSources(dir: string): ClineSources {
+/** What a configured folder holds for one extension: its folder in globalStorage, a whole globalStorage folder (its
+ *  folder inside), its own data folder (Cline's ~/.cline/data, a custom storage path), Kilo Code 7's database. */
+export function findClineSources(dir: string, family: ClineFamily): ClineSources {
   const found: ClineSources = { tasks: [], sessionRoots: [], kiloDatabases: [] };
   if (!existsSync(dir)) return found;
-  const addTasks = (root: string, storage: string, extension: string | null, client: string) => {
+  const { ids, client } = CLINE_EXTENSIONS[family];
+  const addTasks = (root: string, storage: string, extension: string | null) => {
     const tasksDir = join(root, "tasks");
     if (!existsSync(tasksDir)) return;
     const index = taskIndex(storage, extension);
     for (const id of subdirs(tasksDir)) {
       const taskDir = join(tasksDir, id);
-      if (existsSync(join(taskDir, "ui_messages.json"))) found.tasks.push({ dir: taskDir, client, info: index.get(id) });
+      if (existsSync(join(taskDir, "ui_messages.json"))) found.tasks.push({ dir: taskDir, provider: family, client, info: index.get(id) });
     }
   };
-  for (const [extension, client] of Object.entries(CLINE_EXTENSIONS)) addTasks(join(dir, extension), dir, extension, client);
-  addTasks(dir, dir, null, clientFor(dir));
-  if (existsSync(join(dir, "sessions")) && existsSync(join(dir, "db", "sessions.db"))) found.sessionRoots.push(dir);
-  try {
-    for (const f of readdirSync(dir)) if (/^kilo(-[\w.-]+)?\.db$/.test(f)) found.kiloDatabases.push(join(dir, f));
-  } catch {
-    /* unreadable folder */
+  const name = basename(dir).toLowerCase();
+  if (ids.includes(name)) addTasks(dir, join(dir, ".."), name);
+  else {
+    for (const id of ids) addTasks(join(dir, id), dir, id);
+    addTasks(dir, dir, null);
+  }
+  if (family === "cline" && existsSync(join(dir, "sessions")) && existsSync(join(dir, "db", "sessions.db"))) found.sessionRoots.push(dir);
+  if (family === "kilo") {
+    try {
+      for (const f of readdirSync(dir)) if (/^kilo(-[\w.-]+)?\.db$/.test(f)) found.kiloDatabases.push(join(dir, f));
+    } catch {
+      /* unreadable folder */
+    }
   }
   return found;
 }
@@ -140,7 +144,6 @@ export function netInput(tokensIn: number, cacheReads: number, cacheWrites: numb
   return cache > 0 && tokensIn >= cache ? tokensIn - cache : tokensIn;
 }
 
-const cl = (id: string) => `cline:${id}`;
 
 /** The model in use at a time: from model changes Cline logs, or the <model> Roo and Kilo tell the model it is. */
 function modelTimeline(taskDir: string): { ts: number; model: string }[] {
@@ -171,6 +174,8 @@ export function ingestClineTask(task: ClineTask, sink: IngestSink, opts: { promp
   const messages = readJson(join(task.dir, "ui_messages.json"));
   if (!Array.isArray(messages) || !messages.length) return 0;
   const taskId = basename(task.dir);
+  const provider: Provider = task.provider;
+  const cl = (id: string) => `${provider}:${id}`;
   const sessionId = cl(taskId);
   const project = task.info?.cwd ?? null;
   const parent = task.info?.parent ?? null;
@@ -190,7 +195,7 @@ export function ingestClineTask(task: ClineTask, sink: IngestSink, opts: { promp
     if (isPrompt && typeof m.text === "string" && m.text.trim() && !parent) {
       promptId = `${sessionId}:${ts}`;
       firstText ??= m.text;
-      sink.prompt({ id: promptId, sessionId, provider: "cline", ts, text: truncate(m.text, opts.promptTextLimit), skill: null, isCommand: false });
+      sink.prompt({ id: promptId, sessionId, provider, ts, text: truncate(m.text, opts.promptTextLimit), skill: null, isCommand: false });
       continue;
     }
     if (m.type === "say" && (m.say === "api_req_started" || m.say === "deleted_api_reqs" || m.say === "subagent_usage")) {
@@ -207,7 +212,7 @@ export function ingestClineTask(task: ClineTask, sink: IngestSink, opts: { promp
       const usageId = `${sessionId}:${ts}${m.say === "api_req_started" ? "" : `:${m.say}`}`;
       sink.usage({
         id: usageId,
-        provider: "cline",
+        provider,
         sessionId,
         promptId,
         ts,
@@ -227,7 +232,7 @@ export function ingestClineTask(task: ClineTask, sink: IngestSink, opts: { promp
       });
       rows++;
       if (info.cancelReason === "user_cancelled") {
-        sink.outcome?.({ id: `${usageId}:interrupt`, provider: "cline", sessionId, ts, project, model: m.modelInfo?.modelId ?? modelAt(timeline, ts), agent, kind: "interrupt" });
+        sink.outcome?.({ id: `${usageId}:interrupt`, provider, sessionId, ts, project, model: m.modelInfo?.modelId ?? modelAt(timeline, ts), agent, kind: "interrupt" });
       }
       continue;
     }
@@ -245,13 +250,13 @@ export function ingestClineTask(task: ClineTask, sink: IngestSink, opts: { promp
           /* not JSON: keep the generic name */
         }
       }
-      sink.tool({ id: `${sessionId}:${ts}:${m.type}`, usageId: null, sessionId, promptId, provider: "cline", ts, project, tool, filePath, skill: null, agent });
+      sink.tool({ id: `${sessionId}:${ts}:${m.type}`, usageId: null, sessionId, promptId, provider, ts, project, tool, filePath, skill: null, agent });
     }
   }
 
   sink.session({
     id: sessionId,
-    provider: "cline",
+    provider,
     nativeId: taskId,
     project,
     title: truncate(task.info?.title ?? firstText, opts.promptTextLimit > 0 ? 200 : 0),
@@ -352,6 +357,7 @@ export function ingestClineSession(
       return {};
     }
   })();
+  const cl = (id: string) => `cline:${id}`;
   const isSub = file.agentId != null || row?.is_subagent === 1;
   const sessionId = cl(file.agentId ? `${file.sessionId}:${file.agentId}` : file.sessionId);
   const parent = file.agentId ? cl(file.sessionId) : row?.parent_session_id ? cl(row.parent_session_id) : null;
