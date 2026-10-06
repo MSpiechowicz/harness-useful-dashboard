@@ -177,8 +177,9 @@
   <!-- Main -->
   <div class="flex min-w-0 flex-1 flex-col">
     <header class="sticky top-0 z-20 border-b border-line bg-page/85 backdrop-blur" class:lg:hidden={!showFilters}>
-      <div class="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-2.5 sm:px-6">
-        <button class="btn !px-2 lg:hidden" aria-label="Open menu" onclick={() => (menuOpen = true)}><Menu size={16} /></button>
+      <!-- Top-aligned: when the filters wrap onto more lines, the menu button stays level with the first one. -->
+      <div class="mx-auto flex max-w-[1500px] items-start gap-3 px-4 py-2.5 sm:px-6">
+        <button class="btn shrink-0 !px-2 lg:hidden" aria-label="Open menu" onclick={() => (menuOpen = true)}><Menu size={16} /></button>
         {#if showFilters}
           <div class="min-w-0 flex-1"><FilterBar /></div>
         {:else}
