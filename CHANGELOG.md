@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.8.0...v1.9.0) (2026-10-06)
+
+
+### Features
+
+* search, sort, page and put away tips ([7a1c321](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/7a1c32114330e9b3d51f9d6d4c474c37b70ebdc2))
+
 # [1.8.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.7.0...v1.8.0) (2026-10-06)
 
 
