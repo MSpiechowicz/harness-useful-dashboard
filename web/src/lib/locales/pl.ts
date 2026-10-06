@@ -353,7 +353,7 @@ export const pl: Record<MessageKey, string> = {
   "drift.allEfforts": "Wszystkie poziomy",
   "drift.empty": "Żaden model nie ma w tym okresie wystarczającej aktywności do porównania.",
   "drift.metric.speed": "Szybkość odpowiedzi",
-  "drift.metric.speedHint": "Mediana tokenów wyjściowych na minutę dla odpowiedzi od 200 tokenów, z czasem oczekiwania na pierwszy token",
+  "drift.metric.speedHint": "Mediana tokenów wyjściowych na sekundę dla odpowiedzi od 200 tokenów, z czasem oczekiwania na pierwszy token",
   "drift.metric.ttft": "Czas do pierwszego tokena",
   "drift.metric.ttftHint": "Mediana czasu oczekiwania na pierwszy token odpowiedzi",
   "drift.metric.toolErrors": "Odsetek błędów narzędzi",
@@ -385,6 +385,7 @@ export const pl: Record<MessageKey, string> = {
   "drift.allModels": "Wszystkie modele",
   "drift.allModelsHint": "Zmiana każdej miary względem zwykłego poziomu modelu. Wybierz wiersz, aby zobaczyć jego wykresy.",
   "drift.responses": "Odpowiedzi",
+  "drift.unit.tps": "{v} tok/s",
   "drift.unit.s": "{v} s",
 
   "tips.title": "Wskazówki",

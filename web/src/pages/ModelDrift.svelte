@@ -10,7 +10,7 @@
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch, type Drift, type DriftComparison, type DriftMetric } from "../lib/api.svelte.ts";
   import { driftLine } from "../lib/charts.ts";
-  import { compact, decimal, percent } from "../lib/format.ts";
+  import { compact, decimal, integer, percent } from "../lib/format.ts";
   import { t, type MessageKey } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -18,28 +18,11 @@
   let selected = $state("");
   let effort = $state("");
   const d = useFetch<Drift>(() => apiUrl("/api/drift", { select: selected, effort }));
-  // Speed is measured per second and shown per minute, as on the Live view. Converted once here, so tiles, table and
-  // chart axes all work in the unit on screen.
-  const PER_MIN: Partial<Record<DriftMetric, number>> = { speed: 60 };
-  function scaled(c: DriftComparison, k: number): DriftComparison {
-    const x = (v: number | null) => (v == null ? null : v * k);
-    return { ...c, recent: x(c.recent), baseline: x(c.baseline), band: c.band && { lo: c.band.lo * k, mid: c.band.mid * k, hi: c.band.hi * k } };
-  }
-  const data = $derived.by((): Drift | null => {
-    const raw = d.data;
-    if (!raw) return null;
-    const k = (m: DriftMetric) => PER_MIN[m] ?? 1;
-    return {
-      ...raw,
-      models: raw.models.map((r) => ({ ...r, metrics: Object.fromEntries(Object.entries(r.metrics).map(([m, c]) => [m, scaled(c, k(m as DriftMetric))])) as typeof r.metrics })),
-      series: raw.series.map((s) => ({ ...s, values: s.values.map((v) => (v == null ? null : v * k(s.key))), comparison: scaled(s.comparison, k(s.key)) })),
-    };
-  });
-  const model = $derived(selected || data?.model || "");
+  const model = $derived(selected || d.data?.model || "");
 
   const METRICS: DriftMetric[] = ["speed", "ttft", "toolErrors", "interrupts", "steps", "output"];
   const FORMAT: Record<DriftMetric, (v: number) => string> = {
-    speed: (v) => `${compact(v)}/min`,
+    speed: (v) => t("drift.unit.tps", { v: integer(v) }),
     ttft: (v) => t("drift.unit.s", { v: decimal(v, 1) }),
     toolErrors: (v) => percent(v / 100, 1),
     interrupts: (v) => decimal(v, 1),
@@ -66,20 +49,21 @@
   }
 
   const modelOptions = $derived.by(() => {
-    const names = (data?.models ?? []).map((m) => m.model);
+    const names = (d.data?.models ?? []).map((m) => m.model);
     if (model && !names.includes(model)) names.unshift(model);
     return names.map((m) => ({ value: m, label: m }));
   });
-  const effortOptions = $derived([{ value: "", label: t("drift.allEfforts") }, ...(data?.efforts ?? []).map((e) => ({ value: e, label: e }))]);
+  const effortOptions = $derived([{ value: "", label: t("drift.allEfforts") }, ...(d.data?.efforts ?? []).map((e) => ({ value: e, label: e }))]);
 
   function pick(m: string) {
     selected = m;
     effort = "";
   }
 
-  const series = $derived(new Map((data?.series ?? []).map((s) => [s.key, s])));
+  const series = $derived(new Map((d.data?.series ?? []).map((s) => [s.key, s])));
   const options = $derived.by(() => {
     void store.dark;
+    const data = d.data;
     if (!data) return new Map();
     const recentFrom = dayKey(data.window.recentFrom);
     return new Map(
@@ -120,7 +104,7 @@
   ]);
   const rows = $derived.by(() => {
     const dir = asc ? 1 : -1;
-    return (data?.models ?? [])
+    return (d.data?.models ?? [])
       .map((m): Row => ({ ...m, flagged: METRICS.filter((k) => m.metrics[k].status === "changed").length }))
       .sort((a, b) => (sort === "model" ? dir * a.model.localeCompare(b.model) : dir * (a[sort] - b[sort])));
   });
