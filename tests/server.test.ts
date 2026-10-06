@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "../src/cli.ts";
 import { App } from "../src/server/app.ts";
 import { createHandler, parseFilters } from "../src/server/http.ts";
-import { assetName, compareVersions } from "../src/server/update.ts";
+import { assetName, compareVersions, installedPath, installedVersion } from "../src/server/update.ts";
 import { claudeAssistant, claudeUser, CLAUDE_SESSION, tempDir, writeJsonl } from "./helpers.ts";
 
 describe("update helpers", () => {
@@ -18,6 +18,18 @@ describe("update helpers", () => {
     expect(compareVersions("v1.0.0", "1.0.0")).toBe(0);
     expect(compareVersions("1.0.0-beta.1", "1.0.0")).toBeLessThan(0);
     expect(compareVersions("1.10.0", "1.9.3")).toBeGreaterThan(0);
+  });
+  test("the install path drops the suffix Linux adds once the running binary was replaced", () => {
+    expect(installedPath("/home/u/.local/bin/harness-dashboard (deleted)")).toBe("/home/u/.local/bin/harness-dashboard");
+    expect(installedPath("/home/u/.local/bin/harness-dashboard")).toBe("/home/u/.local/bin/harness-dashboard");
+    expect(installedPath("C:\\Users\\u\\harness-dashboard.exe")).toBe("C:\\Users\\u\\harness-dashboard.exe");
+  });
+  test("reads the version of the installed binary, or nothing when there is none", () => {
+    const dir = tempDir();
+    const fake = join(dir, "harness-dashboard");
+    writeFileSync(fake, "#!/bin/sh\necho 1.3.2\n", { mode: 0o755 });
+    if (process.platform !== "win32") expect(installedVersion(fake)).toBe("1.3.2");
+    expect(installedVersion(join(dir, "missing"))).toBeNull();
   });
 });
 

@@ -51,6 +51,25 @@ export function isCompiledBinary(): boolean {
   return Bun.main.startsWith("/$bunfs/") || /[\\/]~BUN[\\/]/.test(Bun.main);
 }
 
+/**
+ * Where the dashboard is installed. Once its file is replaced while it runs, Linux reports the running program as
+ * "<path> (deleted)": the install path is still the one without that suffix.
+ */
+export function installedPath(execPath = process.execPath): string {
+  return execPath.replace(/ \(deleted\)$/, "");
+}
+
+/** The version of the binary installed at `path`, which is newer than this process after an update from the CLI. */
+export function installedVersion(path = installedPath()): string | null {
+  try {
+    const r = Bun.spawnSync([path, "version"], { stdout: "pipe", stderr: "ignore", timeout: 10_000 });
+    const v = r.stdout.toString().trim();
+    return r.exitCode === 0 && /^\d+\.\d+\.\d+/.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchLatestRelease(fetchImpl: typeof fetch = fetch): Promise<ReleaseInfo> {
   const res = await fetchImpl(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": `${BIN_NAME}/${VERSION}` },
@@ -108,8 +127,15 @@ async function sha256(buf: ArrayBuffer): Promise<string> {
  */
 export async function applyUpdate(log: (msg: string) => void = () => {}): Promise<{ version: string; path: string }> {
   if (!isCompiledBinary()) throw new Error("Self-update only works for the installed binary. Use `git pull && bun run build` for source checkouts.");
+  const target = installedPath();
   const rel = await fetchLatestRelease();
-  if (compareVersions(rel.version, VERSION) <= 0) return { version: VERSION, path: process.execPath };
+  if (compareVersions(rel.version, VERSION) <= 0) return { version: VERSION, path: target };
+  // Already installed from the command line while this one kept running: restarting is all that's left.
+  const onDisk = installedVersion(target);
+  if (onDisk && compareVersions(onDisk, rel.version) >= 0) {
+    log(`${onDisk} is already installed at ${target}`);
+    return { version: onDisk, path: target };
+  }
   const name = assetName();
   const asset = rel.assets.find((a) => a.name === name);
   if (!asset) throw new Error(`Release ${rel.version} has no asset named ${name}`);
@@ -131,7 +157,6 @@ export async function applyUpdate(log: (msg: string) => void = () => {}): Promis
     log("Warning: release has no checksums.txt; skipping verification.");
   }
 
-  const target = process.execPath;
   const dir = dirname(target);
   const tmp = join(dir, `.${BIN_NAME}.new`);
   writeFileSync(tmp, new Uint8Array(buf));
@@ -155,7 +180,7 @@ export async function applyUpdate(log: (msg: string) => void = () => {}): Promis
 export function cleanupOldBinary(): void {
   if (process.platform !== "win32" || !isCompiledBinary()) return;
   try {
-    rmSync(`${process.execPath}.old`, { force: true });
+    rmSync(`${installedPath()}.old`, { force: true });
   } catch {
     /* still locked; try again next start */
   }
