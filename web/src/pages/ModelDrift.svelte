@@ -9,7 +9,7 @@
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch, type Drift, type DriftComparison, type DriftMetric } from "../lib/api.svelte.ts";
   import { driftLine } from "../lib/charts.ts";
-  import { compact, decimal, percent } from "../lib/format.ts";
+  import { compact, decimal, integer, percent } from "../lib/format.ts";
   import { t, type MessageKey } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -21,7 +21,7 @@
 
   const METRICS: DriftMetric[] = ["speed", "ttft", "toolErrors", "interrupts", "steps", "output"];
   const FORMAT: Record<DriftMetric, (v: number) => string> = {
-    speed: (v) => t("drift.unit.tps", { v: decimal(v, 1) }),
+    speed: (v) => t("drift.unit.tps", { v: integer(v) }),
     ttft: (v) => t("drift.unit.s", { v: decimal(v, 1) }),
     toolErrors: (v) => percent(v / 100, 1),
     interrupts: (v) => decimal(v, 1),

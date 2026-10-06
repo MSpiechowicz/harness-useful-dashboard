@@ -495,14 +495,14 @@ export function driftLine(o: {
   const known = [...o.values.filter((v): v is number => v != null), ...(o.band ? [o.band.lo, o.band.hi] : [])];
   const lo = known.length ? Math.min(...known) : 0;
   const hi = known.length ? Math.max(...known) : 1;
-  // Rounded to a step of 1, 2, 2.5 or 5 × 10ⁿ so the axis labels stay even.
+  // Rounded to a step of 1, 2 or 5 × 10ⁿ so the axis labels stay even, also when shown as whole numbers.
   // A flat line (all zeros, say) still gets an axis at least one unit tall.
   const span = Math.max(hi - lo, 1);
   const pad = span * 0.1;
   const raw = (span + 2 * pad) / 4;
   const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = ([1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) ?? 10) * mag;
-  const extent = { min: Math.max(0, Math.floor((lo - pad) / step) * step), max: Math.ceil((hi + pad) / step) * step };
+  const step = ([1, 2, 5, 10].find((m) => m * mag >= raw) ?? 10) * mag;
+  const extent = { min: Math.max(0, Math.floor((lo - pad) / step) * step), max: Math.ceil((hi + pad) / step) * step, step };
   const areas: unknown[] = [];
   if (o.band) areas.push([{ yAxis: o.band.lo, itemStyle: { color: withAlpha(color, 0.1) } }, { yAxis: o.band.hi }]);
   if (recentIdx >= 0) areas.push([{ xAxis: recentIdx, itemStyle: { color: withAlpha(cssVar("--ink-2"), 0.1) } }, { xAxis: o.days.length - 1 }]);
@@ -526,7 +526,7 @@ export function driftLine(o: {
     },
     xAxis: { type: "category", data: o.days.map((d) => bucketLabel(d, "day")), axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel, boundaryGap: false },
     // The axis spans the values and the usual range, so the band's edges stay in view.
-    yAxis: { type: "value", min: extent.min, max: extent.max, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => o.format(v) } },
+    yAxis: { type: "value", min: extent.min, max: extent.max, interval: extent.step, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => o.format(v) } },
     series: [
       {
         type: "line",

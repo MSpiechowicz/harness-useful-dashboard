@@ -380,7 +380,7 @@ export const en = {
   "drift.allModels": "All models",
   "drift.allModelsHint": "Change of each measure against the model's usual level. Pick a row to see its charts.",
   "drift.responses": "Responses",
-  "drift.unit.tps": "{v} tok/s",
+  "drift.unit.tps": "{v}/s",
   "drift.unit.s": "{v} s",
 
   "tips.title": "Tips",

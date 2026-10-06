@@ -382,7 +382,7 @@ export const de: Record<MessageKey, string> = {
   "drift.allModels": "Alle Modelle",
   "drift.allModelsHint": "Änderung jedes Messwerts gegenüber dem üblichen Niveau des Modells. Eine Zeile wählen, um die Diagramme zu sehen.",
   "drift.responses": "Antworten",
-  "drift.unit.tps": "{v} Tok./s",
+  "drift.unit.tps": "{v}/s",
   "drift.unit.s": "{v} s",
 
   "tips.title": "Tipps",
