@@ -1,3 +1,10 @@
+## [1.3.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.4...v1.3.5) (2026-10-06)
+
+
+### Bug Fixes
+
+* show the app's icon on its window on Linux ([61c6166](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/61c61668131577fd419aa5e63b26d053e5d63e69))
+
 ## [1.3.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.3...v1.3.4) (2026-10-06)
 
 
