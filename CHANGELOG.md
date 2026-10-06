@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.3.0...v1.3.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* give the app its own icon on macOS, Linux and Windows ([9a7b00a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9a7b00aaf9e88a17b94d04d832d2456f77150d3f))
+
 # [1.3.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.2.0...v1.3.0) (2026-10-06)
 
 
