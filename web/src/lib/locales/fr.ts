@@ -151,6 +151,8 @@ export const fr: Record<MessageKey, string> = {
   "chart.other": "Autres",
   "chart.noUsage": "Aucune consommation",
   "chart.movingAvg": "Moyenne sur 7 jours",
+  "chart.movingAvgWeeks": "Moyenne sur 4 semaines",
+  "chart.movingAvgMonths": "Moyenne sur 3 mois",
   "chart.timeline": "Chronologie",
 
   "trends.title": "Tendances de consommation",

@@ -149,6 +149,8 @@ export const en = {
   "chart.other": "Other",
   "chart.noUsage": "No usage",
   "chart.movingAvg": "7-day average",
+  "chart.movingAvgWeeks": "4-week average",
+  "chart.movingAvgMonths": "3-month average",
   "chart.timeline": "Timeline",
 
   "trends.title": "Usage trends",

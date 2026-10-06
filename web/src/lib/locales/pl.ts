@@ -151,6 +151,8 @@ export const pl: Record<MessageKey, string> = {
   "chart.other": "Inne",
   "chart.noUsage": "Brak zużycia",
   "chart.movingAvg": "Średnia 7-dniowa",
+  "chart.movingAvgWeeks": "Średnia 4-tygodniowa",
+  "chart.movingAvgMonths": "Średnia 3-miesięczna",
   "chart.timeline": "Oś czasu",
 
   "trends.title": "Trendy zużycia",

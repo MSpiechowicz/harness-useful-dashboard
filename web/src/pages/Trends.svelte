@@ -9,7 +9,7 @@
   import ViewGate from "../components/ViewGate.svelte";
   import UsageChart from "../components/UsageChart.svelte";
   import { apiUrl, settled, useFetch, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
-  import { cumulativeChart, seriesLabel } from "../lib/charts.ts";
+  import { cumulativeChart, seriesLabel, trendAverage } from "../lib/charts.ts";
   import { bucketLabel, days, metricValue } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
@@ -30,8 +30,8 @@
 
   const totalsPerBucket = $derived(series.data ? series.data.buckets.map((_, i) => series.data!.series.reduce((a, s) => a + (s.data[i] ?? 0), 0)) : []);
 
-  // Daily views of two weeks or more get a 7-day moving average of the total as a trend line.
-  const average = $derived(series.data && effBucket === "day" && series.data.buckets.length >= 14 ? { window: 7, label: t("chart.movingAvg") } : undefined);
+  // A moving average of the total as a trend line, over days, weeks or months alike.
+  const average = $derived(series.data ? trendAverage(effBucket, series.data.buckets.length) : undefined);
   // The running total is split by the chosen grouping; "Total" splits it by provider, so it always shows who it came from.
   const cumGroup = $derived(group === "none" ? "provider" : group);
   const cumulative = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: "day", group: cumGroup, metric: valueKind }));

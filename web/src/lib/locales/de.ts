@@ -151,6 +151,8 @@ export const de: Record<MessageKey, string> = {
   "chart.other": "Sonstige",
   "chart.noUsage": "Keine Nutzung",
   "chart.movingAvg": "7-Tage-Durchschnitt",
+  "chart.movingAvgWeeks": "4-Wochen-Durchschnitt",
+  "chart.movingAvgMonths": "3-Monats-Durchschnitt",
   "chart.timeline": "Zeitachse",
 
   "trends.title": "Verbrauchstrends",

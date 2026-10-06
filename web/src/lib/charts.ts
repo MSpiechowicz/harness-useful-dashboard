@@ -61,6 +61,16 @@ function tooltipRow(r: TooltipRow): string {
   return `<div style="display:flex;align-items:center;gap:8px;line-height:1.7">${lineKey(r.color)}<b style="font-variant-numeric:tabular-nums">${r.value}</b><span style="opacity:.7">${escapeHtml(r.name)}</span></div>`;
 }
 
+/**
+ * The trend line drawn over a usage chart: the trailing average of a week of days, a month of weeks or a quarter of
+ * months. Only once the chart has twice that many intervals, so the line smooths the bars rather than repeating them.
+ */
+export function trendAverage(bucket: string, intervals: number): { window: number; label: string } | undefined {
+  const spans = { day: [7, "chart.movingAvg"], week: [4, "chart.movingAvgWeeks"], month: [3, "chart.movingAvgMonths"] } as const;
+  const span = spans[bucket as keyof typeof spans];
+  return span && intervals >= span[0] * 2 ? { window: span[0], label: t(span[1]) } : undefined;
+}
+
 /** Header, one row per series, then an optional total and reference rows (e.g. a moving average) below a rule. */
 function tooltipRows(header: string, rows: TooltipRow[], total?: string, notes: TooltipRow[] = []): string {
   const body = rows.map(tooltipRow).join("");

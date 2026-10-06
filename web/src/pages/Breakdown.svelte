@@ -13,7 +13,7 @@
   import RankedList from "../components/RankedList.svelte";
   import UsageChart from "../components/UsageChart.svelte";
   import { apiUrl, settled, useFetch, type BillingRow, type Breakdown, type TimeSeries } from "../lib/api.svelte.ts";
-  import { breakdownItems, treemapChart } from "../lib/charts.ts";
+  import { breakdownItems, treemapChart, trendAverage } from "../lib/charts.ts";
   import { isColored } from "../lib/colors.svelte.ts";
   import { entityLabel, metricValue, percent } from "../lib/format.ts";
   import { t, type MessageKey } from "../lib/i18n.svelte.ts";
@@ -77,8 +77,8 @@
       ? t("breakdown.topShown", { metric: t(`metric.${store.metric}`), n: distributionShown, total: rows.length, what: t(`breakdown.what.${dim}` as MessageKey) })
       : t(`metric.${store.metric}`),
   );
-  // Daily views of two weeks or more get a 7-day moving average of the total as a trend line, as on Trends.
-  const average = $derived(trend && store.bucket === "day" && trend.buckets.length >= 14 ? { window: 7, label: t("chart.movingAvg") } : undefined);
+  // A moving average of the total as a trend line, as on Trends.
+  const average = $derived(trend ? trendAverage(store.bucket, trend.buckets.length) : undefined);
 
   // Agents: everything outside the main thread is subagent work.
   const subagentShare = $derived.by(() => {
