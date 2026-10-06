@@ -76,7 +76,8 @@ export async function fetchLatestRelease(fetchImpl: typeof fetch = fetch): Promi
 let cached: UpdateStatus | null = null;
 
 export async function checkForUpdate(force = false): Promise<UpdateStatus> {
-  if (!force && cached && Date.now() - cached.checkedAt < 6 * 3600_000) return cached;
+  // An hour, so a release shows within the hour the app checks again, well inside GitHub's 60 requests an hour.
+  if (!force && cached && Date.now() - cached.checkedAt < 3600_000) return cached;
   try {
     const rel = await fetchLatestRelease();
     cached = {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, Cloud, FileUp, Info, Plus, Power, RefreshCw, Trash2, TriangleAlert, Users } from "@lucide/svelte";
+  import { Check, Cloud, Download, FileUp, Info, Loader, Plus, Power, RefreshCw, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import LangPicker from "../components/LangPicker.svelte";
@@ -9,9 +9,10 @@
   import SettingRow from "../components/SettingRow.svelte";
   import Switch from "../components/Switch.svelte";
   import ThemeToggle from "../components/ThemeToggle.svelte";
-  import { getJson, send, type UpdateStatus } from "../lib/api.svelte.ts";
+  import { getJson, send } from "../lib/api.svelte.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
+  import { checkUpdate, installUpdate, updater } from "../lib/update.svelte.ts";
 
   type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode";
   type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs";
@@ -70,7 +71,6 @@
   let userRules = $state<Rule[]>([]);
   let builtinRules = $state<Rule[]>([]);
   let showBuiltin = $state(false);
-  let update = $state<UpdateStatus | null>(null);
   let importMsg = $state<string | null>(null);
 
   /** Join a folder and a name with the separator the folder already uses. */
@@ -163,8 +163,18 @@
     if (target.state === "missing" || target.state === "invalid") return { icon: TriangleAlert, tone: "bad", text };
     return { icon: target.state === "existing" ? Users : Info, tone: "muted", text };
   });
+  // Shared with the sidebar banner: a check here shows there too, and both can install.
+  const update = $derived(updater.status);
+  let checked = $state(false);
   const updateText = $derived(
-    !update ? "" : update.error ? t("update.failed", { error: update.error }) : update.available ? t("update.available", { v: update.latest }) : t("settings.upToDate"),
+    updater.message ??
+      (!update || (!checked && !update.available)
+        ? ""
+        : update.error
+          ? t("update.failed", { error: update.error })
+          : update.available
+            ? t("update.available", { v: update.latest })
+            : t("settings.upToDate")),
   );
 
   async function rescan(full: boolean) {
@@ -224,8 +234,9 @@
     stopped = true;
   }
 
-  async function checkUpdate() {
-    update = await getJson<UpdateStatus>("/api/update?force=1");
+  async function checkNow() {
+    await checkUpdate(true);
+    checked = true;
   }
 </script>
 
@@ -416,8 +427,15 @@
     </Card>
 
     <Card title={t("settings.app")} subtitle={t("settings.appHint")} divided>
-      <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={update ? updateText : live.status?.platform}>
-        <button class="btn" onclick={checkUpdate}><RefreshCw size={14} />{t("settings.checkNow")}</button>
+      <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={updateText || live.status?.platform}>
+        {#if update?.available && update.canSelfUpdate && !updater.message}
+          <button class="btn btn-primary" onclick={installUpdate} disabled={updater.installing}>
+            {#if updater.installing}<Loader size={14} class="animate-spin" />{t("update.installing")}{:else}<Download size={14} />{t("update.install")}{/if}
+          </button>
+        {:else if update?.available && update.releaseUrl && !update.canSelfUpdate}
+          <a class="btn" href={update.releaseUrl} target="_blank" rel="noreferrer"><Download size={14} />{t("update.manual")}</a>
+        {/if}
+        <button class="btn" onclick={checkNow}><RefreshCw size={14} />{t("settings.checkNow")}</button>
       </SettingRow>
       <SettingRow label={t("settings.checkUpdates")} hint={t("settings.checkUpdatesHint")}>
         <Switch bind:checked={cfg.checkUpdates} label={t("settings.checkUpdates")} onchange={() => save()} />
