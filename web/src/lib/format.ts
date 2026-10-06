@@ -24,6 +24,12 @@ export function decimal(n: number | null | undefined, digits = 1): string {
   return nf({ minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 }
 
+/** Up to `digits` decimals, without trailing zeros (0 / 1.3 / 10). */
+export function trimmed(n: number | null | undefined, digits = 1): string {
+  if (n == null || !Number.isFinite(n)) return "–";
+  return nf({ maximumFractionDigits: digits }).format(n);
+}
+
 export function integer(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "–";
   return nf({ maximumFractionDigits: 0 }).format(n);
@@ -38,9 +44,9 @@ export function usd(n: number | null | undefined, opts: { compact?: boolean } = 
   return nf({ style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 }
 
-export function percent(x: number | null | undefined, digits = 0): string {
+export function percent(x: number | null | undefined, digits = 0, opts: { trim?: boolean } = {}): string {
   if (x == null || !Number.isFinite(x)) return "–";
-  return nf({ style: "percent", maximumFractionDigits: digits, minimumFractionDigits: digits }).format(x);
+  return nf({ style: "percent", maximumFractionDigits: digits, minimumFractionDigits: opts.trim ? 0 : digits }).format(x);
 }
 
 export function metricValue(n: number, metric: "tokens" | "cost", short = true): string {
