@@ -233,7 +233,6 @@ export const en = {
   "sort.tokens": "Most tokens",
   "live.title": "Live",
   "live.subtitle": "Usage as it happens, and how much of your plan limits is left",
-  "live.auto": "Updates on its own",
   "live.window": "Time window",
   "live.lastMinutes": "Last {n} minutes",
   "live.lastHour": "Last hour",

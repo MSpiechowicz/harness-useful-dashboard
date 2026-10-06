@@ -132,10 +132,6 @@
 
 <div class="flex flex-col gap-5">
   <PageHeader title={t("live.title")} subtitle={t("live.subtitle")}>
-    <span class="flex items-center gap-1.5 text-xs text-muted">
-      <span class="relative flex size-2"><span class="absolute inline-flex size-full animate-ping rounded-full bg-good opacity-60"></span><span class="relative inline-flex size-2 rounded-full bg-good"></span></span>
-      {t("live.auto")}
-    </span>
     <div class="seg" role="radiogroup" aria-label={t("live.window")}>
       {#each WINDOWS as m (m)}
         <button role="radio" aria-checked={minutes === m} onclick={() => pick(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>

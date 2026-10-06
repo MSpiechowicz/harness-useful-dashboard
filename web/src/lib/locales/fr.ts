@@ -235,7 +235,6 @@ export const fr: Record<MessageKey, string> = {
   "sort.tokens": "Le plus de tokens",
   "live.title": "En direct",
   "live.subtitle": "La consommation en temps réel, et ce qu'il reste des limites de vos forfaits",
-  "live.auto": "Mise à jour automatique",
   "live.window": "Fenêtre de temps",
   "live.lastMinutes": "{n} dernières minutes",
   "live.lastHour": "Dernière heure",

@@ -235,7 +235,6 @@ export const es: Record<MessageKey, string> = {
   "sort.tokens": "Más tokens",
   "live.title": "En vivo",
   "live.subtitle": "El consumo en tiempo real y cuánto queda de los límites de tu plan",
-  "live.auto": "Se actualiza solo",
   "live.window": "Ventana de tiempo",
   "live.lastMinutes": "Últimos {n} minutos",
   "live.lastHour": "Última hora",

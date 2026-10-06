@@ -159,7 +159,11 @@
         </div>
       </div>
       <div class="flex items-center gap-2 px-1 text-[11px] text-muted {collapsed ? 'lg:justify-center' : ''}" title={collapsed ? `${live.connected ? t("status.lastScan", { ago }) : t("status.offline")} · v${live.status?.version ?? ""}` : live.status?.dbPath}>
-        <span class="inline-block h-2 w-2 shrink-0 rounded-full" style:background={live.connected ? "var(--status-good)" : "var(--status-critical)"}></span>
+        <!-- Connected, the dot pulses: the dashboard keeps updating on its own. Offline it stays still and red. -->
+        <span class="relative flex size-2 shrink-0">
+          {#if live.connected}<span class="absolute inline-flex size-full animate-ping rounded-full opacity-60" style:background="var(--status-good)"></span>{/if}
+          <span class="relative inline-flex size-2 rounded-full" style:background={live.connected ? "var(--status-good)" : "var(--status-critical)"}></span>
+        </span>
         <span class="flex min-w-0 flex-1 items-center gap-2" class:lg:hidden={collapsed}>
           <span class="min-w-0 truncate" title={live.connected ? t("status.lastScan", { ago }) : undefined}>
           {#if live.scanning}
