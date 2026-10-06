@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.7.0...v1.8.0) (2026-10-06)
+
+
+### Features
+
+* show what each live session is doing, and how limits are pacing ([3574727](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/3574727d6852bf9323757cf9bcd13fc6fd5c04af))
+
 # [1.7.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.6.1...v1.7.0) (2026-10-06)
 
 
