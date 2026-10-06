@@ -1,3 +1,10 @@
+## [1.9.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.9.0...v1.9.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* quieter KPI mini charts, and activity tile icons centered ([70f153e](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/70f153ea53b696f13fdc87fe64bba6a38c1eeb0c))
+
 # [1.9.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.8.0...v1.9.0) (2026-10-06)
 
 
