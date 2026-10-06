@@ -117,6 +117,8 @@ EOF
     mkdir -p "$APPDIR/Contents/MacOS" "$APPDIR/Contents/Resources"
     # The app's logo, published with each release (releases before 1.3.1 don't have it).
     download "$BASE/$BIN.icns" "$APPDIR/Contents/Resources/AppIcon.icns" 2>/dev/null || warn "no app icon in this release; the app uses a generic one"
+    # A script bundle has no architecture of its own, so macOS runs it under Rosetta, and with it everything it starts,
+    # unless told to prefer Apple Silicon.
     cat >"$APPDIR/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -127,12 +129,19 @@ EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
+  <key>LSArchitecturePriority</key><array><string>arm64</string><string>x86_64</string></array>
 </dict></plist>
 EOF
+    # The server runs in the background rather than as the app's own process: macOS would otherwise treat the bundle as
+    # still running after its window is closed, and opening it again would do nothing. Each launch opens a window and
+    # starts the server only when it is not already running.
     cat >"$APPDIR/Contents/MacOS/launcher" <<EOF
 #!/bin/sh
-exec "$INSTALL_DIR/$BIN" serve >/dev/null 2>&1
+nohup "$INSTALL_DIR/$BIN" serve >>"$HOME/Library/Logs/$BIN.log" 2>&1 &
 EOF
+    # Re-read the bundle, which macOS otherwise remembers as it was when first opened.
+    LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    [ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$APPDIR" >/dev/null 2>&1 || true
     chmod +x "$APPDIR/Contents/MacOS/launcher"
     # Finder caches app icons: touching the bundle makes it pick up the new one.
     touch "$APPDIR"

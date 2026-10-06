@@ -6,12 +6,13 @@ import { appDataDir } from "../core/paths.ts";
 /** Chromium-based browsers support `--app=<url>`, which gives a chrome-less, app-like window. */
 function findAppBrowser(): string | null {
   if (process.platform === "darwin") {
+    // App bundles, started through LaunchServices (see openUi).
     const apps = [
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "/Applications/Chromium.app/Contents/MacOS/Chromium",
-      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-      "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-      "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+      "/Applications/Google Chrome.app",
+      "/Applications/Chromium.app",
+      "/Applications/Microsoft Edge.app",
+      "/Applications/Brave Browser.app",
+      "/Applications/Vivaldi.app",
     ];
     return apps.find((p) => existsSync(p)) ?? null;
   }
@@ -46,10 +47,12 @@ export function openUi(url: string, mode: OpenMode): "app" | "browser" | "none" 
     if (browser) {
       const profile = join(appDataDir(), "window-profile");
       mkdirSync(profile, { recursive: true });
-      Bun.spawn(
-        [browser, `--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--window-size=1440,920"],
-        { stdio: ["ignore", "ignore", "ignore"] },
-      ).unref();
+      const flags = [`--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--window-size=1440,920"];
+      // On macOS the browser is started by LaunchServices, as a Dock launch would: run as our child it inherits our
+      // launch context, which runs a universal browser under Rosetta when we were started from the app bundle, and
+      // makes it crash and hang. -n starts a new instance, so the flags apply even while the browser is already open.
+      const cmd = process.platform === "darwin" ? ["open", "-n", "-a", browser, "--args", ...flags] : [browser, ...flags];
+      Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"] }).unref();
       return "app";
     }
   }
