@@ -87,8 +87,16 @@
     return `~/Dropbox/${sharedFolder}`;
   });
 
+  /** Folder lists the server reported: one it doesn't know (an older version still running) isn't saved empty. */
+  let knownDirs = new Set<DirsKey>();
+
   function apply(s: Settings) {
-    cfg = s.config;
+    knownDirs = new Set(SOURCES.map((src) => src.dirs).filter((k) => Array.isArray(s.config.sources[k])));
+    // A source the server doesn't know yet (an older version still running) shows as on, as it is by default,
+    // rather than leaving its switch without a value.
+    const enabled = Object.fromEntries(SOURCES.map((src) => [src.key, s.config.sources.enabled?.[src.key] ?? true])) as Record<SourceKey, boolean>;
+    const limits = Object.fromEntries(LIMIT_SOURCES.map((k) => [k, s.config.limits?.[k] ?? true])) as Record<LimitKey, boolean>;
+    cfg = { ...s.config, sources: { ...s.config.sources, enabled: { ...s.config.sources.enabled, ...enabled } }, limits: { ...s.config.limits, ...limits } };
     currentDb = s.dbPath;
     defaultDb = s.defaultDbPath;
     syncFolders = s.syncFolders;
@@ -125,7 +133,7 @@
         promptTextLimit: Number(cfg.promptTextLimit),
         checkUpdates: cfg.checkUpdates,
         journalMode: cfg.journalMode,
-        sources: { ...Object.fromEntries(SOURCES.map((src) => [src.dirs, clean(dirs[src.key])])), enabled: cfg.sources.enabled },
+        sources: { ...Object.fromEntries(SOURCES.filter((src) => knownDirs.has(src.dirs)).map((src) => [src.dirs, clean(dirs[src.key])])), enabled: cfg.sources.enabled },
         limits: cfg.limits,
         ...extra,
       });
