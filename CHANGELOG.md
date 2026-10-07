@@ -1,3 +1,12 @@
+# [1.15.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.14.2...v1.15.0) (2026-10-07)
+
+
+### Features
+
+* a command palette (Ctrl+K) to jump to pages, run actions and find sessions ([e2cfbf9](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/e2cfbf9dbabe585526c7491789b7e445eff739b8))
+* keep details for a chosen time, and compact the database from Settings ([ee31acc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/ee31acc94716e745912b28d103be306d1bb4b3bc))
+* KPI numbers count up, pages print cleanly ([ebe0e6e](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/ebe0e6ed06b3b1fcbd4d2f73865afe2dbf0d2a6e))
+
 ## [1.14.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.14.1...v1.14.2) (2026-10-07)
 
 
