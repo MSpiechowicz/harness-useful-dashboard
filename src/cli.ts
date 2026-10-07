@@ -6,6 +6,8 @@ import { openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
 import { fallbackLine, gather, parseInput, render, useColor } from "./core/statusline.ts";
 import { importCursorCsv } from "./core/ingest/cursor.ts";
+import { McpServer, serveStream } from "./mcp/server.ts";
+import { createTools } from "./mcp/tools.ts";
 import { DbWriter } from "./core/ingest/writer.ts";
 import { localIdentity } from "./core/paths.ts";
 import { PriceBook } from "./core/pricing.ts";
@@ -23,6 +25,7 @@ Usage:
   ${BIN_NAME} scan [--full]          Ingest new usage from local logs and exit
   ${BIN_NAME} import-cursor <file>   Import a Cursor usage CSV export
   ${BIN_NAME} statusline             Print one status line for Claude Code (reads its JSON on stdin)
+  ${BIN_NAME} mcp                    Serve usage data to AI agents over MCP (stdio, read-only)
   ${BIN_NAME} update [--check]       Update to the latest release
   ${BIN_NAME} config [path|get|set <key> <value>]
   ${BIN_NAME} version
@@ -164,12 +167,33 @@ async function statusline(args: Args, dbFlag: string | undefined): Promise<void>
   process.exit(0);
 }
 
+/**
+ * The MCP server: an agent's client starts it and talks JSON-RPC over stdin and stdout until it closes stdin. Reads the
+ * database only, never scans and never asks the network.
+ */
+async function mcp(dbFlag: string | undefined): Promise<void> {
+  // stdout carries protocol messages only: anything else printed by mistake goes to stderr.
+  console.log = console.info = console.error;
+  const cfg = loadConfig();
+  const { user, host } = localIdentity();
+  const { tools, close } = createTools({ dbPath: resolveDbPath(cfg, dbFlag).path, budgets: cfg.budgets, user: cfg.userName || user, host, cwd: process.cwd(), env: process.env });
+  const server = new McpServer(
+    tools,
+    { name: BIN_NAME, title: "Harness Dashboard", version: VERSION },
+    "Read-only token usage and API-equivalent cost (USD) of the AI coding agents on this machine, from the Harness Dashboard database. Times are ISO 8601.",
+  );
+  await serveStream(server, Bun.stdin.stream(), (line) => void process.stdout.write(line));
+  close();
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.flags.help || args.cmd === "help") return void console.log(HELP);
   if (args.flags.version || args.cmd === "version") return void console.log(VERSION);
   // Before anything that can fail: the status line always prints a line and exits 0.
   if (args.cmd === "statusline") return statusline(args, typeof args.flags.db === "string" ? args.flags.db : undefined);
+  // Read-only as well: no app data folder is created for it.
+  if (args.cmd === "mcp") return mcp(typeof args.flags.db === "string" ? args.flags.db : undefined);
   ensureAppDataDir();
 
   const dbFlag = typeof args.flags.db === "string" ? args.flags.db : undefined;
