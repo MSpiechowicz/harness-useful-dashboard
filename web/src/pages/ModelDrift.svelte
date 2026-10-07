@@ -179,7 +179,7 @@
         {/each}
       </div>
 
-      <TableCard title={t("drift.allModels")} subtitle={t("drift.allModelsHint")} {rows} searchText={(r) => r.model} sorts={SORTS} bind:sortKey={sort} bind:asc>
+      <TableCard title={t("drift.allModels")} subtitle={t("drift.allModelsHint")} {rows} searchText={(r) => r.model} sorts={SORTS} bind:sortKey={sort} bind:asc exportName="model-drift">
         {#snippet children(view)}
           <div class="overflow-x-auto">
             <table class="data">

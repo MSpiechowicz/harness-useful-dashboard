@@ -169,8 +169,8 @@
           </Card>
         {/if}
         <div class="flex flex-col gap-5">
-          <ListCard title={t("chart.byModel")} subtitle={t("detail.models.session")} items={d.data.models} value="cost" />
-          {#if d.data.agents.length > 1}<ListCard title={t("skills.agents")} subtitle={t("detail.agents")} items={d.data.agents} value="cost" />{/if}
+          <ListCard title={t("chart.byModel")} subtitle={t("detail.models.session")} items={d.data.models} value="cost" exportName="session-models" />
+          {#if d.data.agents.length > 1}<ListCard title={t("skills.agents")} subtitle={t("detail.agents")} items={d.data.agents} value="cost" exportName="session-agents" />{/if}
           {#if d.data.children.length}
             <ListCard
               title={t("sessions.children")}
@@ -178,10 +178,11 @@
               items={d.data.children.map((c) => ({ key: c.id, label: c.agent ?? c.title ?? c.id, cost: c.cost }))}
               value="cost"
               link={(key) => `#/sessions/${encodeURIComponent(key)}`}
+              exportName="session-subagents"
             />
           {/if}
-          {#if d.data.tools.length}<ListCard title={t("tools.topTools")} subtitle={t("detail.tools.session")} items={d.data.tools} />{/if}
-          {#if d.data.files.length}<ListCard title={t("tools.files")} subtitle={t("detail.files.session")} items={d.data.files} paths />{/if}
+          {#if d.data.tools.length}<ListCard title={t("tools.topTools")} subtitle={t("detail.tools.session")} items={d.data.tools} exportName="session-tools" />{/if}
+          {#if d.data.files.length}<ListCard title={t("tools.files")} subtitle={t("detail.files.session")} items={d.data.files} paths exportName="session-files" />{/if}
         </div>
       </div>
     {:else}

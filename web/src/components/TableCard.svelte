@@ -4,6 +4,7 @@
   import Card from "./Card.svelte";
   import Dropdown from "./Dropdown.svelte";
   import Empty from "./Empty.svelte";
+  import ExportMenu from "./ExportMenu.svelte";
   import Pager from "./Pager.svelte";
   import SearchInput from "./SearchInput.svelte";
 
@@ -32,6 +33,10 @@
     loading?: boolean;
     pageSize?: number;
     class?: string;
+    /** Adds the export menu: the file's name part (English, stable), e.g. `sessions`. */
+    exportName?: string;
+    /** Server-side tables: every row matching the filters and search, for the export (the card has one page). */
+    exportAll?: () => Promise<T[]>;
     /** The table for the current page: rows to sort, and which slice of them to show. */
     children: Snippet<[{ rows: T[]; offset: number; limit: number | undefined }]>;
   }
@@ -49,6 +54,8 @@
     loading = false,
     pageSize = 10,
     class: cls = "",
+    exportName,
+    exportAll,
     children,
   }: Props = $props();
 
@@ -72,6 +79,7 @@
   {#snippet actions()}
     <SearchInput bind:value={query} />
     <Dropdown label={t("common.sortBy")} bind:value={sortKey} options={sorts.map((s) => ({ value: s.value, label: s.label }))} onchange={(v) => (asc = !!sorts.find((s) => s.value === v)?.asc)} />
+    {#if exportName}<ExportMenu name={exportName} rows={() => (server && exportAll ? exportAll() : found)} />{/if}
   {/snippet}
   {#if found.length}
     <div class="overflow-x-auto transition-opacity" class:loading-dim={loading}>

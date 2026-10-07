@@ -2,6 +2,7 @@
   import { setContext, type Snippet } from "svelte";
   import { Table2, ChartColumn } from "@lucide/svelte";
   import { t } from "../lib/i18n.svelte.ts";
+  import ExportMenu from "./ExportMenu.svelte";
 
   interface Props {
     title?: string;
@@ -16,12 +17,15 @@
     divided?: boolean;
     /** Buttons for the whole card (Save), in a ruled-off strip at the bottom. */
     footer?: Snippet;
+    /** Adds the export menu: the file's name part (English, stable) and the rows the card shows. */
+    exportName?: string;
+    exportRows?: () => readonly unknown[];
   }
-  let { title, subtitle, actions, children, table, class: cls = "", pad = true, divided = false, footer }: Props = $props();
+  let { title, subtitle, actions, children, table, class: cls = "", pad = true, divided = false, footer, exportName, exportRows }: Props = $props();
   let showTable = $state(false);
   // A chart in the card is named after it (see Chart's label).
   setContext("card-title", () => title);
-  const hasHeader = $derived(!!(title || actions || table));
+  const hasHeader = $derived(!!(title || actions || table || exportName));
 </script>
 
 <section class="card flex min-w-0 flex-col {cls}">
@@ -34,6 +38,7 @@
       </div>
       <div class="flex min-w-0 flex-wrap items-center gap-2">
         {#if actions}{@render actions()}{/if}
+        {#if exportName && exportRows}<ExportMenu name={exportName} rows={exportRows} small />{/if}
         {#if table}
           <button
             class="btn !h-7 !px-2"

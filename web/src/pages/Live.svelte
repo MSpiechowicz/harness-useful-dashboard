@@ -289,6 +289,7 @@
       searchText={(s) => `${s.title ?? ""} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider}`}
       sorts={SORTS}
       bind:sortKey={sort}
+      exportName="live-sessions"
     >
       {#snippet children(view)}
         <table class="data fixed-cols">
@@ -354,6 +355,7 @@
       searchText={(e) => `${feedText(e)} ${e.title ?? ""} ${e.tool ?? ""}`}
       sorts={FEED_SORTS}
       bind:sortKey={feedSort}
+      exportName="live-feed"
     >
       {#snippet children(view)}
         <table class="data fixed-cols">

@@ -60,9 +60,9 @@
       {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} />{/if}
 
       <div class="grid gap-5 lg:grid-cols-3">
-        <ListCard title={t("tools.topTools")} subtitle={t("detail.tools.prompt")} items={d.data.tools} empty={t("detail.noTools")} />
-        <ListCard title={t("tools.files")} subtitle={t("detail.files.prompt")} items={d.data.files} paths empty={t("detail.noFiles")} />
-        <ListCard title={t("skills.agents")} subtitle={t("detail.agents")} items={d.data.agents} value="cost" />
+        <ListCard title={t("tools.topTools")} subtitle={t("detail.tools.prompt")} items={d.data.tools} empty={t("detail.noTools")} exportName="prompt-tools" />
+        <ListCard title={t("tools.files")} subtitle={t("detail.files.prompt")} items={d.data.files} paths empty={t("detail.noFiles")} exportName="prompt-files" />
+        <ListCard title={t("skills.agents")} subtitle={t("detail.agents")} items={d.data.agents} value="cost" exportName="prompt-agents" />
       </div>
     {:else}
       <div class="card"><Empty compact title={t("common.loadFailed")} /></div>

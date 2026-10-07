@@ -24,6 +24,7 @@
     link,
     empty,
     class: cls = "",
+    exportName,
   }: {
     title: string;
     subtitle?: string;
@@ -34,6 +35,8 @@
     /** What an empty list says, e.g. that a prompt touched no files. */
     empty?: string;
     class?: string;
+    /** Adds the export menu: the file's name part (English, stable), e.g. `session-models`. */
+    exportName?: string;
   } = $props();
 
   const SIZE = 10;
@@ -47,7 +50,7 @@
   const max = $derived(Math.max(1e-9, ...items.map((i) => (value === "cost" ? (i.cost ?? 0) : (i.calls ?? 0)))));
 </script>
 
-<Card {title} {subtitle} pad={false} class={cls}>
+<Card {title} {subtitle} pad={false} class={cls} exportName={items.length ? exportName : undefined} exportRows={() => items}>
   <div class="px-5 pt-1 pb-3">
     {#if items.length}
       <KeyCountList items={items.slice((page - 1) * SIZE, page * SIZE)} {value} {paths} {link} {max} />

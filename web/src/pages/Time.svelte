@@ -119,7 +119,7 @@
         </Card>
       </div>
 
-      <TableCard title={t("time.byModel")} subtitle={t("time.byModelHint")} rows={models} searchText={(m) => m.key} sorts={MODEL_SORTS} bind:sortKey={modelSort} bind:asc={modelAsc}>
+      <TableCard title={t("time.byModel")} subtitle={t("time.byModelHint")} rows={models} searchText={(m) => m.key} sorts={MODEL_SORTS} bind:sortKey={modelSort} bind:asc={modelAsc} exportName="time-by-model">
         {#snippet children(view)}
           <table class="data fixed-cols">
             <colgroup>
@@ -156,7 +156,7 @@
         {/snippet}
       </TableCard>
 
-      <TableCard title={t("time.byProject")} subtitle={t("time.byProjectHint")} rows={projects} searchText={(p) => p.label} sorts={PROJECT_SORTS} bind:sortKey={projectSort}>
+      <TableCard title={t("time.byProject")} subtitle={t("time.byProjectHint")} rows={projects} searchText={(p) => p.label} sorts={PROJECT_SORTS} bind:sortKey={projectSort} exportName="time-by-project">
         {#snippet children(view)}
           <table class="data fixed-cols">
             <colgroup>

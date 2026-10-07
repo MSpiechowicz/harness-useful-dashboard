@@ -15,11 +15,13 @@
   import TipCard from "../components/TipCard.svelte";
   import UsageChart from "../components/UsageChart.svelte";
   import BreakdownTable from "../components/BreakdownTable.svelte";
+  import BudgetBar from "../components/BudgetBar.svelte";
   import { type ActivityDay, activityStats, daySpan, spanMonths } from "../lib/activity.ts";
   import { apiUrl, settled, useFetch, type Breakdown, type Summary, type Tip, type TimeSeries } from "../lib/api.svelte.ts";
   import { breakdownItems, heatMax, seriesLabel, weekHeatmap } from "../lib/charts.ts";
   import { bucketLabel, compact, integer, metricValue, percent, trimmed, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
+  import { seriesRows } from "../lib/export.ts";
   import { store } from "../lib/state.svelte.ts";
   import { tipStore } from "../lib/tips.svelte.ts";
 
@@ -104,8 +106,10 @@
         <Kpi label={t("kpi.cacheHit")} value={s ? percent(s.cacheHitRate, 1) : "…"} hint={s ? `${t("kpi.costPerPrompt")}: ${usd(s.costPerPrompt)}` : undefined} />
       </div>
 
+      <BudgetBar />
+
       <!-- Usage over time -->
-      <Card title={t("chart.usageOverTime")} subtitle={group === "type" ? t("metric.tokens") : t(`metric.${store.metric}`)}>
+      <Card title={t("chart.usageOverTime")} subtitle={group === "type" ? t("metric.tokens") : t(`metric.${store.metric}`)} exportName="usage-over-time" exportRows={() => (series.data ? seriesRows(series.data) : [])}>
         {#snippet actions()}
           <div class="seg" role="group">
             {#each groups as g (g.value)}
@@ -131,12 +135,12 @@
       </Card>
 
       <div class="grid gap-5 xl:grid-cols-2">
-        <Card title={t("chart.topProjects")}>
+        <Card title={t("chart.topProjects")} exportName="projects" exportRows={() => projects.data?.rows ?? []}>
           {#snippet actions()}{@render more("#/projects", t("nav.projects"))}{/snippet}
           {#snippet table()}{#if projects.data}<BreakdownTable rows={projects.data.rows} dim="project" filterKey="project" compactCols />{/if}{/snippet}
           {#if projects.data}<RankedList rows={projects.data.rows.filter((r) => store.showNoProject || r.key !== "(none)")} dim="project" filterKey="project" loading={projects.loading} />{/if}
         </Card>
-        <Card title={t("chart.topModels")}>
+        <Card title={t("chart.topModels")} exportName="models" exportRows={() => models.data?.rows ?? []}>
           {#snippet actions()}{@render more("#/models", t("nav.models"))}{/snippet}
           {#snippet table()}{#if models.data}<BreakdownTable rows={models.data.rows} dim="model" filterKey="model" compactCols />{/if}{/snippet}
           {#if models.data}<RankedList rows={models.data.rows} dim="model" filterKey="model" loading={models.loading} />{/if}
@@ -148,7 +152,7 @@
            sidebar counts. -->
       <div class="@container">
         <div class="grid gap-5 @6xl:grid-cols-5">
-          <Card title={t("chart.providerSplit")} subtitle={t("chart.providerSplitHint", { metric: t(`metric.${store.metric}`) })} class="@6xl:col-span-2">
+          <Card title={t("chart.providerSplit")} subtitle={t("chart.providerSplitHint", { metric: t(`metric.${store.metric}`) })} class="@6xl:col-span-2" exportName="providers" exportRows={() => providers.data?.rows ?? []}>
             {#snippet table()}{#if providers.data}<BreakdownTable rows={providers.data.rows} dim="provider" filterKey="provider" compactCols />{/if}{/snippet}
             {#if providers.data}
               <DonutList

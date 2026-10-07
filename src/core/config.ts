@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { type AlertLang, type BudgetConfig, DEFAULT_BUDGETS } from "./budgets.ts";
 import { configPath, defaultDbPath, expandHome, localIdentity } from "./paths.ts";
 
 export type OpenMode = "app" | "browser" | "none";
@@ -47,6 +48,10 @@ export interface AppConfig {
   limits: { claude: boolean; omp: boolean; codex: boolean; pi: boolean; opencode: boolean };
   /** What each plan or account costs a month in USD, keyed like the billing breakdown ("claude", "openai-codex", …). */
   planPrices: Record<string, number>;
+  /** Spending caps and the desktop alerts that come with them (see budgets.ts). */
+  budgets: BudgetConfig;
+  /** The UI's language, which the desktop alerts use too. */
+  language: AlertLang;
   /** Tips the user put away: `hidden` holds rule ids (never shown again), `read` holds tip keys (seen, kept on the Tips page). */
   tips: TipState;
 }
@@ -86,6 +91,8 @@ export function defaultConfig(): AppConfig {
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
     planPrices: {},
+    budgets: { ...DEFAULT_BUDGETS, projects: {} },
+    language: "en",
     tips: { hidden: [], read: [] },
   };
 }
@@ -153,6 +160,7 @@ function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {
       enabled: { ...base.sources.enabled, ...(patch.sources?.enabled ?? {}) },
     },
     limits: { ...base.limits, ...(patch.limits ?? {}) },
+    budgets: { ...base.budgets, ...(patch.budgets ?? {}) },
     tips: { ...base.tips, ...(patch.tips ?? {}) },
   };
 }
@@ -187,7 +195,8 @@ const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "ro
 const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode"] as const;
 
 /** A settings change: what `parseSettings` lets through, merged into the config by the server. */
-export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips">> & {
+export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips" | "budgets">> & {
+  budgets?: Partial<BudgetConfig>;
   sources?: Partial<Omit<SourceConfig, "enabled">> & { enabled?: Partial<SourceConfig["enabled"]> };
   limits?: Partial<AppConfig["limits"]>;
 };
@@ -263,6 +272,36 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
     const limits = booleans(body.limits, LIMIT_SOURCES);
     if (!limits) return invalid("limits");
     patch.limits = limits;
+  }
+  if (has("budgets")) {
+    const b = body.budgets;
+    if (!isObject(b)) return invalid("budgets");
+    const budgets: Partial<BudgetConfig> = {};
+    const cap = (v: unknown) => (v === null || (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1e9));
+    for (const k of ["daily", "monthly"] as const) {
+      if (!(k in b)) continue;
+      if (!cap(b[k])) return invalid(`budgets.${k}`);
+      budgets[k] = (b[k] as number | null) || null;
+    }
+    for (const k of ["notify", "limitAlerts"] as const) {
+      if (!(k in b)) continue;
+      if (typeof b[k] !== "boolean") return invalid(`budgets.${k}`);
+      budgets[k] = b[k] as boolean;
+    }
+    if ("projects" in b) {
+      if (!isObject(b.projects)) return invalid("budgets.projects");
+      const projects: Record<string, number> = {};
+      for (const [k, v] of Object.entries(b.projects)) {
+        if (k.length > 4096 || !cap(v)) return invalid("budgets.projects");
+        if (v) projects[k] = v as number;
+      }
+      budgets.projects = projects;
+    }
+    patch.budgets = budgets;
+  }
+  if (has("language")) {
+    if (!["en", "de", "es", "fr", "pl"].includes(body.language as string)) return invalid("language");
+    patch.language = body.language as AlertLang;
   }
   if (has("planPrices")) {
     if (!isObject(body.planPrices)) return invalid("planPrices");

@@ -6,7 +6,7 @@
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
   import PageHeader from "../components/PageHeader.svelte";
-  import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
+  import { apiUrl, getJson, settled, useFetch } from "../lib/api.svelte.ts";
   import { sessionScatter, type SessionPoint } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
@@ -98,6 +98,8 @@
       bind:query
       bind:page
       loading={data.loading}
+      exportName="sessions"
+      exportAll={() => getJson<{ rows: SessionRow[] }>(apiUrl("/api/sessions", { sort, q: debounced, limit: 10000, export: 1 })).then((d) => d.rows)}
     >
       {#snippet children(view)}
         <table class="data fixed-cols">

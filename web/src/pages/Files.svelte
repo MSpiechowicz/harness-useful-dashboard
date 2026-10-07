@@ -9,7 +9,7 @@
   import Kpi from "../components/Kpi.svelte";
   import Loading from "../components/Loading.svelte";
   import PageHeader from "../components/PageHeader.svelte";
-  import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
+  import { apiUrl, getJson, settled, useFetch } from "../lib/api.svelte.ts";
   import { compact, entityLabel, percent, relative } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store, keeper } from "../lib/state.svelte.ts";
@@ -169,6 +169,8 @@
         bind:query
         bind:page
         loading={list.loading}
+        exportName="files"
+        exportAll={() => getJson<{ rows: (FileRow & { sessions: number; lastTs: number })[] }>(apiUrl("/api/files/list", { q: debounced, sort, limit: 10000, export: 1 })).then((d) => d.rows)}
       >
         {#snippet children(view)}
           <table class="data fixed-cols">

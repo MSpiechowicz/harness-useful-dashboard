@@ -20,6 +20,9 @@ everything in a local SQLite database and shows clear, interactive charts of whe
 - **Rule-based tips**: low cache hit rate, context bloat, premium models on small prompts, tool loops, spikes, and more
 - **Live view**: tokens per minute as you work, the sessions running right now, and how much of your plan limits is left
   (Claude's 5-hour and weekly limits, Codex, and every plan omp is logged in to, such as GitHub Copilot)
+- **Budgets and alerts**: daily, monthly and per-project spending caps, with desktop notifications at 80% and 100% and when a plan limit is 80% used
+- **Export**: every table and chart's data as CSV or JSON, following the current filters
+- **Claude Code status line**: this session's cost, today's cost and the 5-hour limit, right in Claude Code
 - **English, German, Spanish, French and Polish UI** (English by default), light and dark themes, responsive layout
 - **Shared database**: point several machines at one SQLite file on iCloud Drive, Dropbox, OneDrive or a network share
 
@@ -181,6 +184,48 @@ omp against whatever they billed a call through, read with their own logins.
 Each source can be switched off in **Settings → Plan limits**. Network sources are asked at most every 2 minutes. When a
 provider says it's asked too often, the dashboard waits at least 5 minutes (doubling up to 30) and keeps showing the
 last reading.
+
+### Claude Code status line
+
+`harness-dashboard statusline` prints one line for Claude Code's status line: the model, this session's cost, what you
+spent today across every harness, and how much of the Claude 5-hour limit is used.
+
+```text
+Opus 5.5 · session $1.74 · today $18.40 · 5h 42% (resets 1h20m)
+```
+
+Add it to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "harness-dashboard statusline"
+  }
+}
+```
+
+It reads the database only and never scans, so it takes a few milliseconds. The numbers are as fresh as the last
+scan, every 30 seconds while the dashboard runs. A session not scanned yet shows the cost Claude Code reports. The
+5-hour limit comes from Claude Code itself when it reports one, otherwise from a reading the dashboard took in the last
+15 minutes. Parts with no value are left out.
+
+| Option | What it does |
+|---|---|
+| `--format <template>` | The line's layout. Placeholders: `{model}`, `{session}`, `{today}`, `{limit}`. Default `{model} · {session} · {today} · {limit}` |
+| `--no-color` | Plain text. Setting `NO_COLOR` does the same |
+| `--db <path>` | Read this database instead of the configured one |
+
+"Today" starts at local midnight and counts your own usage, by the user name in **Settings**.
+
+### Budgets and alerts
+
+In **Settings → Budgets and alerts**, set a daily or monthly cap, or a monthly cap per project. Caps count your own
+usage (the name in **Settings → Your name**) at API-equivalent prices, and **Overview** shows how each stands, with the
+month's pace. The dashboard sends a desktop notification when a budget reaches 80% and when it's used up, and when a
+plan limit is 80% used. Each one once per day, month or limit window. Notifications come from the background server, so
+they arrive with no dashboard window open: through `notify-send` on Linux (from libnotify), the Notification Center on
+macOS and a toast on Windows. **Send test** checks that your system lets them through.
 
 ### Shared database (iCloud, Dropbox, network share)
 

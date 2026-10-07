@@ -226,6 +226,7 @@
         sorts={TOOL_SORTS}
         bind:sortKey={toolSort}
         bind:asc={toolAsc}
+        exportName="tools"
       >
         {#snippet children(view)}
           <table class="data fixed-cols">

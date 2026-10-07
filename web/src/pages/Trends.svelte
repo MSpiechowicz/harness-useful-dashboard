@@ -11,6 +11,7 @@
   import { apiUrl, settled, useFetch, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
   import { cumulativeChart, seriesLabel, trendAverage } from "../lib/charts.ts";
   import { bucketLabel, dayWithYear, days, metricValue } from "../lib/format.ts";
+  import { seriesRows } from "../lib/export.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -80,7 +81,7 @@
         <Kpi label={t("trends.projection")} value={stats ? metricValue(stats.projection, store.metric) : "…"} hint={t("trends.projectionHint")} />
       </div>
 
-      <Card title={t("chart.usageOverTime")} subtitle={t(`metric.${valueKind}`)}>
+      <Card title={t("chart.usageOverTime")} subtitle={t(`metric.${valueKind}`)} exportName="usage-over-time" exportRows={() => (series.data ? seriesRows(series.data, true) : [])}>
         {#snippet actions()}
           <Dropdown prefix label={t("trends.groupBy")} bind:value={group} options={groups.map((g) => ({ value: g, label: groupLabel(g) }))} />
           <Dropdown prefix label={t("trends.interval")} bind:value={bucket} options={buckets.map((b) => ({ value: b, label: b === "auto" ? `${t("bucket.auto")} (${t(`bucket.${store.bucket}`)})` : t(`bucket.${b}`) }))} />

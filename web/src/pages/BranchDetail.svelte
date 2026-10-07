@@ -109,8 +109,8 @@
           </div>
         </Card>
         <div class="flex flex-col gap-5">
-          <ListCard title={t("chart.byModel")} subtitle={t("detail.models.branch")} items={d.data.models} value="cost" />
-          <ListCard title={t("branches.files")} subtitle={t("branches.filesHint")} items={d.data.files.map((f) => ({ key: f.key, calls: f.edits }))} paths />
+          <ListCard title={t("chart.byModel")} subtitle={t("detail.models.branch")} items={d.data.models} value="cost" exportName="branch-models" />
+          <ListCard title={t("branches.files")} subtitle={t("branches.filesHint")} items={d.data.files.map((f) => ({ key: f.key, calls: f.edits }))} paths exportName="branch-files" />
         </div>
       </div>
     {/if}

@@ -107,6 +107,7 @@
         sorts={MODEL_SORTS}
         bind:sortKey={modelSort}
         bind:asc={modelAsc}
+        exportName="cache-by-model"
       >
         {#snippet children(view)}
           <table class="data fixed-cols">

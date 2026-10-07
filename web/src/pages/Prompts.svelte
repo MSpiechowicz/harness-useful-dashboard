@@ -7,7 +7,7 @@
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
   import PageHeader from "../components/PageHeader.svelte";
-  import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
+  import { apiUrl, getJson, settled, useFetch } from "../lib/api.svelte.ts";
   import { paretoChart, percentile, promptHistogram, topShare, type PromptCost } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, dateTime, entityLabel, metricValue, percent, usd } from "../lib/format.ts";
@@ -100,6 +100,8 @@
       bind:query
       bind:page
       loading={data.loading}
+      exportName="prompts"
+      exportAll={() => getJson<{ rows: PromptRow[] }>(apiUrl("/api/prompts", { sort, q: debounced, limit: 10000, export: 1 })).then((d) => d.rows)}
     >
       {#snippet children(view)}
         <table class="data fixed-cols">

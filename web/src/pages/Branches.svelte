@@ -189,7 +189,7 @@
         </Card>
       </div>
 
-      <TableCard title={t("branches.all")} subtitle={t("branches.allHint")} rows={sorted} searchText={(r) => `${r.branch} ${r.projectLabel}`} sorts={SORTS} bind:sortKey={sort} bind:asc>
+      <TableCard title={t("branches.all")} subtitle={t("branches.allHint")} rows={sorted} searchText={(r) => `${r.branch} ${r.projectLabel}`} sorts={SORTS} bind:sortKey={sort} bind:asc exportName="branches">
         {#snippet children(view)}
           <table class="data fixed-cols">
             <colgroup>

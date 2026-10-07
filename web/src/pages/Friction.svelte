@@ -129,7 +129,7 @@
         </Card>
       </div>
 
-      <TableCard title={t("friction.byTool")} subtitle={t("friction.byToolHint")} rows={tools} searchText={(r) => r.key} sorts={TOOL_SORTS} bind:sortKey={toolSort} bind:asc={toolAsc}>
+      <TableCard title={t("friction.byTool")} subtitle={t("friction.byToolHint")} rows={tools} searchText={(r) => r.key} sorts={TOOL_SORTS} bind:sortKey={toolSort} bind:asc={toolAsc} exportName="friction-by-tool">
         {#snippet children(view)}
           <table class="data fixed-cols">
             <colgroup>
@@ -163,7 +163,7 @@
         {/snippet}
       </TableCard>
 
-      <TableCard title={t("friction.sessions")} subtitle={t("friction.sessionsHint")} rows={sessions} searchText={(s) => `${s.title ?? ""} ${s.projectLabel}`} sorts={SESSION_SORTS} bind:sortKey={sessionSort}>
+      <TableCard title={t("friction.sessions")} subtitle={t("friction.sessionsHint")} rows={sessions} searchText={(s) => `${s.title ?? ""} ${s.projectLabel}`} sorts={SESSION_SORTS} bind:sortKey={sessionSort} exportName="friction-sessions">
         {#snippet children(view)}
           <table class="data fixed-cols">
             <colgroup>

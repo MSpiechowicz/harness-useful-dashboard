@@ -11,11 +11,13 @@ import type { Bucket, Dimension, Filters, Metric, SeriesGroup } from "../core/qu
 import { SHARED_FOLDER, dbTarget, findSyncFolders } from "../core/syncFolders.ts";
 import { activePlans } from "../core/limits.ts";
 import { limitHistory, planValue } from "../core/plans.ts";
+import { budgetStatus, message } from "../core/budgets.ts";
 import { generateTips } from "../core/tips.ts";
 import { timing } from "../core/timing.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
 import { cookieName, cookieValue, sameToken } from "./auth.ts";
+import { notify } from "./notify.ts";
 import { applyUpdate, checkForUpdate, isCompiledBinary } from "./update.ts";
 
 const DIMENSIONS: Dimension[] = ["provider", "project", "user", "model", "skill", "agent", "session", "prompt", "host"];
@@ -206,6 +208,12 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
     }
   }
 
+  /** A page of a server-paged list: at most 200 rows, or 10000 for an export of the whole list (`export=1`). */
+  function pageLimit(sp: URLSearchParams): number {
+    const n = Number(sp.get("limit") ?? 50);
+    return Math.max(0, Math.min(sp.get("export") === "1" ? 10000 : 200, Number.isFinite(n) ? Math.floor(n) : 50));
+  }
+
   async function api(req: Request, url: URL, path: string, sp: URLSearchParams): Promise<Response> {
     const f = parseFilters(sp);
     const q = app.queries;
@@ -239,11 +247,11 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/calendar":
           return json(q.calendar(f));
         case "/api/sessions":
-          return json(q.sessions(f, { sort: sp.get("sort") ?? undefined, limit: Math.min(200, Number(sp.get("limit") ?? 50)), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
+          return json(q.sessions(f, { sort: sp.get("sort") ?? undefined, limit: pageLimit(sp), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
         case "/api/session":
           return json(q.sessionDetail(sp.get("id") ?? ""));
         case "/api/prompts":
-          return json(q.prompts(f, { sort: sp.get("sort") ?? undefined, limit: Math.min(200, Number(sp.get("limit") ?? 50)), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
+          return json(q.prompts(f, { sort: sp.get("sort") ?? undefined, limit: pageLimit(sp), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
         case "/api/prompts/costs":
           return json(q.promptCosts(f));
         case "/api/prompt":
@@ -255,7 +263,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/files/hotspots":
           return json(q.hotspots(f));
         case "/api/files/list":
-          return json(q.fileList(f, { sort: sp.get("sort") ?? undefined, limit: Math.min(200, Number(sp.get("limit") ?? 50)), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
+          return json(q.fileList(f, { sort: sp.get("sort") ?? undefined, limit: pageLimit(sp), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
         case "/api/cache":
           return json(q.cache(f, pick(sp.get("bucket"), BUCKETS, "day")));
         case "/api/branches":
@@ -282,7 +290,13 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           // With `minutes`, only the plans the sessions of that window ran on are asked about.
           const minutes = Number(sp.get("minutes"));
           const active = minutes > 0 ? activePlans(app.db, Date.now() - minutes * 60_000) : undefined;
-          return json({ ...(await app.limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active)), active: active ?? null });
+          const result = await app.limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active);
+          app.sendAlerts(result.reports).catch((err) => console.error("[alerts]", err));
+          return json({ ...result, active: active ?? null });
+        }
+        case "/api/budgets": {
+          const b = app.cfg.budgets;
+          return json({ config: b, items: budgetStatus(app.db, b, app.identity.user) });
         }
         case "/api/filters":
           return json(q.filters(f));
@@ -330,6 +344,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
             if (target.state !== "current" && file !== app.cfg.dbPath) await app.switchDatabase(file, copyDb === true);
           }
           if (patch.sources) app.scanNow().catch(() => {});
+          // A cap set below what is spent already alerts now, not with the next usage.
+          if (patch.budgets) app.sendAlerts().catch((err) => console.error("[alerts]", err));
           return json({ config: app.cfg, dbPath: app.dbPath });
         }
         case "/api/tips/state": {
@@ -360,6 +376,18 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           app.reloadPrices();
           const updated = recomputeCosts(app.db, app.priceBook());
           return json({ updated });
+        }
+        case "/api/notify/test": {
+          const lang = app.cfg.language;
+          return json({ shown: await notify(message(lang, "title"), message(lang, "test")) });
+        }
+        case "/api/language": {
+          // The UI's language, for the desktop alerts. Saved on its own: a settings change would restart the scanner.
+          const lang = ((await jsonBody(req)) as { language?: unknown } | undefined)?.language;
+          const parsed = parseSettings({ language: lang });
+          if ("error" in parsed || !parsed.patch.language) return error("invalid value for language");
+          if (parsed.patch.language !== app.cfg.language) app.saveLanguage(parsed.patch.language);
+          return json({ language: app.cfg.language });
         }
         case "/api/shutdown":
           setTimeout(() => hooks.shutdown(), 100);

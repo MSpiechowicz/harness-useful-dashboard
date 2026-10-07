@@ -10,7 +10,8 @@
   import ThemeToggle from "./components/ThemeToggle.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
   import { time } from "./lib/format.ts";
-  import { t, type MessageKey } from "./lib/i18n.svelte.ts";
+  import { i18n, t, type MessageKey } from "./lib/i18n.svelte.ts";
+  import { send } from "./lib/api.svelte.ts";
   import { live } from "./lib/live.svelte.ts";
   import { store } from "./lib/state.svelte.ts";
   import BranchDetail from "./pages/BranchDetail.svelte";
@@ -83,6 +84,12 @@
     page === "live" ? "filters.none.live" : page === "settings" ? "filters.none.settings" : page === "prompts" ? "filters.none.prompt" : page === "branches" ? "filters.none.branch" : "filters.none.session",
   );
   const showFilters = $derived(page !== "settings" && page !== "live" && !(page === "sessions" && id) && !(page === "prompts" && id) && !(page === "branches" && id));
+  // Desktop alerts come from the server: it writes them in the language the UI shows.
+  $effect(() => {
+    const language = i18n.lang;
+    send("/api/language", { language }).catch(() => {});
+  });
+
   // For the Live menu icon below. A minute is precise enough.
   let now = $state(Date.now());
   $effect(() => {

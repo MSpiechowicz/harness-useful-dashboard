@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, Cloud, Download, FileUp, Info, Loader, Plus, Power, RefreshCw, Trash2, TriangleAlert, Users } from "@lucide/svelte";
+  import { Bell, Check, Cloud, Download, FileUp, Info, Loader, Plus, Power, RefreshCw, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import LangPicker from "../components/LangPicker.svelte";
@@ -27,6 +27,7 @@
     checkUpdates: boolean;
     sources: Record<DirsKey, string[]> & { enabled: Record<SourceKey, boolean> };
     limits: Record<LimitKey, boolean>;
+    budgets?: { daily: number | null; monthly: number | null; projects: Record<string, number>; notify: boolean; limitAlerts: boolean };
   }
   interface Settings {
     config: Config;
@@ -76,6 +77,12 @@
   let builtinRules = $state<Rule[]>([]);
   let showBuiltin = $state(false);
   let importMsg = $state<string | null>(null);
+  // Budgets: 0 in a field means no cap. Project rows are edited here and saved together.
+  let budgetDaily = $state(0);
+  let budgetMonthly = $state(0);
+  let projectBudgets = $state<{ project: string; cap: number }[]>([]);
+  let projectOptions = $state<{ value: string; label: string }[]>([]);
+  let testMsg = $state<string | null>(null);
 
   /** Join a folder and a name with the separator the folder already uses. */
   const joinPath = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") && !dir.includes("/") ? "\\" : "/"}${name}`;
@@ -105,10 +112,46 @@
     sharedFolder = s.sharedFolder;
     dbInput = asFolder(s.config.dbPath);
     for (const src of SOURCES) dirs[src.key] = s.config.sources[src.dirs]?.length ? [...s.config.sources[src.dirs]] : [""];
+    const b = s.config.budgets;
+    budgetDaily = b?.daily ?? 0;
+    budgetMonthly = b?.monthly ?? 0;
+    projectBudgets = Object.entries(b?.projects ?? {}).map(([project, cap]) => ({ project, cap }));
+  }
+
+  async function saveBudgets() {
+    if (!cfg?.budgets) return;
+    busy = true;
+    errorMsg = null;
+    try {
+      const projects = Object.fromEntries(projectBudgets.filter((r) => r.project && Number(r.cap) > 0).map((r) => [r.project, Number(r.cap)]));
+      const r = await send<Settings>("/api/settings", {
+        budgets: { daily: Number(budgetDaily) || null, monthly: Number(budgetMonthly) || null, projects, notify: cfg.budgets.notify, limitAlerts: cfg.budgets.limitAlerts },
+      });
+      apply(r);
+      flash(t("settings.saved"));
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function testNotification() {
+    testMsg = null;
+    try {
+      const r = await send<{ shown: boolean }>("/api/notify/test");
+      testMsg = t(r.shown ? "settings.testNotificationShown" : "settings.testNotificationFailed");
+    } catch (e) {
+      testMsg = (e as Error).message;
+    }
   }
 
   async function load() {
     apply(await getJson<Settings>("/api/settings"));
+    // Every project ever seen, for the project budgets.
+    getJson<{ project: { value: string; label: string }[] }>("/api/filters")
+      .then((f) => (projectOptions = f.project.map((o) => ({ value: o.value, label: o.label }))))
+      .catch(() => {});
     const rules = await getJson<Rule[]>("/api/pricing");
     userRules = rules.filter((r) => r.source === "user");
     builtinRules = rules.filter((r) => r.source === "builtin");
@@ -387,6 +430,48 @@
         </SettingRow>
       {/each}
     </Card>
+
+    {#if cfg.budgets}
+      <Card title={t("settings.budgets")} subtitle={t("settings.budgetsHint")} divided>
+        <SettingRow label={t("settings.budgetDaily")} hint={t("settings.budgetDailyHint")}>
+          <NumberField bind:value={budgetDaily} unit="USD" label={t("settings.budgetDaily")} />
+        </SettingRow>
+        <SettingRow label={t("settings.budgetMonthly")} hint={t("settings.budgetMonthlyHint")}>
+          <NumberField bind:value={budgetMonthly} unit="USD" label={t("settings.budgetMonthly")} />
+        </SettingRow>
+        <SettingRow label={t("settings.budgetProjects")} hint={t("settings.budgetProjectsHint")} wide>
+          <div class="flex w-full flex-col gap-2">
+            {#each projectBudgets as row, i (i)}
+              <div class="flex items-center gap-2">
+                <div class="min-w-0 flex-1">
+                  <Dropdown
+                    full
+                    label={t("settings.budgetProject")}
+                    bind:value={row.project}
+                    options={[...projectOptions, ...(row.project && !projectOptions.some((o) => o.value === row.project) ? [{ value: row.project, label: row.project }] : [])]}
+                  />
+                </div>
+                <div class="w-40 shrink-0"><NumberField bind:value={row.cap} unit="USD" label={t("settings.budgetMonthly")} /></div>
+                <button class="btn !w-8 shrink-0 justify-center !px-0" aria-label={t("common.remove")} onclick={() => (projectBudgets = projectBudgets.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+              </div>
+            {/each}
+            <button class="btn self-start" onclick={() => (projectBudgets = [...projectBudgets, { project: "", cap: 0 }])}><Plus size={14} />{t("settings.budgetAddProject")}</button>
+          </div>
+        </SettingRow>
+        <SettingRow label={t("settings.budgetAlerts")} hint={t("settings.budgetAlertsHint")}>
+          <Switch bind:checked={cfg.budgets.notify} label={t("settings.budgetAlerts")} onchange={() => saveBudgets()} />
+        </SettingRow>
+        <SettingRow label={t("settings.limitAlerts")} hint={t("settings.limitAlertsHint")}>
+          <Switch bind:checked={cfg.budgets.limitAlerts} label={t("settings.limitAlerts")} onchange={() => saveBudgets()} />
+        </SettingRow>
+        <SettingRow label={t("settings.testNotification")} hint={testMsg ?? t("settings.testNotificationHint")}>
+          <button class="btn" onclick={testNotification}><Bell size={14} />{t("settings.testNotificationSend")}</button>
+        </SettingRow>
+        {#snippet footer()}
+          <button class="btn btn-primary" onclick={saveBudgets} disabled={busy}>{t("settings.save")}</button>
+        {/snippet}
+      </Card>
+    {/if}
 
     <Card title={t("settings.pricing")} subtitle={t("settings.pricingHint")} divided>
       <div class="card-flush -mx-5 overflow-x-auto">

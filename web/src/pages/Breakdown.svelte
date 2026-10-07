@@ -139,6 +139,7 @@
         sorts={SORTS}
         bind:sortKey
         bind:asc
+        exportName={`${dim}s`}
       >
         {#snippet children(view)}
           <BreakdownTable rows={view.rows} {dim} filterKey={dim as FilterKey} offset={view.offset} limit={view.limit} bind:sortKey bind:asc />
@@ -154,6 +155,7 @@
           sorts={BILLING_SORTS}
           bind:sortKey={billingSort}
           bind:asc={billingAsc}
+          exportName="billing"
         >
           {#snippet children(view)}
             <BillingTable rows={view.rows} offset={view.offset} limit={view.limit} bind:sortKey={billingSort} bind:asc={billingAsc} />

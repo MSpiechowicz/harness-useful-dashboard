@@ -4,12 +4,14 @@ import { dirname } from "node:path";
 import { type AppConfig, loadConfig, resolveDbPath, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
 import { getMeta, openDb, setMeta } from "../core/db.ts";
 import { type ScanResult, scan } from "../core/ingest/index.ts";
-import { activePlans, LimitsCache } from "../core/limits.ts";
+import { budgetAlerts, budgetStatus, limitAlerts, takeNew } from "../core/budgets.ts";
+import { activePlans, type LimitReport, LimitsCache } from "../core/limits.ts";
 import { localIdentity } from "../core/paths.ts";
 import { BUILTIN_PRICES_VERSION, PriceBook } from "../core/pricing.ts";
 import { recomputeCosts } from "../core/ingest/writer.ts";
 import { redactStored } from "../core/redact.ts";
 import { Queries } from "../core/queries.ts";
+import { notify } from "./notify.ts";
 
 /** How often plan limits are read in the background, for the history on the plans view. */
 const LIMIT_POLL_MS = 5 * 60_000;
@@ -20,7 +22,8 @@ export type AppEvent =
   | { type: "scan"; result: ScanResult }
   | { type: "scanning"; done: number; total: number }
   | { type: "db-changed"; path: string }
-  | { type: "pricing-changed" };
+  | { type: "pricing-changed" }
+  | { type: "alert"; title: string; body: string };
 
 /** Long-lived server state: config, database handle, background scanner and event subscribers. */
 export class App {
@@ -128,6 +131,7 @@ export class App {
         this.lastScan = result;
         this.lastScanAt = Date.now();
         this.emit({ type: "scan", result });
+        if (result.filesParsed > 0) this.sendAlerts().catch((err) => console.error("[alerts]", err));
         return result;
       })
       .finally(() => {
@@ -176,7 +180,27 @@ export class App {
   /** Reads the limits of the plans in use, which keeps them in the history. */
   private async pollLimits(): Promise<void> {
     const active = activePlans(this.db, Date.now() - LIMIT_ACTIVE_MS);
-    if (active.length) await this.limits.get(this.db, this.identity.host, this.cfg.limits, false, active);
+    if (!active.length) return;
+    const { reports } = await this.limits.get(this.db, this.identity.host, this.cfg.limits, false, active);
+    await this.sendAlerts(reports);
+  }
+
+  /**
+   * Sends the desktop alerts that came due, each once: budgets after a scan brought new usage, plan limits after a
+   * reading. Open windows hear about them too.
+   */
+  async sendAlerts(reports?: LimitReport[]): Promise<void> {
+    const b = this.cfg.budgets;
+    const { user, host } = this.identity;
+    const lang = this.cfg.language;
+    const due = [
+      ...(b.notify ? budgetAlerts(budgetStatus(this.db, b, user), host, lang) : []),
+      ...(b.limitAlerts && reports ? limitAlerts(reports, host, lang) : []),
+    ];
+    for (const a of takeNew(this.db, due)) {
+      this.emit({ type: "alert", title: a.title, body: a.body });
+      await notify(a.title, a.body);
+    }
   }
 
   /**
@@ -199,16 +223,22 @@ export class App {
   }
 
   updateConfig(patch: SettingsPatch): AppConfig {
-    const { sources, limits, ...rest } = patch;
+    const { sources, limits, budgets, ...rest } = patch;
     this.cfg = {
       ...this.cfg,
       ...rest,
       sources: { ...this.cfg.sources, ...sources, enabled: { ...this.cfg.sources.enabled, ...sources?.enabled } },
       limits: { ...this.cfg.limits, ...limits },
+      budgets: { ...this.cfg.budgets, ...budgets },
     };
     saveConfig(this.cfg);
     this.startBackgroundScan();
     return this.cfg;
+  }
+
+  saveLanguage(language: AppConfig["language"]): void {
+    this.cfg = { ...this.cfg, language };
+    saveConfig(this.cfg);
   }
 
   /** Saves which tips are read or hidden, without restarting the background scan like a settings change does. */
