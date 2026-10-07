@@ -285,10 +285,8 @@
                     <td class="text-ink-2 tabular" title={dateTime(f.ts)}>{relative(f.ts)}</td>
                     <td class="truncate text-ink" title={f.tool ?? ""}>{f.tool ? toolName(f.tool) : t("live.feed.aTool")}</td>
                     <td>
-                      <span class="flex min-w-0 items-center gap-2">
-                        <span class="h-2 w-2 shrink-0 rounded-full" style:background={f.reason === "rejected" ? "var(--status-warning)" : "var(--status-critical)"}></span>
-                        <span class="truncate text-ink-2">{reasonLabel(f.reason)}</span>
-                      </span>
+                      <!-- The cause as a pill, as in Live's activity: red for a failure, grey for a call that was declined. -->
+                      <span class="block max-w-full truncate rounded bg-surface-2 px-1.5 text-[11px] {f.reason === 'rejected' ? 'text-muted' : 'text-bad'}" style:width="fit-content" title={reasonLabel(f.reason)}>{reasonLabel(f.reason)}</span>
                     </td>
                     <td title={errorTitle(f)}>
                       <!-- One line: the error. Its command or file and the full text open below. -->
