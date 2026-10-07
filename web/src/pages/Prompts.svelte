@@ -8,7 +8,8 @@
   import Link from "../components/Link.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import { apiUrl, getJson, settled, useFetch } from "../lib/api.svelte.ts";
-  import { paretoChart, percentile, promptHistogram, topShare, type PromptCost } from "../lib/charts.ts";
+  import type { PromptStats } from "../../../src/core/promptStats.ts";
+  import { paretoChart, promptHistogram } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, dateTime, entityLabel, metricValue, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
@@ -56,11 +57,11 @@
   const maxCost = $derived(Math.max(1e-9, ...(data.data?.rows ?? []).map((r) => r.cost)));
 
   // Every prompt in the range, for how the spend spreads across them.
-  const costs = useFetch<PromptCost[]>(() => apiUrl("/api/prompts/costs"));
-  const values = $derived((costs.data ?? []).map((r) => (store.metric === "cost" ? r.cost : r.tokens)));
+  // How the spend spreads over every prompt in the range, summed on the server.
+  const costs = useFetch<PromptStats>(() => apiUrl("/api/prompts/stats", { metric: store.metric }));
   const metricWord = $derived(t(`prompts.metricWord.${store.metric}`));
-  const histogram = $derived.by(() => (void store.dark, costs.data?.length ? promptHistogram(costs.data, store.metric) : null));
-  const pareto = $derived.by(() => (void store.dark, values.length ? paretoChart(values, store.metric) : null));
+  const histogram = $derived.by(() => (void store.dark, costs.data?.count ? promptHistogram(costs.data, store.metric) : null));
+  const pareto = $derived.by(() => (void store.dark, costs.data?.count ? paretoChart(costs.data, store.metric) : null));
 </script>
 
 <div class="flex flex-col gap-5">
@@ -71,8 +72,8 @@
         <Card title={t("prompts.dist", { metric: t(`metric.${store.metric}`) })} subtitle={t("prompts.distHint")} class="xl:col-span-3">
           {#snippet actions()}
             <div class="flex gap-5 text-right">
-              <div><div class="text-[11px] text-muted">{t("prompts.median")}</div><div class="text-sm font-semibold text-ink tabular">{metricValue(percentile(values, 0.5), store.metric)}</div></div>
-              <div><div class="text-[11px] text-muted">{t("prompts.p90")}</div><div class="text-sm font-semibold text-ink tabular">{metricValue(percentile(values, 0.9), store.metric)}</div></div>
+              <div><div class="text-[11px] text-muted">{t("prompts.median")}</div><div class="text-sm font-semibold text-ink tabular">{metricValue(costs.data?.median ?? 0, store.metric)}</div></div>
+              <div><div class="text-[11px] text-muted">{t("prompts.p90")}</div><div class="text-sm font-semibold text-ink tabular">{metricValue(costs.data?.p90 ?? 0, store.metric)}</div></div>
             </div>
           {/snippet}
           <Chart option={histogram} height={260} fill dim={costs.loading} />
@@ -81,7 +82,7 @@
           <!-- The headline number, then the curve it comes from in the rest of the card. -->
           <div class="flex h-full flex-col">
             <div class="mb-1 flex items-baseline gap-2">
-              <span class="text-2xl font-semibold tracking-tight text-ink tabular">{percent(topShare(values, 0.1), 0)}</span>
+              <span class="text-2xl font-semibold tracking-tight text-ink tabular">{percent(costs.data?.top10 ?? 0, 0)}</span>
               <span class="text-xs text-muted">{t("prompts.top10", { metric: metricWord })}</span>
             </div>
             <Chart option={pareto} height={220} fill dim={costs.loading} />

@@ -1,3 +1,4 @@
+import { PROMPT_BANDS, type PromptMetric, type PromptStats } from "../../../src/core/promptStats.ts";
 import type { BreakdownRow, TimeSeries } from "./api.svelte.ts";
 import { colorFor, cssVar, isColored, seqRamp } from "./colors.svelte.ts";
 import type { EChartsOption } from "./echarts.ts";
@@ -308,31 +309,17 @@ export function weekHeatmap(cells: readonly (readonly [number, number, number, n
   };
 }
 
-export interface PromptCost {
-  cost: number;
-  tokens: number;
-  provider: string;
-}
-
-/** Band edges for the cost-per-prompt histogram: the bands below the first edge, between edges, and above the last. */
-const PROMPT_BANDS = { cost: [0.1, 0.25, 0.5, 1, 2.5, 5, 10], tokens: [100_000, 250_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000] };
-
-/** How many prompts fall in each cost (or token) band, stacked by provider. */
-export function promptHistogram(rows: PromptCost[], metric: "tokens" | "cost"): EChartsOption {
+/** How many prompts fall in each cost (or token) band, stacked by provider (bands summed on the server). */
+export function promptHistogram(stats: PromptStats, metric: PromptMetric): EChartsOption {
   const c = chrome();
   const edges = PROMPT_BANDS[metric];
   // Bands are named by their upper limit, short enough that every one gets its label.
   const fmt = (v: number) => (metric === "cost" ? (Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`) : compact(v));
   const labels = [...edges.map((e) => `≤ ${fmt(e)}`), `> ${fmt(edges[edges.length - 1]!)}`];
-  const band = (v: number) => {
-    const i = edges.findIndex((e) => v < e);
-    return i < 0 ? edges.length : i;
-  };
-  const providers = [...new Set(rows.map((r) => r.provider))];
-  const counts = providers.map(() => labels.map(() => 0));
-  for (const r of rows) counts[providers.indexOf(r.provider)]![band(metric === "cost" ? r.cost : r.tokens)]!++;
-  // Biggest provider at the base, as in the other stacks.
-  const order = providers.map((_, i) => i).sort((a, b) => counts[b]!.reduce((x, y) => x + y, 0) - counts[a]!.reduce((x, y) => x + y, 0));
+  // Biggest provider at the base, as in the other stacks: the server sends them busiest first.
+  const providers = stats.bands.map((b) => b.provider);
+  const counts = stats.bands.map((b) => b.counts);
+  const order = providers.map((_, i) => i);
   return {
     animationDuration: 500,
     textStyle: c.text,
@@ -371,19 +358,10 @@ export function promptHistogram(rows: PromptCost[], metric: "tokens" | "cost"): 
  * Pareto curve: prompts from most to least expensive along x, the share of all cost they add up to along y.
  * The diagonal is an even spread; how far the curve bows above it is how concentrated the spend is.
  */
-export function paretoChart(values: number[], metric: "tokens" | "cost"): EChartsOption {
+export function paretoChart(stats: PromptStats, metric: PromptMetric): EChartsOption {
   const c = chrome();
-  const sorted = [...values].sort((a, b) => b - a);
-  const total = sorted.reduce((a, b) => a + b, 0) || 1;
-  // At most ~200 points, always including the first and the last prompt.
-  const step = Math.max(1, Math.floor(sorted.length / 200));
-  const points: [number, number][] = [[0, 0]];
-  let run = 0;
-  sorted.forEach((v, i) => {
-    run += v;
-    if ((i + 1) % step === 0 || i === sorted.length - 1) points.push([((i + 1) / sorted.length) * 100, (run / total) * 100]);
-  });
-  const top10 = topShare(values, 0.1);
+  const points = stats.pareto;
+  const top10 = stats.top10;
   // The blue ramp, as on the other single-measure charts: the top 10% of prompts in a stronger shade, so the stretch
   // the headline counts stands out from the long tail.
   const hot = cssVar("--seq-6");
@@ -444,22 +422,6 @@ export function paretoChart(values: number[], metric: "tokens" | "cost"): EChart
       },
     ],
   };
-}
-
-/** The share of the total that the largest `fraction` of the values make up. */
-export function topShare(values: number[], fraction: number): number {
-  const sorted = [...values].sort((a, b) => b - a);
-  const total = sorted.reduce((a, b) => a + b, 0);
-  if (!total) return 0;
-  const n = Math.max(1, Math.round(sorted.length * fraction));
-  return sorted.slice(0, n).reduce((a, b) => a + b, 0) / total;
-}
-
-/** The value at a percentile (0–1) of the values. */
-export function percentile(values: number[], p: number): number {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!;
 }
 
 /** One line per series on a shared percentage axis (e.g. cache hit rate). */

@@ -190,6 +190,9 @@ describe("live", () => {
     const now = T0;
     expect(liveStatus(now - 30_000, "end_turn", now)).toBe("working"); // calls still coming in
     expect(liveStatus(now - 5 * MIN, "end_turn", now)).toBe("idle"); // the turn finished: waiting for a prompt
+    // Another machine's clock ahead: a little still counts as working, far ahead can't be trusted.
+    expect(liveStatus(now + 3 * MIN, "end_turn", now)).toBe("working");
+    expect(liveStatus(now + 2 * 60 * MIN, "tool_use", now)).toBe("idle");
     expect(liveStatus(now - 5 * MIN, "stop", now)).toBe("idle");
     expect(liveStatus(now - 5 * MIN, "tool_use", now)).toBe("working"); // a long tool run
     expect(liveStatus(now - 5 * MIN, "error", now)).toBe("error");
