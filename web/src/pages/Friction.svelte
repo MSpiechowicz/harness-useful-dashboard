@@ -181,6 +181,8 @@
         exportRows={() => reasons.map((r) => ({ reason: r.reason, label: reasonLabel(r.reason), calls: r.count, share: r.share, tools: r.tools.map((x) => `${x.tool} ${x.count}`).join(", ") }))}
       >
         {#if reasons.length}
+          <!-- At most one entry per cause (a fixed set of nine) with its top three tools, so the card never grows with
+               the data. Bars in the data color: every entry here is a failure, red would say nothing. Declined in grey. -->
           <ul class="-mx-2 grid gap-x-6 md:grid-cols-2 xl:grid-cols-3" class:loading-dim={d.loading}>
             {#each reasons as r (r.reason)}
               <li>
@@ -197,7 +199,7 @@
                     <span
                       class="block h-full rounded-full"
                       style:width="{Math.max(0.5, (r.count / maxReason) * 100)}%"
-                      style:background={r.reason === "rejected" ? "var(--status-warning)" : "var(--status-critical)"}
+                      style:background={r.reason === "rejected" ? "var(--muted)" : "var(--data)"}
                     ></span>
                   </span>
                   <span class="col-span-3 truncate text-xs text-muted">{r.tools.map((x) => `${toolName(x.tool)} ${compact(x.count)}`).join(" · ")}</span>
