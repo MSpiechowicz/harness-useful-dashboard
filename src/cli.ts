@@ -101,7 +101,8 @@ async function serve(args: Args): Promise<void> {
       // Hand the port over to the freshly installed binary; open windows reconnect on their own.
       server.stop(true);
       app.close();
-      Bun.spawn([installedPath(), "serve", "--no-open", "--port", String(port)], { stdio: ["ignore", "inherit", "inherit"] }).unref();
+      // Detached, as `update` does: the new server must outlive this process and its process group.
+      Bun.spawn([installedPath(), "serve", "--no-open", "--port", String(port)], { stdio: ["ignore", "inherit", "inherit"], detached: true }).unref();
       setTimeout(() => process.exit(0), 200);
     },
     shutdown: () => shutdown(),

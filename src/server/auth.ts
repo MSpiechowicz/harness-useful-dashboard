@@ -30,9 +30,9 @@ export function loadToken(dir = appDataDir()): string {
   }
 }
 
-/** Opening this signs the browser in: it sets the cookie and goes on to the app. */
+/** Opening this signs the browser in: it sets the cookie and goes on to the app. The root path: see http.ts. */
 export function signInUrl(base: string, token: string): string {
-  return `${base}/api/auth?k=${token}`;
+  return `${base}/?k=${token}`;
 }
 
 /** Cookies are kept per host, not per port: the port in the name keeps a dev server and the installed app apart. */

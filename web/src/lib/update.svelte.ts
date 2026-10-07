@@ -1,5 +1,6 @@
 import { getJson, send, type UpdateStatus } from "./api.svelte.ts";
 import { t } from "./i18n.svelte.ts";
+import { RESTART_POLL_MS, restartDone, type RestartProbe } from "./restart.ts";
 
 /** How often the app asks whether a newer release is out (the server answers from its cache within the hour). */
 const RECHECK_MS = 3600_000;
@@ -38,9 +39,32 @@ export async function installUpdate(): Promise<void> {
   updater.message = null;
   try {
     const r = await send<{ restarting: boolean }>("/api/update");
-    if (r.restarting) updater.message = t("update.restarting");
+    if (r.restarting) {
+      updater.message = t("update.restarting");
+      void reloadWhenRestarted(updater.status?.current ?? "");
+    }
   } catch (e) {
     updater.message = t("update.failed", { error: (e as Error).message });
     updater.installing = false;
+  }
+}
+
+/**
+ * Loads the page again once the updated server is up. The live stream does that too when it reconnects, but not when
+ * the new server refuses it, so this doesn't depend on it.
+ */
+async function reloadWhenRestarted(from: string): Promise<void> {
+  const started = Date.now();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, RESTART_POLL_MS));
+    let probe: RestartProbe = null;
+    try {
+      const res = await fetch("/api/status", { cache: "no-store", signal: AbortSignal.timeout(RESTART_POLL_MS * 3) });
+      const body = (await res.json().catch(() => ({}))) as { version?: string };
+      probe = { status: res.status, version: body.version };
+    } catch {
+      /* nothing listens yet */
+    }
+    if (restartDone(probe, from, Date.now() - started)) return location.reload();
   }
 }

@@ -114,6 +114,9 @@ export interface ServerHooks {
 
 const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
 
+/** The version the live stream reports to a window that isn't signed in (the UI checks for it by name). */
+export const SIGNED_OUT = "signed-out";
+
 /**
  * Guards against DNS-rebinding and cross-site requests: the Host header must be a loopback name, and state-changing
  * requests must carry a custom header (which forces a CORS preflight we never allow). The API also refuses requests a
@@ -189,13 +192,17 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
     const sp = url.searchParams;
     const path = url.pathname;
 
-    if (auth && path === "/api/auth") {
+    // The sign-in link is the app's root with the token ("/?k=…"): the address the app window opens with names it on
+    // Linux (its Wayland app ID and WM class come from the address's path), so it must stay "/" for the launcher that
+    // gives the window its icon. "/api/auth?k=…" from 1.11 still works.
+    if (auth && (path === "/api/auth" || (path === "/" && sp.has("k")))) {
       if (!sameToken(sp.get("k"), auth.token)) return error("unauthorized", 401);
       return new Response(null, {
         status: 303,
         headers: { Location: "/", "Cache-Control": "no-store", "Set-Cookie": `${cookie}=${auth.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000` },
       });
     }
+    if (path === "/api/events" && !signedIn(req)) return signedOutEvents();
     if (path.startsWith("/api/") && !signedIn(req)) return error("unauthorized", 401);
 
     try {
@@ -252,8 +259,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           return json(q.sessionDetail(sp.get("id") ?? ""));
         case "/api/prompts":
           return json(q.prompts(f, { sort: sp.get("sort") ?? undefined, limit: pageLimit(sp), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
-        case "/api/prompts/costs":
-          return json(q.promptCosts(f));
+        case "/api/prompts/stats":
+          return json(q.promptStats(f, pick(sp.get("metric"), ["tokens", "cost"] as const, "cost")));
         case "/api/prompt":
           return json(q.promptDetail(sp.get("id") ?? ""));
         case "/api/tools":
@@ -400,6 +407,18 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
       }
     }
     return error(`no route for ${method} ${url.pathname}`, 404);
+  }
+
+  /**
+   * The live stream for a window without the sign-in cookie, e.g. one opened by 1.10 or older that just installed this
+   * version and lost its server. A 401 would close its stream for good and leave it on "Restarting…" forever. A server
+   * that says hello under another version is what such a window reloads on, into a page that says it isn't signed in.
+   * Nothing else is sent, and the browser asks again only after an hour.
+   */
+  function signedOutEvents(): Response {
+    return new Response(`retry: 3600000\ndata: ${JSON.stringify({ type: "hello", version: SIGNED_OUT })}\n\n`, {
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+    });
   }
 
   function events(req: Request): Response {

@@ -21,7 +21,7 @@ describe("token", () => {
     expect(loadToken(dir)).toMatch(/^[0-9a-f]{64}$/);
   });
   test("helpers", () => {
-    expect(signInUrl("http://localhost:4317", "abc")).toBe("http://localhost:4317/api/auth?k=abc");
+    expect(signInUrl("http://localhost:4317", "abc")).toBe("http://localhost:4317/?k=abc");
     expect(cookieName(4317)).toBe("hd_auth_4317");
     expect(cookieValue("a=1; hd_auth_4317=xyz; b=2", "hd_auth_4317")).toBe("xyz");
     expect(cookieValue("hd_auth_4318=xyz", "hd_auth_4317")).toBeNull();
@@ -70,9 +70,27 @@ describe("signed-in API", () => {
     expect(ok.headers.get("set-cookie")).toContain("SameSite=Strict");
     // Opened from a terminal, a launcher or another page alike.
     expect((await req(`/api/auth?k=${token}`, { "sec-fetch-site": "cross-site" })).status).toBe(303);
+    // At the root, so the app window keeps the address that names it on Linux, and its icon.
+    const root = await req(`/?k=${token}`);
+    expect(root.status).toBe(303);
+    expect(root.headers.get("set-cookie")).toContain(`hd_auth_4317=${token}`);
+    expect((await req("/?k=nope")).status).toBe(401);
     const bad = await req("/api/auth?k=nope");
     expect(bad.status).toBe(401);
     expect(bad.headers.get("set-cookie")).toBeNull();
+  });
+
+  test("a window that isn't signed in gets a live stream that only tells it to reload", async () => {
+    // A window opened by 1.10 or older reloads on a hello under another version, and stays on "Restarting…" on a 401.
+    const res = await req("/api/events", { "sec-fetch-site": "same-origin" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const body = await res.text();
+    expect(body).toContain(`data: {"type":"hello","version":"signed-out"}`);
+    expect(body).toContain("retry: 3600000");
+    expect(body).not.toMatch(/\d+\.\d+\.\d+/);
+    // Another site still can't open it.
+    expect((await req("/api/events", { "sec-fetch-site": "cross-site" })).status).toBe(403);
   });
 
   test("state-changing requests still need the custom header, signed in or not", async () => {

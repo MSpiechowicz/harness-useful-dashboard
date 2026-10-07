@@ -13,6 +13,12 @@ type ServerEvent =
 // while an agent works. The Live page polls once a minute on its own and takes no extra reloads.
 const REFRESH_MS = 60_000;
 
+/** How long to wait before opening the live stream again after the server refused it. */
+const RECONNECT_MS = 5000;
+
+/** What the server says its version is to a window without the sign-in cookie. */
+const SIGNED_OUT = "signed-out";
+
 class Live {
   connected = $state(false);
   scanning = $state<{ done: number; total: number } | null>(null);
@@ -53,16 +59,26 @@ class Live {
       })
       .catch(() => {});
 
+    this.connect();
+  }
+
+  private connect(): void {
     const es = new EventSource("/api/events");
     es.onopen = () => (this.connected = true);
-    es.onerror = () => (this.connected = false);
+    es.onerror = () => {
+      this.connected = false;
+      // The browser retries a dropped stream on its own, but not one the server refused: ask again in a while.
+      if (es.readyState === EventSource.CLOSED) setTimeout(() => this.connect(), RECONNECT_MS);
+    };
     es.onmessage = (msg) => {
       const e = JSON.parse(msg.data) as ServerEvent;
       switch (e.type) {
         case "hello":
-          // The server restarted with a different binary (self-update): load the new UI.
+          // The server restarted with a different binary (self-update), or no longer knows this window: load the
+          // page again, which shows the new UI or says the window isn't signed in.
           if (this.version && e.version !== this.version) location.reload();
           this.version = e.version;
+          if (e.version === SIGNED_OUT) this.connected = false;
           break;
         case "scanning":
           this.scanning = e.done < e.total ? { done: e.done, total: e.total } : null;
