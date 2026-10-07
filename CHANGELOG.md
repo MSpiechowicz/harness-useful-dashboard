@@ -1,3 +1,10 @@
+## [1.18.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.3...v1.18.4) (2026-10-07)
+
+
+### Bug Fixes
+
+* subagent rows in Live stay readable in a narrow window ([2008a06](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/2008a06c3a1b2f03ca4e96b3520b9974bb3c0903))
+
 ## [1.18.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.2...v1.18.3) (2026-10-07)
 
 
