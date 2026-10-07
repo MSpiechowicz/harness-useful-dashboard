@@ -85,8 +85,10 @@ Everything runs locally. Your usage is never uploaded anywhere.
 curl -fsSL https://raw.githubusercontent.com/MSpiechowicz/harness-useful-dashboard/main/install.sh | sh
 ```
 
-This installs `harness-dashboard` to `~/.local/bin`, verifies the release checksum (and installs nothing without one) and adds a launcher: an
-applications-menu entry on Linux, or `~/Applications/Harness Dashboard.app` on macOS.
+This installs `harness-dashboard` to `~/.local/bin`, adds that directory to your `PATH` (via your shell profile:
+`~/.zshrc`, `~/.bashrc`/`~/.bash_profile`, fish `conf.d` or `~/.profile`) if it isn't already, verifies the release
+checksum (and installs nothing without one) and adds a launcher: an applications-menu entry on Linux, or
+`~/Applications/Harness Dashboard.app` on macOS.
 
 **Windows (PowerShell)**
 
@@ -98,7 +100,8 @@ This installs to `%LOCALAPPDATA%\Programs\harness-dashboard`, adds it to your `P
 shortcut.
 
 Installer options (environment variables): `HARNESS_DASHBOARD_VERSION=v0.2.0` pins a release,
-`HARNESS_DASHBOARD_INSTALL_DIR=…` picks a custom install directory, and `HARNESS_DASHBOARD_NO_SHORTCUT=1` skips the launcher.
+`HARNESS_DASHBOARD_INSTALL_DIR=…` picks a custom install directory, `HARNESS_DASHBOARD_NO_SHORTCUT=1` skips the launcher,
+and `HARNESS_DASHBOARD_NO_MODIFY_PATH=1` leaves your shell profile untouched (macOS/Linux).
 
 ### Updating
 

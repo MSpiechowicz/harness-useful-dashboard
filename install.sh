@@ -7,6 +7,7 @@
 #   HARNESS_DASHBOARD_VERSION      release tag to install (default: latest), e.g. v0.2.0
 #   HARNESS_DASHBOARD_INSTALL_DIR  where the binary goes (default: ~/.local/bin)
 #   HARNESS_DASHBOARD_NO_SHORTCUT  set to 1 to skip the desktop/app launcher
+#   HARNESS_DASHBOARD_NO_MODIFY_PATH  set to 1 to leave your shell profile alone
 set -eu
 
 REPO="MSpiechowicz/harness-useful-dashboard"
@@ -150,8 +151,30 @@ fi
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *)
-    warn "$INSTALL_DIR is not on your PATH. Add this to your shell profile:"
-    printf '    export PATH="%s:$PATH"\n' "$INSTALL_DIR"
+    # Like install.ps1 on Windows: put the install dir on PATH for new terminals by appending to the shell's profile.
+    if [ "${HARNESS_DASHBOARD_NO_MODIFY_PATH:-0}" = "1" ]; then
+      warn "$INSTALL_DIR is not on your PATH. Add this to your shell profile:"
+      printf '    export PATH="%s:$PATH"\n' "$INSTALL_DIR"
+    else
+      case "$(basename "${SHELL:-sh}")" in
+        zsh) PROFILE="${ZDOTDIR:-$HOME}/.zshrc"; LINE="export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
+        bash)
+          # macOS Terminal opens login shells, which read ~/.bash_profile rather than ~/.bashrc.
+          if [ "$OS" = "darwin" ]; then PROFILE="$HOME/.bash_profile"; else PROFILE="$HOME/.bashrc"; fi
+          LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
+          ;;
+        fish) PROFILE="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/$BIN.fish"; LINE="fish_add_path \"$INSTALL_DIR\"" ;;
+        *) PROFILE="$HOME/.profile"; LINE="export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
+      esac
+      if [ -f "$PROFILE" ] && grep -qsF "$LINE" "$PROFILE"; then
+        :
+      elif mkdir -p "$(dirname "$PROFILE")" && printf '\n# Added by the %s installer\n%s\n' "$APP_NAME" "$LINE" >>"$PROFILE"; then
+        info "Added $INSTALL_DIR to your PATH in $PROFILE"
+      else
+        warn "couldn't update $PROFILE. Add $INSTALL_DIR to your PATH yourself"
+      fi
+      warn "open a new terminal (or run: export PATH=\"$INSTALL_DIR:\$PATH\") to use $BIN in this one"
+    fi
     ;;
 esac
 
