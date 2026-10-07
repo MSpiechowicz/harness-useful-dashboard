@@ -2,6 +2,7 @@
   import { Bell, Check, Cloud, Download, FileText, FileUp, Info, Loader, Plus, Power, RefreshCw, Shrink, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Dropdown from "../components/Dropdown.svelte";
+  import FolderField from "../components/FolderField.svelte";
   import LangPicker from "../components/LangPicker.svelte";
   import MarkdownView from "../components/MarkdownView.svelte";
   import NumberField from "../components/NumberField.svelte";
@@ -509,7 +510,7 @@
               {/each}
             </div>
           {/if}
-          <input class="input w-full font-mono text-xs placeholder:font-sans" bind:value={dbInput} placeholder={t("settings.dbFolderPlaceholder")} aria-label={t("settings.dbFolder")} spellcheck="false" autocomplete="off" />
+          <FolderField class="font-mono text-xs placeholder:font-sans" bind:value={dbInput} placeholder={t("settings.dbFolderPlaceholder")} label={t("settings.dbFolder")} />
           <span
             class="flex min-h-4 items-start gap-1.5 text-[11px]"
             class:text-good={status?.tone === "good"}
@@ -649,7 +650,7 @@
           <div class="w-28 shrink-0"><Dropdown full label={t("settings.digestHour")} bind:value={digestHour} options={digestHours} onchange={() => saveDigest()} /></div>
         </SettingRow>
         <SettingRow label={t("settings.digestDir")} hint={t("settings.digestDirHint", { path: digestDefaultDir })} wide>
-          <input class="input w-full font-mono text-xs placeholder:font-sans" bind:value={digestDir} placeholder={t("settings.digestDirDefault")} aria-label={t("settings.digestDirLabel")} spellcheck="false" autocomplete="off" />
+          <FolderField class="font-mono text-xs placeholder:font-sans" bind:value={digestDir} placeholder={t("settings.digestDirDefault")} label={t("settings.digestDirLabel")} />
         </SettingRow>
         <SettingRow label={t("settings.digestNow")} hint={digestMsg ?? t("settings.digestNowHint")}>
           <button class="btn" onclick={writeDigest}><FileText size={14} />{t("settings.digestNowButton")}</button>

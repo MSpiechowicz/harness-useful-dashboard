@@ -23,6 +23,7 @@ import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
 import { cookieName, cookieValue, sameToken } from "./auth.ts";
 import { notify } from "./notify.ts";
+import { type FolderPicker, PickerBusy, folderPicker, listDirs, nativeAvailable } from "./pickFolder.ts";
 import { applyUpdate, checkForUpdate, isCompiledBinary } from "./update.ts";
 
 const DIMENSIONS: Dimension[] = ["provider", "project", "user", "model", "skill", "agent", "session", "prompt", "host"];
@@ -187,7 +188,7 @@ async function jsonBody(req: Request): Promise<unknown> {
 const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const optionalPrice = (v: unknown): number | null => (isPrice(v) ? v : null);
 
-export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks, auth?: ServerAuth) {
+export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks, auth?: ServerAuth, picker: FolderPicker = folderPicker) {
   const cookie = auth ? cookieName(auth.port) : "";
   const signedIn = (req: Request) =>
     !auth || sameToken(req.headers.get("authorization")?.replace(/^Bearer /, ""), auth.token) || sameToken(cookieValue(req.headers.get("cookie"), cookie), auth.token);
@@ -337,6 +338,12 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           return json(q.filters(f));
         case "/api/settings":
           return json({ config: app.cfg, dbPath: app.dbPath, defaultDbPath: defaultDbPath(), syncFolders: findSyncFolders(), sharedFolder: SHARED_FOLDER });
+        case "/api/pick-folder/available":
+          return json({ native: nativeAvailable() });
+        case "/api/dirs": {
+          const r = listDirs(sp.get("path") ?? "", sp.get("hidden") === "1");
+          return "error" in r ? error(r.error, r.error === "not-absolute" ? 400 : r.error === "denied" ? 403 : 404) : json(r);
+        }
         case "/api/db/size":
           return json(app.dbSize());
         case "/api/settings/db-target":
@@ -432,6 +439,16 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           app.reloadPrices();
           const updated = recomputeCosts(app.db, app.priceBook());
           return json({ updated });
+        }
+        case "/api/pick-folder": {
+          // A native dialog on this desktop, which the request waits for. { start?, title? } -> { path } (null: cancelled).
+          const body = ((await jsonBody(req)) ?? {}) as Record<string, unknown>;
+          try {
+            return json({ path: await picker.pick(body.start, body.title) });
+          } catch (err) {
+            if (err instanceof PickerBusy) return error("busy", 409);
+            throw err;
+          }
         }
         case "/api/db/compact":
           // VACUUM: rewrites the whole file, and no scan runs until it is done.
