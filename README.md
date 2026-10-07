@@ -80,7 +80,7 @@ Everything runs locally. Your usage is never uploaded anywhere.
 curl -fsSL https://raw.githubusercontent.com/MSpiechowicz/harness-useful-dashboard/main/install.sh | sh
 ```
 
-This installs `harness-dashboard` to `~/.local/bin`, verifies the release checksum and adds a launcher: an
+This installs `harness-dashboard` to `~/.local/bin`, verifies the release checksum (and installs nothing without one) and adds a launcher: an
 applications-menu entry on Linux, or `~/Applications/Harness Dashboard.app` on macOS.
 
 **Windows (PowerShell)**
@@ -108,6 +108,13 @@ harness-dashboard update --check  # only report whether one is available
 
 Re-running the install command also upgrades.
 
+Every release binary has a signed build provenance attestation, which proves it was built by this repository's
+release workflow from the tagged commit. To check one yourself:
+
+```sh
+gh attestation verify ~/.local/bin/harness-dashboard --repo MSpiechowicz/harness-useful-dashboard
+```
+
 ### Uninstalling
 
 ```sh
@@ -127,7 +134,7 @@ On Windows, delete `%LOCALAPPDATA%\Programs\harness-dashboard`, the Start menu s
 ```sh
 harness-dashboard                # start in the background and open the app window
 harness-dashboard --browser      # open in your default browser instead
-harness-dashboard --no-open      # just run the server (http://localhost:4317)
+harness-dashboard --no-open      # just run the server, and print the link to open it with
 harness-dashboard --db ~/iCloud/harness/usage.db
 harness-dashboard scan [--full]  # ingest once and exit (cron-friendly)
 harness-dashboard import-cursor usage.csv
@@ -137,6 +144,8 @@ harness-dashboard config get | path | set <key> <value>
 The dashboard runs a small local server on `127.0.0.1` and opens it in a chrome-less **app window** when a
 Chromium-based browser (Chrome, Edge, Brave, Chromium, Vivaldi) is installed. Otherwise it opens a normal browser tab.
 Starting it again while it's running just opens another window. Use **Settings → Quit dashboard** to stop it.
+Windows open through a sign-in link (`/api/auth?k=…`), which `--no-open` prints instead. A browser that didn't come in
+through it sees the page but none of your data.
 
 ### Data sources
 
@@ -242,10 +251,14 @@ or when colors shown together get too similar, also for colour-blind readers.
 
 ## Privacy
 
-The database lives on your machine, or wherever you point it. The server only listens on `127.0.0.1`. It rejects
-requests whose `Host` header isn't a loopback name (DNS-rebinding protection), and it requires a custom header on
-state-changing requests (CSRF protection). Prompt text is stored truncated to 2,000 characters so you can recognise
-expensive prompts. Set **Stored prompt length** to `0` to keep no prompt text at all.
+The database lives on your machine, or wherever you point it. The app data folder and its files are readable by your
+account only. The server only listens on `127.0.0.1`, and its API answers only a browser that came in through the
+sign-in link (an `HttpOnly`, `SameSite=Strict` cookie) or a program that sends the token kept in the app data folder,
+so other accounts on the machine can't read your usage. It rejects requests whose `Host` header isn't a loopback name
+(DNS-rebinding protection) and requests a browser marks as coming from another site, requires a custom header on
+state-changing requests (CSRF protection), and sends a Content-Security-Policy that forbids other pages to frame the
+app. Updates install only when the binary matches the release's `checksums.txt`. Prompt text is stored truncated to 2,000 characters so you can recognise
+expensive prompts. API keys, tokens and private keys in it are replaced with `[redacted]` before anything is stored. Set **Stored prompt length** to `0` to keep no prompt text at all.
 
 The app makes two kinds of outbound request, and never sends your usage in either: the optional update check against
 the GitHub releases API, and, while the Live view is open, the plan-limit checks: with Anthropic, ChatGPT and GitHub,

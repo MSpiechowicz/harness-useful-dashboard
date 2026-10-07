@@ -145,17 +145,16 @@ export async function applyUpdate(log: (msg: string) => void = () => {}): Promis
   if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
   const buf = await res.arrayBuffer();
 
+  // Nothing is installed without a checksum to compare against.
   const sums = rel.assets.find((a) => a.name === "checksums.txt");
-  if (sums) {
-    const text = await (await fetch(sums.url, { signal: AbortSignal.timeout(30_000) })).text();
-    const expected = text.split("\n").map((l) => l.trim().split(/\s+/)).find((p) => p[1]?.replace(/^\*/, "") === name)?.[0];
-    if (!expected) throw new Error(`checksums.txt has no entry for ${name}`);
-    const actual = await sha256(buf);
-    if (actual !== expected) throw new Error(`Checksum mismatch for ${name}`);
-    log("Checksum verified.");
-  } else {
-    log("Warning: release has no checksums.txt; skipping verification.");
-  }
+  if (!sums) throw new Error(`Release ${rel.version} has no checksums.txt, so ${name} can't be verified`);
+  const sumsRes = await fetch(sums.url, { signal: AbortSignal.timeout(30_000) });
+  if (!sumsRes.ok) throw new Error(`Download of checksums.txt failed: HTTP ${sumsRes.status}`);
+  const expected = (await sumsRes.text()).split("\n").map((l) => l.trim().split(/\s+/)).find((p) => p[1]?.replace(/^\*/, "") === name)?.[0];
+  if (!expected) throw new Error(`checksums.txt has no entry for ${name}`);
+  const actual = await sha256(buf);
+  if (actual !== expected) throw new Error(`Checksum mismatch for ${name}`);
+  log("Checksum verified.");
 
   const dir = dirname(target);
   const tmp = join(dir, `.${BIN_NAME}.new`);

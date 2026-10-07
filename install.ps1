@@ -24,17 +24,18 @@ try {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Asset" -OutFile (Join-Path $Tmp $Asset)
 
+  # Nothing is installed without a checksum to compare against.
   try {
     Invoke-WebRequest -UseBasicParsing -Uri "$Base/checksums.txt" -OutFile (Join-Path $Tmp "checksums.txt")
-    $line = Get-Content (Join-Path $Tmp "checksums.txt") | Where-Object { $_ -match "\s$([regex]::Escape($Asset))$" } | Select-Object -First 1
-    if (-not $line) { throw "checksums.txt has no entry for $Asset" }
-    $expected = ($line -split "\s+")[0].ToLower()
-    $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $Tmp $Asset)).Hash.ToLower()
-    if ($expected -ne $actual) { throw "Checksum mismatch for $Asset" }
-    Write-Host "==> Checksum verified" -ForegroundColor Cyan
-  } catch [System.Net.WebException] {
-    Write-Warning "No checksums.txt in this release; skipping verification."
+  } catch {
+    throw "This release has no checksums.txt, so $Asset can't be verified. Nothing was installed."
   }
+  $line = Get-Content (Join-Path $Tmp "checksums.txt") | Where-Object { $_ -match "\s$([regex]::Escape($Asset))$" } | Select-Object -First 1
+  if (-not $line) { throw "checksums.txt has no entry for $Asset" }
+  $expected = ($line -split "\s+")[0].ToLower()
+  $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $Tmp $Asset)).Hash.ToLower()
+  if ($expected -ne $actual) { throw "Checksum mismatch for $Asset" }
+  Write-Host "==> Checksum verified" -ForegroundColor Cyan
 
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
   $Target = Join-Path $InstallDir "$Bin.exe"

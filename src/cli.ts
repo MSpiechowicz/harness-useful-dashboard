@@ -9,6 +9,7 @@ import { DbWriter } from "./core/ingest/writer.ts";
 import { localIdentity } from "./core/paths.ts";
 import { PriceBook } from "./core/pricing.ts";
 import { App } from "./server/app.ts";
+import { loadToken, signInUrl } from "./server/auth.ts";
 import { createHandler, loadAssets } from "./server/http.ts";
 import { openUi } from "./server/open.ts";
 import { applyUpdate, checkForUpdate, cleanupOldBinary, installedPath, isCompiledBinary } from "./server/update.ts";
@@ -55,9 +56,14 @@ export function parseArgs(argv: string[]): Args {
   return { cmd, positional, flags };
 }
 
+/** Headers for asking the running dashboard: the token, and the header state-changing requests need. */
+function apiHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${loadToken()}`, "X-Harness-Dashboard": "1" };
+}
+
 async function isOurServer(port: number): Promise<boolean> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/status`, { signal: AbortSignal.timeout(800) });
+    const res = await fetch(`http://127.0.0.1:${port}/api/status`, { headers: apiHeaders(), signal: AbortSignal.timeout(800) });
     if (!res.ok) return false;
     const body = (await res.json()) as { version?: string };
     return typeof body.version === "string";
@@ -75,14 +81,15 @@ async function serve(args: Args): Promise<void> {
   // Single instance: if the dashboard already runs on this port, just bring up a window.
   if (await isOurServer(port)) {
     console.log(`Dashboard already running at http://localhost:${port}`);
-    openUi(`http://localhost:${port}`, openMode);
+    openUi(signInUrl(`http://localhost:${port}`, loadToken()), openMode);
     return;
   }
 
+  const token = loadToken();
   const app = new App(typeof args.flags.db === "string" ? args.flags.db : undefined);
   const assets = await loadAssets();
   let server: ReturnType<typeof Bun.serve>;
-  const handler = createHandler(app, assets, {
+  const hooks = {
     restart() {
       // Hand the port over to the freshly installed binary; open windows reconnect on their own.
       server.stop(true);
@@ -91,7 +98,8 @@ async function serve(args: Args): Promise<void> {
       setTimeout(() => process.exit(0), 200);
     },
     shutdown: () => shutdown(),
-  });
+  };
+  const handler = createHandler(app, assets, hooks, { token, port });
 
   const shutdown = () => {
     server.stop(true);
@@ -103,13 +111,15 @@ async function serve(args: Args): Promise<void> {
   console.log(`${BIN_NAME} ${VERSION}`);
   console.log(`  database: ${app.dbPath}`);
   console.log(`  listening: ${url}`);
+  // Without a window to open, this is how to get in: the API only answers a browser that came through this link.
+  if (openMode === "none") console.log(`  open: ${signInUrl(url, token)}`);
 
   const first = app.scanNow();
   first
     .then((r) => console.log(`  scanned ${r.filesSeen} files (${r.filesParsed} changed, +${r.usageRows} usage rows) in ${r.durationMs} ms`))
     .catch((err) => console.error("[scan]", err));
   app.startBackgroundScan();
-  openUi(url, openMode);
+  openUi(signInUrl(url, token), openMode);
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
@@ -167,7 +177,7 @@ async function main(): Promise<void> {
       // reconnect on their own.
       const port = Number(loadConfig().port) || 4317;
       if (await isOurServer(port)) {
-        await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers: { "X-Harness-Dashboard": "1" } }).catch(() => {});
+        await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers: apiHeaders() }).catch(() => {});
         for (let i = 0; i < 30 && (await isOurServer(port)); i++) await Bun.sleep(100);
         Bun.spawn([r.path, "serve", "--no-open", "--port", String(port)], { stdio: ["ignore", "ignore", "ignore"], detached: true }).unref();
         console.log(`Updated to ${r.version} and restarted the dashboard.`);

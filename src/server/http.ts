@@ -15,6 +15,7 @@ import { generateTips } from "../core/tips.ts";
 import { timing } from "../core/timing.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
+import { cookieName, cookieValue, sameToken } from "./auth.ts";
 import { applyUpdate, checkForUpdate, isCompiledBinary } from "./update.ts";
 
 const DIMENSIONS: Dimension[] = ["provider", "project", "user", "model", "skill", "agent", "session", "prompt", "host"];
@@ -96,6 +97,12 @@ export async function loadAssets(): Promise<AssetSource> {
   };
 }
 
+/** Who may use the API: the browser with the sign-in cookie, or a program sending the token as a bearer token. */
+export interface ServerAuth {
+  token: string;
+  port: number;
+}
+
 export interface ServerHooks {
   /** Called after a self-update installed a new binary; should restart the process. */
   restart(): void;
@@ -114,12 +121,14 @@ const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
 function isAllowed(req: Request, url: URL): boolean {
   const host = (req.headers.get("host") ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
   if (!LOOPBACK.includes(host)) return false;
-  if (!url.pathname.startsWith("/api/")) return true;
+  // The sign-in link may come from anywhere (a terminal, a launcher, a bookmark): it only sets the cookie for the
+  // right token, which no other site knows.
+  if (!url.pathname.startsWith("/api/") || url.pathname === "/api/auth") return true;
   const site = req.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") return false;
   const origin = req.headers.get("origin");
   if (origin && !isLoopbackOrigin(origin)) return false;
-  if (req.method !== "GET" && req.method !== "HEAD") return req.headers.get("x-harness-dashboard") === "1";
+  if (req.method !== "GET" && req.method !== "HEAD") return !!req.headers.get("x-harness-dashboard");
   return true;
 }
 
@@ -163,7 +172,11 @@ async function jsonBody(req: Request): Promise<unknown> {
 const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const optionalPrice = (v: unknown): number | null => (isPrice(v) ? v : null);
 
-export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks) {
+export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks, auth?: ServerAuth) {
+  const cookie = auth ? cookieName(auth.port) : "";
+  const signedIn = (req: Request) =>
+    !auth || sameToken(req.headers.get("authorization")?.replace(/^Bearer /, ""), auth.token) || sameToken(cookieValue(req.headers.get("cookie"), cookie), auth.token);
+
   return async function handle(req: Request): Promise<Response> {
     return secured(await respond(req));
   };
@@ -173,6 +186,15 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
     if (!isAllowed(req, url)) return error("forbidden", 403);
     const sp = url.searchParams;
     const path = url.pathname;
+
+    if (auth && path === "/api/auth") {
+      if (!sameToken(sp.get("k"), auth.token)) return error("unauthorized", 401);
+      return new Response(null, {
+        status: 303,
+        headers: { Location: "/", "Cache-Control": "no-store", "Set-Cookie": `${cookie}=${auth.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000` },
+      });
+    }
+    if (path.startsWith("/api/") && !signedIn(req)) return error("unauthorized", 401);
 
     try {
       if (path.startsWith("/api/")) return await api(req, url, path, sp);

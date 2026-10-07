@@ -61,20 +61,18 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 info "Downloading $ASSET ($VERSION)"
 download "$BASE/$ASSET" "$TMP/$ASSET" || fail "download failed: $BASE/$ASSET"
 
-if download "$BASE/checksums.txt" "$TMP/checksums.txt" 2>/dev/null; then
-  EXPECTED="$(grep " $ASSET\$" "$TMP/checksums.txt" | awk '{print $1}')"
-  [ -n "$EXPECTED" ] || fail "checksums.txt has no entry for $ASSET"
-  if command -v sha256sum >/dev/null 2>&1; then
-    ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
-  else
-    need shasum
-    ACTUAL="$(shasum -a 256 "$TMP/$ASSET" | awk '{print $1}')"
-  fi
-  [ "$EXPECTED" = "$ACTUAL" ] || fail "checksum mismatch for $ASSET"
-  info "Checksum verified"
+# Nothing is installed without a checksum to compare against.
+download "$BASE/checksums.txt" "$TMP/checksums.txt" 2>/dev/null || fail "this release has no checksums.txt, so $ASSET can't be verified. Nothing was installed"
+EXPECTED="$(grep " $ASSET\$" "$TMP/checksums.txt" | awk '{print $1}')"
+[ -n "$EXPECTED" ] || fail "checksums.txt has no entry for $ASSET"
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
 else
-  warn "no checksums.txt in this release; skipping verification"
+  need shasum
+  ACTUAL="$(shasum -a 256 "$TMP/$ASSET" | awk '{print $1}')"
 fi
+[ "$EXPECTED" = "$ACTUAL" ] || fail "checksum mismatch for $ASSET"
+info "Checksum verified"
 
 mkdir -p "$INSTALL_DIR"
 chmod +x "$TMP/$ASSET"

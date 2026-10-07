@@ -1,3 +1,5 @@
+import { redact } from "../redact.ts";
+
 export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo";
 
 export interface SessionRecord {
@@ -148,9 +150,10 @@ export function parseTs(v: unknown): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
+/** Text as it is stored: secrets in it replaced first (so a key cut in half can't slip through), then cut to the limit. */
 export function truncate(text: string | null | undefined, limit: number): string | null {
   if (!text || limit <= 0) return null;
-  const t = text.trim();
+  const t = redact(text.trim());
   return t.length > limit ? t.slice(0, limit) + "…" : t;
 }
 

@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write # push the release commit + tag, create the release
+  id-token: write # sign the build provenance attestations
+  attestations: write # store them, for `gh attestation verify`
 
 concurrency:
   group: release
@@ -20,10 +22,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun test
@@ -33,17 +35,25 @@ jobs:
     # macOS can cross-compile every target and natively ad-hoc sign the darwin binaries.
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0 # semantic-release needs the full history and tags
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - name: semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx --no-install semantic-release
+      # Signed provenance for every binary: proof it was built here, from this commit. Only when a release was made.
+      - name: Attest build provenance
+        if: hashFiles('dist/checksums.txt') != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            dist/harness-dashboard-*
+            dist/checksums.txt

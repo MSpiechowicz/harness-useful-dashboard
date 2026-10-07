@@ -18,6 +18,8 @@
   let spinnerAt = $state<number | null>(null);
   let shown = $state(false);
   const failed = $derived(apiHealth.failing > 0);
+  // The server answers, but this browser didn't come in through the sign-in link.
+  const signedOut = $derived(apiHealth.message === "unauthorized");
 
   $effect(() => {
     const id = setTimeout(() => (spinnerAt = performance.now()), DELAY_MS);
@@ -26,11 +28,12 @@
   $effect(() => {
     if (shown || !ready || failed) return;
     const wait = spinnerAt == null ? 0 : MIN_MS - (performance.now() - spinnerAt);
-    if (wait <= 0) {
+    const show = () => {
       shown = true;
-      return;
-    }
-    const id = setTimeout(() => (shown = true), wait);
+      store.restoreScroll();
+    };
+    if (wait <= 0) return show();
+    const id = setTimeout(show, wait);
     return () => clearTimeout(id);
   });
 
@@ -51,8 +54,8 @@
   <div class="card flex flex-col items-center justify-center py-16 text-center" role="alert">
     <div class="mb-3 rounded-full bg-surface-2 p-3" style="color: var(--status-warning)"><TriangleAlert size={24} /></div>
     <div class="text-sm font-medium text-ink">{t("error.title")}</div>
-    <p class="mt-1 max-w-md text-sm text-muted">{t("error.body")}</p>
-    {#if apiHealth.message}<p class="mt-2 max-w-md truncate font-mono text-xs text-muted" title={apiHealth.message}>{apiHealth.message}</p>{/if}
+    <p class="mt-1 max-w-md text-sm text-muted">{t(signedOut ? "error.signedOut" : "error.body")}</p>
+    {#if apiHealth.message && !signedOut}<p class="mt-2 max-w-md truncate font-mono text-xs text-muted" title={apiHealth.message}>{apiHealth.message}</p>{/if}
     <button type="button" class="btn mt-4" onclick={retry}><RefreshCw size={14} />{t("error.retry")}</button>
   </div>
 {:else if spinnerAt != null}
