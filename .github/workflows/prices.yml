@@ -19,9 +19,11 @@ concurrency:
 jobs:
   prices:
     runs-on: ubuntu-latest
-    env:
-      REPORT: ${{ runner.temp }}/prices-report.md
     steps:
+      # The runner context exists only inside steps: a job-level env using it makes the whole file invalid, which GitHub
+      # reports as a failed run on every push.
+      - name: Report path
+        run: echo "REPORT=$RUNNER_TEMP/prices-report.md" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
