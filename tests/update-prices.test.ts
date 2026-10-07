@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { applyChanges, effective, main, parseLiteLLM, parseRules, perMillion, planUpdates, renderReport, round6 } from "../scripts/update-prices.ts";
 
 const PRICING = `export const BUILTIN_PRICES_VERSION = 4;
@@ -200,7 +202,7 @@ describe("bad data", () => {
   });
 
   test("invalid JSON exits 1 and writes nothing", async () => {
-    const dir = (await import("node:fs")).mkdtempSync("/tmp/prices-test-");
+    const dir = (await import("node:fs")).mkdtempSync(join(tmpdir(), "prices-test-"));
     await Bun.write(`${dir}/bad.json`, "{nope");
     await Bun.write(`${dir}/pricing.ts`, PRICING);
     const code = await main(["--source", `${dir}/bad.json`, "--pricing", `${dir}/pricing.ts`, "--report", `${dir}/r.md`]);
@@ -210,7 +212,7 @@ describe("bad data", () => {
   });
 
   test("main edits a copy of pricing.ts, and --dry-run does not", async () => {
-    const dir = (await import("node:fs")).mkdtempSync("/tmp/prices-test-");
+    const dir = (await import("node:fs")).mkdtempSync(join(tmpdir(), "prices-test-"));
     await Bun.write(`${dir}/src.json`, JSON.stringify(fixture({ "claude-opus-5": claude(6, 30) })));
     await Bun.write(`${dir}/pricing.ts`, PRICING);
     const args = ["--source", `${dir}/src.json`, "--pricing", `${dir}/pricing.ts`];
@@ -225,5 +227,19 @@ describe("bad data", () => {
     }
     expect(await Bun.file(`${dir}/pricing.ts`).text()).toContain("input: 6, output: 30");
     expect(await Bun.file(`${dir}/r.md`).text()).toContain("## Price changes");
+  });
+});
+
+describe("line endings", () => {
+  test("a pricing.ts checked out with CRLF (Windows) parses and keeps its CRLF when edited", async () => {
+    const lf = await Bun.file(join(import.meta.dir, "..", "src", "core", "pricing.ts")).text();
+    const crlf = lf.replace(/\r?\n/g, "\r\n");
+    const a = parseRules(lf.replace(/\r\n/g, "\n"));
+    const b = parseRules(crlf);
+    expect(b.map((r) => [r.pattern, r.line, r.fields])).toEqual(a.map((r) => [r.pattern, r.line, r.fields]));
+    const rule = b[0]!;
+    const out = applyChanges(crlf, [{ rule, write: { ...rule.fields, input: rule.fields.input! + 1 } } as never]);
+    expect(out.includes("\n") && !/[^\r]\n/.test(out)).toBe(true);
+    expect(parseRules(out)[0]!.fields.input).toBe(rule.fields.input! + 1);
   });
 });

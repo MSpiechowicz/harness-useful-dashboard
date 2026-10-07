@@ -156,7 +156,8 @@ const RULE_LINE = /^(\s*\{ pattern: ")([^"]+)(",)(.*?)( \},?)(.*)$/;
 
 export function parseRules(source: string): Rule[] {
   const rules: Rule[] = [];
-  source.split("\n").forEach((text, line) => {
+  // Line ending agnostic: git checks pricing.ts out with CRLF on Windows.
+  source.split(/\r?\n/).forEach((text, line) => {
     const m = RULE_LINE.exec(text);
     if (!m) return;
     const fields: Rule["fields"] = {};
@@ -332,13 +333,15 @@ function fieldsText(write: Rule["fields"]): string {
 /** Rewrites only the rule lines that changed and bumps the version. Comments and layout stay as they are. */
 export function applyChanges(source: string, changes: Change[]): string {
   if (changes.length === 0) return source;
-  const lines = source.split("\n");
+  // The file keeps its own line ending (CRLF in a Windows checkout).
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(/\r?\n/);
   for (const c of changes) {
     const m = RULE_LINE.exec(lines[c.rule.line]!);
     if (!m || m[2] !== c.rule.pattern) fail(`pricing.ts changed under the script near ${c.rule.pattern}`);
     lines[c.rule.line] = `${m[1]}${m[2]}${m[3]} ${fieldsText(c.write)}${m[5]}${m[6]}`;
   }
-  const out = lines.join("\n");
+  const out = lines.join(eol);
   const bumped = out.replace(/(BUILTIN_PRICES_VERSION = )(\d+)/, (_, head, n) => `${head}${Number(n) + 1}`);
   if (bumped === out) fail("BUILTIN_PRICES_VERSION not found in pricing.ts");
   return bumped;
