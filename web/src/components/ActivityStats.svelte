@@ -58,9 +58,10 @@
   ]);
 </script>
 
-<div class="grid h-full grid-cols-2 gap-3 sm:grid-cols-3" class:loading-dim={loading}>
+<!-- Tiles keep their natural height: beside a taller calendar the card has room to spare below them, not inside them. -->
+<div class="grid grid-cols-2 content-start gap-3 sm:grid-cols-3" class:loading-dim={loading}>
   {#each tiles as tile (tile.label)}
-    <div class="flex flex-col justify-between gap-2 rounded-xl bg-surface-2 p-3.5">
+    <div class="flex flex-col gap-2 rounded-xl bg-surface-2 p-3.5">
       <div class="flex items-center gap-1.5 text-xs text-muted">
         <tile.icon size={13} class="shrink-0 text-ink-2" />
         {tile.label}

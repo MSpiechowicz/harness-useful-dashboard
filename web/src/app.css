@@ -403,6 +403,44 @@ table.data th.num {
 }
 }
 
+/* A view's content arriving: each block rises into place, one shortly after the other. The wrapper adds no box of its
+   own, so the page's layout is the same as without it. Backwards fill only, so nothing is left transformed afterwards
+   (a transform would become the containing block of fixed popovers). */
+.view-enter {
+  display: contents;
+}
+.view-enter > * {
+  animation: view-enter 0.28s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+.view-enter > :nth-child(2) {
+  animation-delay: 40ms;
+}
+.view-enter > :nth-child(3) {
+  animation-delay: 80ms;
+}
+.view-enter > :nth-child(n + 4) {
+  animation-delay: 120ms;
+}
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Less motion when asked for: animations and transitions end at once. Spinners keep turning, they say work is going on. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* The Live menu icon while new usage is coming in: the pulse line draws itself left to right, then clears the same way.
    The path runs right to left, hence the offset counting up. */
 .live-trace path {

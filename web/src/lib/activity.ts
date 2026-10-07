@@ -19,6 +19,15 @@ export function daySpan(days: readonly ActivityDay[], range: { from?: number; to
   return { start: dayKey(start), end: end > today ? today : end };
 }
 
+/** The first day of each month the span touches, oldest first. */
+export function spanMonths(span: { start: string; end: string }): Date[] {
+  const first = parseDay(span.start);
+  const last = parseDay(span.end);
+  const out: Date[] = [];
+  for (let m = new Date(first.getFullYear(), first.getMonth(), 1); m <= last; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) out.push(m);
+  return out;
+}
+
 export interface ActivityStats {
   active: number;
   total: number;

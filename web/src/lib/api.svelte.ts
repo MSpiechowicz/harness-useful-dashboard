@@ -18,8 +18,8 @@ export function apiUrl(path: string, extra: Record<string, QueryValue> = {}): st
   return `${path}${qs({ ...filterParams(), ...extra })}`;
 }
 
-export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(path, { signal });
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -41,6 +41,9 @@ export function settled(...fetches: { data: unknown; error: string | null }[]): 
   return fetches.every((f) => f.data != null || f.error != null);
 }
 
+/** How many of the requests on screen failed their last attempt, so a view can say so instead of going blank. */
+export const apiHealth = $state({ failing: 0, message: null as string | null });
+
 /**
  * Reactive fetch: re-runs when the URL returned by `url()` changes or new data is ingested.
  * Keeps the previous data while reloading so charts hold their frame.
@@ -51,26 +54,44 @@ export function useFetch<T>(url: () => string | null) {
   let loading = $state(true);
   let error = $state<string | null>(null);
   let seq = 0;
+  let lastUrl: string | null = null;
+  let failed = false;
+
+  const setFailed = (v: boolean, message: string | null = null) => {
+    if (v !== failed) apiHealth.failing += v ? 1 : -1;
+    failed = v;
+    if (v) apiHealth.message = message;
+  };
+  $effect(() => () => setFailed(false));
 
   $effect(() => {
     const u = url();
     void store.refreshTick;
     if (!u) return;
     const mine = ++seq;
-    loading = true;
-    getJson<T>(u)
+    // Other filters dim what's on screen until the answer comes. A refresh of the same view (new usage came in)
+    // swaps the data in place without a flicker.
+    if (u !== lastUrl) loading = true;
+    lastUrl = u;
+    const ctrl = new AbortController();
+    getJson<T>(u, ctrl.signal)
       .then((d) => {
         if (mine === seq) {
           data = d;
           error = null;
+          setFailed(false);
         }
       })
       .catch((e: Error) => {
-        if (mine === seq) error = e.message;
+        if (mine !== seq || ctrl.signal.aborted) return;
+        error = e.message;
+        setFailed(true, e.message);
       })
       .finally(() => {
         if (mine === seq) loading = false;
       });
+    // Superseded or left: the answer isn't needed any more.
+    return () => ctrl.abort();
   });
 
   return {

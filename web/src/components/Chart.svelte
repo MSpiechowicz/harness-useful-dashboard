@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { echarts, type EChartsOption } from "../lib/echarts.ts";
 
   interface Props {
@@ -22,7 +22,7 @@
 
   let el = $state<HTMLDivElement>();
   let chart: ReturnType<typeof echarts.init> | null = null;
-  /** Series switched off through the legend; reset whenever a new option replaces the old one. */
+  /** Series switched off through the legend. They stay off when new data comes in, while their names are still there. */
   let off = $state<Record<string, boolean>>({});
 
   interface SeriesLike {
@@ -47,9 +47,28 @@
     else chart?.dispatchAction({ type: "legendToggleSelect", name });
   }
 
+  /**
+   * The option as drawn: with the legend entries the user switched off kept off, and without motion for those who
+   * asked for less (no grow-in, no ripple on the Live chart).
+   */
+  function prepared(opt: EChartsOption, hidden: string[]): EChartsOption {
+    let out = opt;
+    const lg = opt.legend as { data?: (string | { name: string })[]; selected?: Record<string, boolean> } | unknown[] | undefined;
+    if (hidden.length && lg && !Array.isArray(lg) && !legendOff) {
+      const names = new Set([...(lg.data ?? []).map((d) => (typeof d === "string" ? d : d.name)), ...((opt.series ?? []) as SeriesLike[]).map((x) => x.name)]);
+      const keep = hidden.filter((n) => names.has(n));
+      if (keep.length) out = { ...out, legend: { ...lg, selected: { ...lg.selected, ...Object.fromEntries(keep.map((n) => [n, false])) } } };
+    }
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const series = ((out.series ?? []) as { type?: string }[]).map((x) => (x.type === "effectScatter" ? { ...x, type: "scatter" } : x));
+      out = { ...out, animation: false, series: series as EChartsOption["series"] };
+    }
+    return out;
+  }
+
   onMount(() => {
     chart = echarts.init(el!, undefined, { renderer: "canvas" });
-    chart.setOption(option, { notMerge: true });
+    chart.setOption(prepared(option, []), { notMerge: true });
     chart.on("click", (p) => onclick?.(p as never));
     chart.on("legendselectchanged", (e) => {
       const selected = (e as { selected: Record<string, boolean> }).selected;
@@ -66,8 +85,12 @@
 
   $effect(() => {
     const opt = option;
-    chart?.setOption(opt, { notMerge: true });
-    off = {};
+    if (!chart) return;
+    const hidden = untrack(() => Object.keys(off).filter((k) => off[k]));
+    const drawn = prepared(opt, hidden);
+    chart.setOption(drawn, { notMerge: true });
+    const selected = (drawn.legend as { selected?: Record<string, boolean> } | undefined)?.selected ?? {};
+    off = Object.fromEntries(Object.entries(selected).filter(([, v]) => !v).map(([k]) => [k, true]));
   });
 </script>
 

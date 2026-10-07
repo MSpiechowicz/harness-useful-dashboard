@@ -15,7 +15,7 @@
   import TipCard from "../components/TipCard.svelte";
   import UsageChart from "../components/UsageChart.svelte";
   import BreakdownTable from "../components/BreakdownTable.svelte";
-  import { type ActivityDay, activityStats, daySpan } from "../lib/activity.ts";
+  import { type ActivityDay, activityStats, daySpan, spanMonths } from "../lib/activity.ts";
   import { apiUrl, settled, useFetch, type Breakdown, type Summary, type Tip, type TimeSeries } from "../lib/api.svelte.ts";
   import { breakdownItems, heatMax, seriesLabel, weekHeatmap } from "../lib/charts.ts";
   import { bucketLabel, compact, integer, metricValue, percent, trimmed, usd } from "../lib/format.ts";
@@ -37,6 +37,15 @@
   const calendar = useFetch<ActivityDay[]>(() => apiUrl("/api/calendar"));
   const span = $derived(daySpan(calendar.data ?? [], store.filters));
   const activity = $derived(calendar.data ? activityStats(calendar.data, span, (d) => (store.metric === "cost" ? d.cost : d.tokens)) : null);
+  // The calendar shows two months at a time, the latest first. Paging steps back through the range by two months.
+  const CAL_PAGE = 2;
+  const calMonths = $derived(spanMonths(span));
+  let calBack = $state(0);
+  $effect(() => {
+    void [span.start, span.end];
+    calBack = 0;
+  });
+  const calShown = $derived(calMonths.slice(Math.max(0, calMonths.length - calBack - CAL_PAGE), calMonths.length - calBack));
   const tips = useFetch<Tip[]>(() => apiUrl("/api/tips"));
   // Read and hidden tips stay on the Tips page only (and none show until it's known which those are).
   const activeTips = $derived(tipStore.loaded ? (tips.data ?? []).filter((tip) => tipStore.status(tip) === "active") : []);
@@ -134,36 +143,51 @@
         </Card>
       </div>
 
-      <div class="grid gap-5 xl:grid-cols-5">
-        <Card title={t("chart.providerSplit")} subtitle={t("chart.providerSplitHint", { metric: t(`metric.${store.metric}`) })} class="xl:col-span-2">
-          {#snippet table()}{#if providers.data}<BreakdownTable rows={providers.data.rows} dim="provider" filterKey="provider" compactCols />{/if}{/snippet}
-          {#if providers.data}
-            <DonutList
-              dim="provider"
-              items={breakdownItems(providers.data.rows, "provider", store.metric)}
-              format={(v) => metricValue(v, store.metric)}
-              onselect={(key) => store.setFilter("provider", key)}
-              loading={providers.loading}
-              size={216}
-            />
-          {/if}
-        </Card>
-        <Card title={t("chart.activity")} subtitle={t("chart.activityHint")} class="xl:col-span-3">
-          {#snippet actions()}{#if heat.data}<HeatLegend max={metricValue(heatMax(heat.data.cells), store.metric)} />{/if}{/snippet}
-          {#if heatOption}<Chart option={heatOption} height={240} dim={heat.loading} />{/if}
-        </Card>
+      <!-- Side by side only once the split has room for its legend beside the donut: a narrower split stacks into a tall card,
+           and the hour heatmap beside it would stretch into tall, thin cells. The row's own width decides, so a collapsed
+           sidebar counts. -->
+      <div class="@container">
+        <div class="grid gap-5 @6xl:grid-cols-5">
+          <Card title={t("chart.providerSplit")} subtitle={t("chart.providerSplitHint", { metric: t(`metric.${store.metric}`) })} class="@6xl:col-span-2">
+            {#snippet table()}{#if providers.data}<BreakdownTable rows={providers.data.rows} dim="provider" filterKey="provider" compactCols />{/if}{/snippet}
+            {#if providers.data}
+              <DonutList
+                dim="provider"
+                items={breakdownItems(providers.data.rows, "provider", store.metric)}
+                format={(v) => metricValue(v, store.metric)}
+                onselect={(key) => store.setFilter("provider", key)}
+                loading={providers.loading}
+                size={216}
+              />
+            {/if}
+          </Card>
+          <Card title={t("chart.activity")} subtitle={t("chart.activityHint")} class="@6xl:col-span-3">
+            {#snippet actions()}{#if heat.data}<HeatLegend max={metricValue(heatMax(heat.data.cells), store.metric)} />{/if}{/snippet}
+            {#if heatOption}<Chart option={heatOption} height={240} fill dim={heat.loading} />{/if}
+          </Card>
+        </div>
       </div>
 
       {#if !calendar.data || calendar.data.length}
         <!-- Same columns as the row above: the rhythm under the provider split, the calendar under the hour heatmap. -->
-        <div class="grid gap-5 xl:grid-cols-5">
-          <Card title={t("calendar.rhythm")} subtitle={t("calendar.rhythmHint")} class="xl:col-span-2">
-            {#if activity}<ActivityStats stats={activity} loading={calendar.loading} />{/if}
-          </Card>
-          <Card title={t("chart.calendar")} subtitle={t("calendar.hint")} class="xl:col-span-3">
-            {#snippet actions()}{#if activity}<HeatLegend max={metricValue(activity.busiest ? (store.metric === "cost" ? activity.busiest.cost : activity.busiest.tokens) : 0, store.metric)} />{/if}{/snippet}
-            {#if calendar.data && activity}<DailyCalendar days={calendar.data} {span} peak={activity.busiest?.day} loading={calendar.loading} />{/if}
-          </Card>
+        <div class="@container">
+          <div class="grid gap-5 @6xl:grid-cols-5">
+            <Card title={t("calendar.rhythm")} subtitle={t("calendar.rhythmHint")} class="@6xl:col-span-2">
+              {#if activity}<ActivityStats stats={activity} loading={calendar.loading} />{/if}
+            </Card>
+            <Card title={t("chart.calendar")} subtitle={t("calendar.hint")} class="@6xl:col-span-3">
+              {#snippet actions()}{#if activity}<HeatLegend max={metricValue(activity.busiest ? (store.metric === "cost" ? activity.busiest.cost : activity.busiest.tokens) : 0, store.metric)} />{/if}{/snippet}
+              {#if calendar.data && activity}<DailyCalendar
+                  days={calendar.data}
+                  {span}
+                  visible={calShown}
+                  peak={activity.busiest?.day}
+                  loading={calendar.loading}
+                  onearlier={calMonths.length > CAL_PAGE ? (calBack + CAL_PAGE < calMonths.length ? () => (calBack = Math.min(calBack + CAL_PAGE, calMonths.length - CAL_PAGE)) : null) : undefined}
+                  onlater={calMonths.length > CAL_PAGE ? (calBack > 0 ? () => (calBack = Math.max(0, calBack - CAL_PAGE)) : null) : undefined}
+                />{/if}
+            </Card>
+          </div>
         </div>
       {/if}
 
