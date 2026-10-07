@@ -1,3 +1,10 @@
+## [1.18.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.4...v1.18.5) (2026-10-07)
+
+
+### Bug Fixes
+
+* prices from the makers' own pages: GLM-5.2/5.3 and Kimi K3 corrected, 12 more models ([646ff72](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/646ff7253848eae8fb6cab6aaf9453ca3c7f8ad4))
+
 ## [1.18.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.3...v1.18.4) (2026-10-07)
 
 
