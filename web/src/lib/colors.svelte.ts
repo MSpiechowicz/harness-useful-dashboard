@@ -27,7 +27,8 @@ let ranking = $state<Record<string, string[]>>({});
  */
 export async function loadColorRanking(): Promise<void> {
   try {
-    const from = Date.now() - 30 * 86_400_000;
+    // On the hour, so refreshes within it ask the same question and the server can answer from its cache.
+    const from = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 30 * 86_400_000;
     type Options = Record<string, { value: string }[]>;
     const [recent, all] = await Promise.all([getJson<Options>(`/api/filters?from=${from}`), getJson<Options>("/api/filters")]);
     const r: Record<string, string[]> = {};

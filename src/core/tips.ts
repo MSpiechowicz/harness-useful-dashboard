@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { memo } from "./cache.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
-import { EDIT_TOOLS, type Filters, projectLabel, READ_TOOLS, whereClause } from "./queries.ts";
+import { bucketExpr, EDIT_TOOLS, type Filters, projectLabel, READ_TOOLS, whereClause } from "./queries.ts";
 
 export type Severity = "info" | "warn" | "critical";
 export type TipCategory = "cache" | "context" | "models" | "workflow" | "spend";
@@ -53,7 +54,12 @@ function subject(tip: Pick<Tip, "id" | "params" | "link">): string {
 
 const PREMIUM = /fable|mythos|opus|gpt-6|o3-pro/;
 
+/** About twenty scans of the range: kept until the data or the prices change (a price edit writes the database). */
 export function generateTips(db: Database, f: Filters, prices: PriceBook): Tip[] {
+  return memo(db, `tips:${JSON.stringify(f)}`, () => computeTips(db, f, prices));
+}
+
+function computeTips(db: Database, f: Filters, prices: PriceBook): Tip[] {
   const w = whereClause(f);
   const and = (cond: string) => (w.sql ? `${w.sql} AND ${cond}` : `WHERE ${cond}`);
   const q = <T>(sql: string, extra: Record<string, string | number> = {}) => db.query<T, any>(sql).all({ ...w.params, ...extra });
@@ -135,7 +141,7 @@ export function generateTips(db: Database, f: Filters, prices: PriceBook): Tip[]
 
   // 8. Spike: most recent day vs trailing 7-day average
   const days = q<{ day: string; cost: number }>(
-    `SELECT date(ts / 1000, 'unixepoch', 'localtime') AS day, SUM(cost_usd) AS cost FROM usage u ${w.sql} GROUP BY day ORDER BY day DESC LIMIT 8`,
+    `SELECT ${bucketExpr("day")} AS day, SUM(cost_usd) AS cost FROM usage u ${w.sql} GROUP BY day ORDER BY day DESC LIMIT 8`,
   );
   if (days.length >= 4) {
     const [latest, ...prev] = days;

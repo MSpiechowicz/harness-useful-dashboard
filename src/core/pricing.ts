@@ -19,7 +19,7 @@ export interface PriceRule extends Price {
 }
 
 /** Raised whenever BUILTIN_PRICES changes: a database priced with an older table is re-priced once on open. */
-export const BUILTIN_PRICES_VERSION = 2;
+export const BUILTIN_PRICES_VERSION = 3;
 
 /**
  * Built-in list prices (first-party API rates). Claude Code and Codex subscription users don't pay these
@@ -66,10 +66,21 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "o3-mini*", input: 1.1, output: 4.4, cacheRead: 0.55, cacheWrite5m: 1.1, cacheWrite1h: 1.1 },
   { pattern: "o3", input: 2, output: 8, cacheRead: 0.5, cacheWrite5m: 2, cacheWrite1h: 2 },
   { pattern: "codex-mini*", input: 1.5, output: 6, cacheRead: 0.375, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
-  // Google
+  // Google — up to 200k tokens of context; cache storage is billed per hour, not per write.
   { pattern: "gemini-2.5-pro*", input: 1.25, output: 10, cacheRead: 0.31, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
+  { pattern: "gemini-3.1-pro*", input: 2, output: 12, cacheRead: 0.2, cacheWrite5m: 2, cacheWrite1h: 2 },
+  { pattern: "gemini-2.5-flash-lite*", input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite5m: 0.1, cacheWrite1h: 0.1 },
   { pattern: "gemini-2.5-flash*", input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
+  // Zhipu, as OpenCode, Zed and Cline users often run it.
+  { pattern: "glm-4.6*", input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite5m: 0.6, cacheWrite1h: 0.6 },
+  { pattern: "glm-4.5-air*", input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite5m: 0.2, cacheWrite1h: 0.2 },
+  { pattern: "glm-4.5*", input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite5m: 0.6, cacheWrite1h: 0.6 },
 ];
+
+/** A price for a maker that doesn't charge extra for cache writes: written tokens cost what input does. */
+function noCacheWrite(input: number, output: number, cacheRead = input * 0.1): Price {
+  return { input, output, cacheRead, cacheWrite5m: input, cacheWrite1h: input };
+}
 
 /** Used for models with no matching rule; rows priced this way are flagged `cost_estimated`. */
 const FALLBACKS: { test: RegExp; price: Price }[] = [
@@ -77,8 +88,17 @@ const FALLBACKS: { test: RegExp; price: Price }[] = [
   { test: /fable|mythos/, price: { input: 10, output: 50 } },
   { test: /haiku/, price: { input: 1, output: 5 } },
   { test: /claude|sonnet/, price: { input: 3, output: 15 } },
-  { test: /^(gpt|o\d|codex)/, price: { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite5m: 1.25, cacheWrite1h: 1.25 } },
+  { test: /^(gpt|o\d|codex)/, price: noCacheWrite(1.25, 10) },
+  { test: /^gemini/, price: noCacheWrite(1.25, 10) },
+  { test: /^deepseek/, price: noCacheWrite(0.28, 0.42) },
+  { test: /^grok/, price: noCacheWrite(3, 15, 0.75) },
+  { test: /^kimi/, price: noCacheWrite(0.6, 2.5, 0.15) },
+  { test: /^glm/, price: noCacheWrite(0.6, 2.2, 0.11) },
+  { test: /^qwen/, price: noCacheWrite(1, 5) },
+  // Any other named model: not Anthropic's, so no cache-write charge.
+  { test: /^(?!unknown$)/, price: noCacheWrite(3, 15) },
 ];
+/** No model id at all: most usage is Claude's, priced like a Sonnet. */
 const DEFAULT_FALLBACK: Price = { input: 3, output: 15 };
 
 
@@ -141,21 +161,25 @@ export class PriceBook {
     return result;
   }
 
-  cost(model: string | null | undefined, t: TokenCounts, speed?: string | null): { usd: number; estimated: boolean } {
-    if (normalizeModel(model) === "<synthetic>") return { usd: 0, estimated: false };
+  /** Every token kind's rate for a model ($ per 1M), the missing cache rates derived. Synthetic messages cost nothing. */
+  rates(model: string | null | undefined): { input: number; output: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number; estimated: boolean } {
+    if (normalizeModel(model) === "<synthetic>") return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, estimated: false };
     const { price, estimated } = this.lookup(model);
-    const cacheRead = price.cacheRead ?? price.input * 0.1;
-    const write5 = price.cacheWrite5m ?? price.input * 1.25;
-    const write1h = price.cacheWrite1h ?? price.input * 2;
-    let usd =
-      (t.input * price.input +
-        t.output * price.output +
-        t.cacheRead * cacheRead +
-        t.cacheWrite * write5 +
-        t.cacheWrite1h * write1h) /
-      1_000_000;
+    return {
+      input: price.input,
+      output: price.output,
+      cacheRead: price.cacheRead ?? price.input * 0.1,
+      cacheWrite: price.cacheWrite5m ?? price.input * 1.25,
+      cacheWrite1h: price.cacheWrite1h ?? price.input * 2,
+      estimated,
+    };
+  }
+
+  cost(model: string | null | undefined, t: TokenCounts, speed?: string | null): { usd: number; estimated: boolean } {
+    const r = this.rates(model);
+    let usd = (t.input * r.input + t.output * r.output + t.cacheRead * r.cacheRead + t.cacheWrite * r.cacheWrite + t.cacheWrite1h * r.cacheWrite1h) / 1_000_000;
     if (speed === "fast") usd *= 2; // Claude fast mode is billed at 2x standard rates
-    return { usd, estimated };
+    return { usd, estimated: r.estimated };
   }
 }
 

@@ -22,6 +22,7 @@ export class DbWriter implements IngestSink {
   private sLimit: Statement;
   private sMeta: Statement;
   private sOutcome: Statement;
+  private sOutcomeTool: Statement;
   private sReading: Statement;
 
   constructor(
@@ -101,11 +102,15 @@ export class DbWriter implements IngestSink {
         stop_reason = COALESCE(excluded.stop_reason, response_meta.stop_reason)
     `);
     this.sReading = readingStatement(db);
+    // An outcome carries the tool of the call it ended, whichever of the two is written first.
     this.sOutcome = db.prepare(`
-      INSERT INTO outcomes (id, provider, session_id, ts, project, user, host, model, agent, effort, kind)
-      VALUES ($id, $provider, $sessionId, $ts, $project, $user, $host, $model, $agent, $effort, $kind)
-      ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, model = COALESCE(outcomes.model, excluded.model)
+      INSERT INTO outcomes (id, provider, session_id, ts, project, user, host, model, agent, effort, kind, tool)
+      VALUES ($id, $provider, $sessionId, $ts, $project, $user, $host, $model, $agent, $effort, $kind,
+              (SELECT t.tool FROM tool_calls t WHERE t.id = $id))
+      ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, model = COALESCE(outcomes.model, excluded.model),
+        tool = COALESCE(outcomes.tool, excluded.tool)
     `);
+    this.sOutcomeTool = db.prepare("UPDATE outcomes SET tool = $tool WHERE id = $id AND tool IS NULL");
   }
 
   session(s: SessionRecord): void {
@@ -196,6 +201,7 @@ export class DbWriter implements IngestSink {
       agent: t.agent,
       spawnRef: t.spawnRef ?? null,
     });
+    this.sOutcomeTool.run({ id: t.id, tool: t.tool });
     this.stats.tools++;
   }
 
@@ -265,27 +271,26 @@ export function resolveSpawnRefs(db: Database): void {
   }
 }
 
-/** Re-prices every usage row (after pricing edits). Provider-reported costs (Cursor, Cline, Roo Code, Kilo Code) are kept. */
+/**
+ * Re-prices every usage row (after pricing edits). Provider-reported costs (Cursor, Cline, Roo Code, Kilo Code) are kept.
+ * Cost is linear in the token counts, so each model (and fast mode) is one UPDATE with its rates: the same sum in the
+ * same order as PriceBook.cost, rather than every row read into JS and written back one by one.
+ */
 export function recomputeCosts(db: Database, prices: PriceBook): number {
-  const rows = db
-    .query<
-      { id: string; model: string | null; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cache_write_1h_tokens: number; speed: string | null },
-      []
-    >(
-      `SELECT id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, speed
-       FROM usage WHERE provider NOT IN ('cursor', 'cline', 'roo', 'kilo') OR cost_estimated = 1`,
-    )
-    .all();
-  const upd = db.prepare("UPDATE usage SET cost_usd = ?, cost_estimated = ? WHERE id = ?");
+  const repriced = "(provider NOT IN ('cursor', 'cline', 'roo', 'kilo') OR cost_estimated = 1)";
+  const models = db.query<{ model: string | null }, []>(`SELECT DISTINCT model FROM usage WHERE ${repriced}`).all();
+  const upd = db.prepare(
+    `UPDATE usage SET cost_usd = (input_tokens * ? + output_tokens * ? + cache_read_tokens * ? + cache_write_tokens * ? + cache_write_1h_tokens * ?) / 1000000.0 * ?,
+                      cost_estimated = ?
+     WHERE model IS ? AND (speed IS 'fast') = ? AND ${repriced}`,
+  );
+  let updated = 0;
   db.transaction(() => {
-    for (const r of rows) {
-      const c = prices.cost(
-        r.model,
-        { input: r.input_tokens, output: r.output_tokens, cacheRead: r.cache_read_tokens, cacheWrite: r.cache_write_tokens, cacheWrite1h: r.cache_write_1h_tokens },
-        r.speed,
-      );
-      upd.run(c.usd, c.estimated ? 1 : 0, r.id);
+    for (const { model } of models) {
+      const r = prices.rates(model);
+      const rates = [r.input, r.output, r.cacheRead, r.cacheWrite, r.cacheWrite1h];
+      for (const fast of [0, 1]) updated += upd.run(...rates, fast ? 2 : 1, r.estimated ? 1 : 0, model, fast).changes;
     }
   })();
-  return rows.length;
+  return updated;
 }

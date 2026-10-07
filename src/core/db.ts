@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -207,6 +207,12 @@ const MIGRATIONS: Record<number, string> = {
     CREATE INDEX IF NOT EXISTS idx_outcomes_session ON outcomes(session_id, ts);
     CREATE INDEX IF NOT EXISTS idx_usage_host_project ON usage(host, project);
   `,
+  // The tool a tool call's outcome belongs to, kept on the outcome: the friction view joined every outcome to its tool
+  // call to group by tool (seconds on a year of history).
+  9: /* sql */ `
+    ALTER TABLE outcomes ADD COLUMN tool TEXT;
+    UPDATE outcomes SET tool = (SELECT t.tool FROM tool_calls t WHERE t.id = outcomes.id);
+  `,
 };
 
 export interface OpenDbOptions {
@@ -225,23 +231,56 @@ export function openDb(path: string, opts: OpenDbOptions = {}): Database {
     const mode = opts.journalMode ?? "auto";
     const useWal = mode === "wal" || (mode === "auto" && opts.isDefaultPath !== false);
     db.exec(`PRAGMA journal_mode = ${useWal ? "WAL" : "DELETE"}`);
-    db.exec("PRAGMA synchronous = NORMAL");
+    // In WAL mode NORMAL can lose the last commits on power loss but never corrupts. With the rollback journal (the
+    // shared-database path) only FULL closes that window.
+    db.exec(`PRAGMA synchronous = ${useWal ? "NORMAL" : "FULL"}`);
+    // Memory-mapped reads only on a local disk: on a synced or network folder another machine can change the file
+    // under the mapping.
+    if (useWal) db.exec("PRAGMA mmap_size = 268435456");
   }
-  if (!opts.readonly) migrate(db);
+  // 64 MB of page cache instead of 2 MB: the views read the same indexes over and over.
+  db.exec("PRAGMA cache_size = -65536");
+  if (!opts.readonly) {
+    migrate(db);
+    optimize(db, true);
+  }
   return db;
 }
 
+/**
+ * Keeps the query planner's statistics current: SQLite only analyzes the tables whose size changed a lot since the
+ * last time, so this is cheap when nothing did. `opening` also looks at tables never analyzed.
+ */
+export function optimize(db: Database, opening = false): void {
+  db.exec(`PRAGMA optimize${opening ? " = 0x10002" : ""}`);
+}
+
+function schemaVersion(db: Database): number {
+  try {
+    const row = db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'").get();
+    return row ? Number(row.value) : 0;
+  } catch {
+    return 0; // no meta table yet
+  }
+}
+
+/**
+ * Brings the schema up to date. Several machines can open a shared database at once: each step takes the write lock
+ * first (BEGIN IMMEDIATE) and reads the version again under it, so a step another process just ran is not run twice
+ * (a second `ALTER TABLE … ADD COLUMN` would fail).
+ */
 export function migrate(db: Database): void {
-  db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
-  const row = db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'").get();
-  let current = row ? Number(row.value) : 0;
-  while (current < SCHEMA_VERSION) {
-    const next = current + 1;
-    db.transaction(() => {
-      db.exec(MIGRATIONS[next]!);
-      db.query("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)").run(String(next));
-    })();
-    current = next;
+  if (schemaVersion(db) >= SCHEMA_VERSION) return;
+  const step = db.transaction((): boolean => {
+    db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
+    const current = schemaVersion(db);
+    if (current >= SCHEMA_VERSION) return false;
+    db.exec(MIGRATIONS[current + 1]!);
+    db.query("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)").run(String(current + 1));
+    return true;
+  });
+  while (step.immediate()) {
+    /* one migration per transaction */
   }
 }
 

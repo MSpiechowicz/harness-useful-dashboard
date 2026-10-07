@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scan, splitLines } from "../src/core/ingest/index.ts";
+import { DbWriter } from "../src/core/ingest/writer.ts";
+import { PriceBook } from "../src/core/pricing.ts";
 import { claudeAssistant, claudeUser, CLAUDE_SESSION, ID, memDb, tempDir, testConfig, writeJsonl } from "./helpers.ts";
 
 describe("splitLines", () => {
@@ -109,5 +111,69 @@ describe("incremental scanning", () => {
     cfg.sources.enabled.claude = false;
     const r = await scan(db, cfg, ID);
     expect(r.filesSeen).toBe(0);
+  });
+});
+
+describe("ingest transactions", () => {
+  const transcript = (root: string, session: string) => join(root, "claude", "projects", "-work-alpha", `${session}.jsonl`);
+
+  test("small and large transcripts in one scan are all read, and their offsets saved", async () => {
+    const root = tempDir();
+    for (let i = 0; i < 250; i++) {
+      const session = `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`;
+      writeJsonl(transcript(root, session), [claudeAssistant({ id: `m${i}`, ts: "2026-09-01T10:00:01.000Z", session })]);
+    }
+    // Over the size read in one go: read in slices, outside the shared transaction.
+    const big = "99999999-0000-0000-0000-000000000000";
+    const pad = "x".repeat(4000);
+    writeJsonl(
+      transcript(root, big),
+      Array.from({ length: 400 }, (_, i) => claudeAssistant({ id: `b${i}`, ts: "2026-09-01T11:00:00.000Z", session: big, content: [{ type: "text", text: pad }] })),
+    );
+    const db = memDb();
+    const r = await scan(db, testConfig(root), ID);
+    expect(r.errors).toEqual([]);
+    expect(r.filesParsed).toBe(251);
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM usage").get()!.n).toBe(650);
+    expect(db.inTransaction).toBe(false);
+    const files = db.query<{ size: number; offset: number }, []>("SELECT size, offset FROM ingest_files").all();
+    expect(files.length).toBe(251);
+    for (const f of files) expect(f.offset).toBe(f.size);
+    expect((await scan(db, testConfig(root), ID)).filesParsed).toBe(0);
+  });
+
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("a file that fails is not read again on every scan", async () => {
+    const root = tempDir();
+    const path = transcript(root, CLAUDE_SESSION);
+    writeJsonl(path, [claudeAssistant({ id: "m1", ts: "2026-09-01T10:00:01.000Z" })]);
+    chmodSync(path, 0o000);
+    const db = memDb();
+    const cfg = testConfig(root);
+    try {
+      expect((await scan(db, cfg, ID)).errors.length).toBe(1);
+      // Backing off: the next scan leaves it alone.
+      expect((await scan(db, cfg, ID)).errors.length).toBe(0);
+      chmodSync(path, 0o644);
+      // A full rescan tries every file again.
+      const r = await scan(db, cfg, ID, { full: true });
+      expect(r.errors).toEqual([]);
+      expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM usage").get()!.n).toBe(1);
+    } finally {
+      chmodSync(path, 0o644);
+    }
+  });
+
+  test("an outcome carries its tool call's tool, whichever is written first", () => {
+    const db = memDb();
+    const w = new DbWriter(db, new PriceBook(), ID);
+    const tool = (id: string) => ({ id, usageId: null, sessionId: "s", promptId: null, provider: "claude" as const, ts: 1, project: null, tool: "Bash", filePath: null, skill: null, agent: "main" });
+    const outcome = (id: string) => ({ id, provider: "claude" as const, sessionId: "s", ts: 2, project: null, model: null, agent: "main", kind: "tool_error" as const });
+    w.tool(tool("t1"));
+    w.outcome(outcome("t1"));
+    w.outcome(outcome("t2"));
+    w.tool(tool("t2"));
+    w.outcome(outcome("t3"));
+    const rows = db.query<{ id: string; tool: string | null }, []>("SELECT id, tool FROM outcomes ORDER BY id").all();
+    expect(rows).toEqual([{ id: "t1", tool: "Bash" }, { id: "t2", tool: "Bash" }, { id: "t3", tool: null }]);
   });
 });

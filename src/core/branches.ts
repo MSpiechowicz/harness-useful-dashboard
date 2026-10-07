@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { memo } from "./cache.ts";
 import { bucketExpr, EDIT_TOOLS, fillBuckets, type Filters, projectLabel, sessionTitle, whereClause } from "./queries.ts";
 
 type Params = Record<string, string | number | null>;
@@ -45,6 +46,10 @@ export interface BranchRow {
 
 /** Usage by git branch, per project: what each piece of work cost. */
 export function branches(db: Database, f: Filters) {
+  return memo(db, `branches:${JSON.stringify(f)}`, () => computeBranches(db, f));
+}
+
+function computeBranches(db: Database, f: Filters) {
   const w = whereClause(f);
   const rows = db
     .query<Omit<BranchRow, "id" | "projectLabel" | "longLived">, Params>(
@@ -87,12 +92,14 @@ export function branchDetail(db: Database, id: string) {
   const at = new Map(days.map((d) => [d.bucket, d]));
   const sessions = db
     .query<{ id: string; title: string | null; provider: string; tokens: number; cost: number; messages: number; prompts: number; subagents: number; firstTs: number; lastTs: number }, Params>(
-      `SELECT ${ROOT} AS id, MAX(${sessionTitle("root")}) AS title, MAX(root.provider) AS provider,
-              COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost, COUNT(*) AS messages,
-              COUNT(DISTINCT u.prompt_id) AS prompts, COUNT(DISTINCT CASE WHEN u.session_id <> ${ROOT} THEN u.session_id END) AS subagents,
-              MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
-       FROM usage u ${JOIN} LEFT JOIN sessions root ON root.id = ${ROOT} ${where}
-       GROUP BY ${ROOT} ORDER BY lastTs DESC`,
+      // Titles are looked up once per session, after grouping, rather than per usage row.
+      `SELECT g.id, ${sessionTitle("root")} AS title, root.provider, g.tokens, g.cost, g.messages, g.prompts, g.subagents, g.firstTs, g.lastTs
+       FROM (SELECT ${ROOT} AS id, COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost, COUNT(*) AS messages,
+                    COUNT(DISTINCT u.prompt_id) AS prompts, COUNT(DISTINCT CASE WHEN u.session_id <> ${ROOT} THEN u.session_id END) AS subagents,
+                    MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
+             FROM usage u ${JOIN} ${where} GROUP BY ${ROOT}) g
+       LEFT JOIN sessions root ON root.id = g.id
+       ORDER BY g.lastTs DESC`,
     )
     .all(params);
   const models = db

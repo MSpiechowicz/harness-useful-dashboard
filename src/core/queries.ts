@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { homedir } from "node:os";
+import { memo } from "./cache.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
 
 export interface Filters {
@@ -112,18 +113,68 @@ export function projectLabel(path: string | null): string {
   return parts[parts.length - 1] ?? path;
 }
 
-const LOCAL = "'unixepoch', 'localtime'";
+const HOUR_MS = 3_600_000;
+/** Where the precomputed offsets start. Older times, and times past their end, take SQLite's 'localtime'. */
+const ZONE_FROM = Date.UTC(2015, 0, 1);
+
+/** The local time zone's offset (ms) from `at` on, at every change between `from` and `to`, oldest first. */
+export function zoneChanges(from: number, to: number): { at: number; offset: number }[] {
+  const offset = (t: number) => -new Date(t).getTimezoneOffset() * 60_000;
+  const out = [{ at: from, offset: offset(from) }];
+  // Offsets change at most a few times a year and never twice within six hours. Each change is then found to the
+  // minute, which is where zones change.
+  const step = 6 * HOUR_MS;
+  for (let t = from; t < to; t += step) {
+    const current = out[out.length - 1]!.offset;
+    let hi = Math.min(t + step, to);
+    if (offset(hi) === current) continue;
+    let lo = t;
+    while (hi - lo > 60_000) {
+      const mid = lo + Math.floor((hi - lo) / 120_000) * 60_000;
+      if (offset(mid) === current) lo = mid;
+      else hi = mid;
+    }
+    out.push({ at: hi, offset: offset(hi) });
+  }
+  return out;
+}
+
+let zone: { until: number; changes: { at: number; offset: number }[] } | null = null;
+
+/**
+ * SQL for the local time of an epoch-ms column, as epoch ms. SQLite's 'localtime' asks the C library per row, which on
+ * Linux with TZ unset re-reads /etc/localtime every call (about 10x slower on a year of history). The offsets come from
+ * the JS clock instead, as a CASE over the zone's changes, newest first since most rows are recent. Times outside the
+ * precomputed years fall back to 'localtime', so every row gets the same answer as before.
+ */
+export function localMs(col: string): string {
+  const now = Date.now();
+  if (!zone || now > zone.until - 30 * 86_400_000) {
+    const until = now + 400 * 86_400_000;
+    zone = { until, changes: zoneChanges(ZONE_FROM, until) };
+  }
+  const exact = `(strftime('%s', ${col} / 1000, 'unixepoch', 'localtime') - ${col} / 1000) * 1000`;
+  const parts = [`WHEN ${col} >= ${zone.until} OR ${col} < ${ZONE_FROM} THEN ${exact}`];
+  for (let i = zone.changes.length - 1; i > 0; i--) parts.push(`WHEN ${col} >= ${zone.changes[i]!.at} THEN ${zone.changes[i]!.offset}`);
+  return `(${col} + CASE ${parts.join(" ")} ELSE ${zone.changes[0]!.offset} END)`;
+}
+
+/** SQLite time-value arguments for an epoch-ms column read as local time. */
+export function localTime(col: string): string {
+  return `${localMs(col)} / 1000, 'unixepoch'`;
+}
+
 export function bucketExpr(bucket: Bucket, col = "u.ts"): string {
-  const t = `${col} / 1000`;
+  const t = localTime(col);
   switch (bucket) {
     case "hour":
-      return `strftime('%Y-%m-%d %H:00', ${t}, ${LOCAL})`;
+      return `strftime('%Y-%m-%d %H:00', ${t})`;
     case "week":
-      return `date(${t}, ${LOCAL}, 'weekday 0', '-6 days')`;
+      return `date(${t}, 'weekday 0', '-6 days')`;
     case "month":
-      return `strftime('%Y-%m', ${t}, ${LOCAL})`;
+      return `strftime('%Y-%m', ${t})`;
     default:
-      return `date(${t}, ${LOCAL})`;
+      return `date(${t})`;
   }
 }
 
@@ -306,9 +357,10 @@ export class Queries {
   heatmap(f: Filters, metric: Metric) {
     const w = whereClause(f);
     const value = metric === "cost" ? "SUM(u.cost_usd)" : "SUM(u.total_tokens)";
+    const t = localTime("u.ts");
     const rows = this.all<{ dow: number; hour: number; v: number; n: number }>(
-      `SELECT (CAST(strftime('%w', u.ts / 1000, ${LOCAL}) AS INTEGER) + 6) % 7 AS dow,
-              CAST(strftime('%H', u.ts / 1000, ${LOCAL}) AS INTEGER) AS hour,
+      `SELECT (CAST(strftime('%w', ${t}) AS INTEGER) + 6) % 7 AS dow,
+              CAST(strftime('%H', ${t}) AS INTEGER) AS hour,
               ${value} AS v, COUNT(*) AS n
        FROM usage u ${w.sql} GROUP BY dow, hour`,
       w.params,
@@ -794,25 +846,45 @@ export class Queries {
     };
   }
 
+  /**
+   * Every value of each filter dimension in the range, by cost. One pass over the combinations, folded per dimension
+   * here, rather than a scan per dimension; the UI asks on every refresh, so the answer is kept until the data changes.
+   */
   filters(f: Filters = {}) {
-    const time = whereClause({ from: f.from, to: f.to });
-    const values = (col: string) =>
-      this.all<{ value: string | null; n: number; cost: number }>(
-        `SELECT u.${col} AS value, COUNT(*) AS n, SUM(u.cost_usd) AS cost FROM usage u ${time.sql} GROUP BY u.${col} ORDER BY cost DESC`,
+    return memo(this.db, `filters:${f.from ?? ""}:${f.to ?? ""}`, () => {
+      const time = whereClause({ from: f.from, to: f.to });
+      const cols = ["provider", "project", "user", "model", "skill", "agent"] as const;
+      type Col = (typeof cols)[number];
+      const combos = this.all<Record<Col, string | null> & { n: number; cost: number }>(
+        `SELECT ${cols.map((c) => `u.${c}`).join(", ")}, COUNT(*) AS n, COALESCE(SUM(u.cost_usd), 0) AS cost
+         FROM usage u ${time.sql} GROUP BY ${cols.map((c) => `u.${c}`).join(", ")}`,
         time.params,
-      ).map((r) => ({ value: r.value ?? "(none)", label: col === "project" ? projectLabel(r.value) : r.value ?? "(none)", n: r.n }));
-    const range = this.get<{ minTs: number | null; maxTs: number | null; rows: number }>(
-      "SELECT MIN(ts) AS minTs, MAX(ts) AS maxTs, COUNT(*) AS rows FROM usage",
-    )!;
-    return {
-      provider: values("provider"),
-      project: values("project"),
-      user: values("user"),
-      model: values("model"),
-      skill: values("skill").filter((v) => v.value !== "(none)"),
-      agent: values("agent"),
-      range,
-    };
+      );
+      const values = (col: Col) => {
+        const sums = new Map<string | null, { n: number; cost: number }>();
+        for (const r of combos) {
+          const s = sums.get(r[col]) ?? { n: 0, cost: 0 };
+          s.n += r.n;
+          s.cost += r.cost;
+          sums.set(r[col], s);
+        }
+        return [...sums]
+          .sort((a, b) => b[1].cost - a[1].cost)
+          .map(([value, s]) => ({ value: value ?? "(none)", label: col === "project" ? projectLabel(value) : value ?? "(none)", n: s.n }));
+      };
+      const range = this.get<{ minTs: number | null; maxTs: number | null; rows: number }>(
+        "SELECT MIN(ts) AS minTs, MAX(ts) AS maxTs, COUNT(*) AS rows FROM usage",
+      )!;
+      return {
+        provider: values("provider"),
+        project: values("project"),
+        user: values("user"),
+        model: values("model"),
+        skill: values("skill").filter((v) => v.value !== "(none)"),
+        agent: values("agent"),
+        range,
+      };
+    });
   }
 }
 

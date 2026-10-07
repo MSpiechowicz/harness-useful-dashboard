@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AppConfig } from "../config.ts";
-import { setMeta } from "../db.ts";
+import { optimize, setMeta } from "../db.ts";
 import { expandHome } from "../paths.ts";
 import { PriceBook } from "../pricing.ts";
 import { normalizeProjects } from "../project.ts";
@@ -92,6 +92,46 @@ export function splitLines(buf: Uint8Array, baseOffset: number): { lines: { text
 
 /** Bytes read per pass; large transcripts are processed in slices to bound memory. */
 const SLICE_BYTES = 32 * 1024 * 1024;
+/** New bytes up to which a file is read at once, in a transaction shared with other small files. */
+const SMALL_BYTES = 1024 * 1024;
+/** Small files per shared transaction. */
+const BATCH_FILES = 200;
+
+function readRange(path: string, offset: number, length: number): Uint8Array {
+  const buf = new Uint8Array(length);
+  const fd = openSync(path, "r");
+  try {
+    let read = 0;
+    while (read < length) {
+      const n = readSync(fd, buf, read, length - read, offset + read);
+      if (n === 0) break;
+      read += n;
+    }
+    return read < length ? buf.subarray(0, read) : buf;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Files whose last read failed, and when to try them again. A file that keeps failing would otherwise be read again on
+ * every scan: the wait doubles from 30 seconds up to an hour, and a full rescan tries them all again.
+ */
+const failing = new Map<string, { count: number; retryAt: number }>();
+
+function backingOff(path: string): boolean {
+  const f = failing.get(path);
+  return f != null && Date.now() < f.retryAt;
+}
+
+function failed(path: string): void {
+  const count = (failing.get(path)?.count ?? 0) + 1;
+  failing.set(path, { count, retryAt: Date.now() + Math.min(60 * 60_000, 30_000 * 2 ** (count - 1)) });
+}
+
+function succeeded(path: string): void {
+  failing.delete(path);
+}
 
 export async function scan(
   db: Database,
@@ -105,7 +145,10 @@ export async function scan(
   const files = await discoverFiles(cfg);
   const result: ScanResult = { filesSeen: files.length, filesParsed: 0, usageRows: 0, prompts: 0, tools: 0, errors: [], durationMs: 0 };
 
-  if (opts.full) db.query("DELETE FROM ingest_files WHERE host = ?").run(identity.host);
+  if (opts.full) {
+    db.query("DELETE FROM ingest_files WHERE host = ?").run(identity.host);
+    failing.clear();
+  }
   const getState = db.prepare<{ size: number; mtime: number; offset: number; state: string | null }, [string, string]>(
     "SELECT size, mtime, offset, state FROM ingest_files WHERE host = ? AND path = ?",
   );
@@ -113,49 +156,87 @@ export async function scan(
     "INSERT OR REPLACE INTO ingest_files (host, path, size, mtime, offset, state) VALUES (?, ?, ?, ?, ?, ?)",
   );
 
+  // Small files (most of them on a first scan) are read in one go and share a transaction, committed every so many
+  // files: on a first scan of a few thousand transcripts the commits per file were much of the time, more so on a disk
+  // that syncs slowly. Nothing awaits while that transaction is open, so no request runs inside it. Each file still
+  // gets a savepoint of its own, so one that fails leaves the others in the batch alone.
+  let batched = 0;
+  const commit = () => {
+    if (db.inTransaction) db.exec("COMMIT");
+    batched = 0;
+  };
   let done = 0;
-  for (const file of files) {
-    done++;
-    try {
-      const st = statSync(file.path);
-      const mtime = Math.floor(st.mtimeMs);
-      const prev = getState.get(identity.host, file.path);
-      if (prev && prev.size === st.size && prev.mtime === mtime) continue;
+  // A savepoint's undo log is a temporary file by default: one per file in a batch made the batch slower than a
+  // commit per file. Kept in memory while the batches run.
+  db.exec("PRAGMA temp_store = MEMORY");
+  try {
+    for (const file of files) {
+      done++;
+      if (backingOff(file.path)) continue;
+      try {
+        const st = statSync(file.path);
+        const mtime = Math.floor(st.mtimeMs);
+        const prev = getState.get(identity.host, file.path);
+        if (prev && prev.size === st.size && prev.mtime === mtime) continue;
 
-      let offset = prev?.offset ?? 0;
-      let state = prev?.state ? JSON.parse(prev.state) : file.parser.initialState(file.path);
-      if (st.size < offset) {
-        // File was truncated or rewritten: start over (upserts keep this idempotent).
-        offset = 0;
-        state = file.parser.initialState(file.path);
-      }
-      if (st.size > offset) {
-        const handle = Bun.file(file.path);
-        while (offset < st.size) {
-          const end = Math.min(st.size, offset + SLICE_BYTES);
-          const buf = new Uint8Array(await handle.slice(offset, end).arrayBuffer());
-          let { lines, consumed } = splitLines(buf, offset);
-          if (consumed === 0) {
-            // No newline in this slice: either a trailing partial line (wait for more) or a huge line.
-            if (end < st.size) {
-              offset = end; // skip pathological >32MB line
-              continue;
-            }
-            break;
-          }
-          db.transaction(() => {
-            state = file.parser.parse(lines, { path: file.path, baseOffset: offset, promptTextLimit: cfg.promptTextLimit }, state, writer);
-          })();
-          lines = [];
-          offset += consumed;
+        let offset = prev?.offset ?? 0;
+        let state = prev?.state ? JSON.parse(prev.state) : file.parser.initialState(file.path);
+        if (st.size < offset) {
+          // File was truncated or rewritten: start over (upserts keep this idempotent).
+          offset = 0;
+          state = file.parser.initialState(file.path);
         }
-        result.filesParsed++;
+        const from = offset;
+        const ctx = { path: file.path, promptTextLimit: cfg.promptTextLimit };
+        if (st.size - offset <= SMALL_BYTES) {
+          if (!db.inTransaction) db.exec("BEGIN");
+          const buf = st.size > offset ? readRange(file.path, offset, st.size - offset) : new Uint8Array(0);
+          const { lines, consumed } = splitLines(buf, offset);
+          db.transaction(() => {
+            if (consumed > 0) state = file.parser.parse(lines, { ...ctx, baseOffset: offset }, state, writer);
+            putState.run(identity.host, file.path, st.size, mtime, offset + consumed, JSON.stringify(state));
+          })();
+          if (++batched >= BATCH_FILES) commit();
+        } else {
+          commit();
+          const handle = Bun.file(file.path);
+          let saved = false;
+          while (offset < st.size) {
+            const end = Math.min(st.size, offset + SLICE_BYTES);
+            const buf = new Uint8Array(await handle.slice(offset, end).arrayBuffer());
+            const { lines, consumed } = splitLines(buf, offset);
+            if (consumed === 0) {
+              // No newline in this slice: either a trailing partial line (wait for more) or a huge line.
+              if (end < st.size) {
+                offset = end; // skip pathological >32MB line
+                saved = false;
+                continue;
+              }
+              break;
+            }
+            // The offset is saved with the lines it covers, so a scan that stops halfway (an error, the app quitting)
+            // goes on from there. The size is saved once the read reaches the end: until then the file counts as changed.
+            const base = offset;
+            db.transaction(() => {
+              state = file.parser.parse(lines, { ...ctx, baseOffset: base }, state, writer);
+              putState.run(identity.host, file.path, end === st.size ? st.size : -1, mtime, base + consumed, JSON.stringify(state));
+            })();
+            offset += consumed;
+            saved = end === st.size;
+          }
+          if (!saved) putState.run(identity.host, file.path, st.size, mtime, offset, JSON.stringify(state));
+        }
+        if (st.size > from) result.filesParsed++;
+        succeeded(file.path);
+      } catch (err) {
+        failed(file.path);
+        result.errors.push({ path: file.path, error: (err as Error).message });
       }
-      putState.run(identity.host, file.path, st.size, mtime, offset, JSON.stringify(state));
-    } catch (err) {
-      result.errors.push({ path: file.path, error: (err as Error).message });
+      opts.onProgress?.(done, files.length);
     }
-    opts.onProgress?.(done, files.length);
+  } finally {
+    commit();
+    db.exec("PRAGMA temp_store = DEFAULT");
   }
 
   // OpenCode and Zed keep a database rather than log files: read what changed since the last scan, when it changed
@@ -178,16 +259,18 @@ export async function scan(
       for (const path of source.find(expandHome(dir))) {
         result.filesSeen++;
         try {
+          if (backingOff(path)) continue;
           const stamp = sqliteStamp(path);
           const prev = getState.get(identity.host, path);
           if (prev && prev.size === stamp.size && prev.mtime === stamp.mtime) continue;
-          let latest = 0;
           db.transaction(() => {
-            latest = source.ingest(path, writer, { since: prev?.offset ?? 0, promptTextLimit: cfg.promptTextLimit });
+            const latest = source.ingest(path, writer, { since: prev?.offset ?? 0, promptTextLimit: cfg.promptTextLimit });
+            putState.run(identity.host, path, stamp.size, stamp.mtime, latest, null);
           })();
-          putState.run(identity.host, path, stamp.size, stamp.mtime, latest, null);
           result.filesParsed++;
+          succeeded(path);
         } catch (err) {
+          failed(path);
           result.errors.push({ path, error: (err as Error).message });
         }
       }
@@ -216,15 +299,20 @@ export async function scan(
   }
   for (const file of jsonFiles) {
     result.filesSeen++;
+    if (backingOff(file.path)) continue;
     try {
       const stamp = fileStamp(file.path);
       if (!stamp) continue;
       const prev = getState.get(identity.host, file.path);
       if (prev && prev.size === stamp.size && prev.mtime === stamp.mtime) continue;
-      db.transaction(file.ingest)();
-      putState.run(identity.host, file.path, stamp.size, stamp.mtime, 0, null);
+      db.transaction(() => {
+        file.ingest();
+        putState.run(identity.host, file.path, stamp.size, stamp.mtime, 0, null);
+      })();
       result.filesParsed++;
+      succeeded(file.path);
     } catch (err) {
+      failed(file.path);
       result.errors.push({ path: file.path, error: (err as Error).message });
     }
   }
@@ -234,6 +322,8 @@ export async function scan(
   if (result.filesParsed > 0) {
     resolveSpawnRefs(db);
     setMeta(db, `last_scan:${identity.host}`, String(Date.now()));
+    // New rows can change which index suits a query best: the planner's statistics follow when tables grew a lot.
+    optimize(db);
   }
   normalizeProjects(db, identity.host, writer.project);
   applyCodexTitles(db, cfg);

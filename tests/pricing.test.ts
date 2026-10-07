@@ -87,6 +87,32 @@ describe("PriceBook", () => {
     expect(book.cost("some-new-model", { ...zero, input: M }).estimated).toBe(true);
   });
 
+  test.each([
+    ["models/gemini-3.1-pro-preview", 2, 12],
+    ["gemini-2.5-flash-lite", 0.1, 0.4],
+    ["z-ai/glm-4.6", 0.6, 2.2],
+    ["glm-4.5-air", 0.2, 1.1],
+  ])("%p has a price of its own", (model, input, output) => {
+    const hit = book.lookup(model);
+    expect(hit.estimated).toBe(false);
+    expect([hit.price.input, hit.price.output]).toEqual([input, output]);
+  });
+
+  test.each(["qwen3-coder-plus", "gemini-9-ultra", "deepseek-chat", "mistral-large", "grok-4-0709", "kimi-k2-0905"])("unknown %p bills no cache-write premium", (model) => {
+    const c = book.cost(model, { ...zero, cacheWrite: M, cacheWrite1h: M });
+    const input = book.cost(model, { ...zero, input: M });
+    expect(c.estimated).toBe(true);
+    expect(c.usd).toBeCloseTo(input.usd * 2, 6);
+  });
+
+  test("unknown Claude models and missing ids keep Anthropic's cache-write multipliers", () => {
+    for (const model of ["claude-sonnet-9", null]) {
+      const c = book.cost(model, { ...zero, cacheWrite: M, cacheWrite1h: M });
+      expect(c.estimated).toBe(true);
+      expect(c.usd).toBeCloseTo(3 * 1.25 + 3 * 2, 6);
+    }
+  });
+
   test("synthetic messages are free", () => {
     expect(book.cost("<synthetic>", { ...zero, input: M }).usd).toBe(0);
   });

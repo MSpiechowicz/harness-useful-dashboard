@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { memo } from "./cache.ts";
 import { type Bucket, bucketExpr, fillBuckets, type Filters, projectLabel, sessionTitle, whereClause } from "./queries.ts";
 
 type Params = Record<string, string | number | null>;
@@ -33,6 +34,10 @@ export function rejectRate(c: FrictionCounts): number | null {
  * and session. Outcomes carry no skill, so that filter doesn't apply.
  */
 export function friction(db: Database, f: Filters, bucket: Bucket) {
+  return memo(db, `friction:${bucket}:${JSON.stringify(f)}`, () => computeFriction(db, f, bucket));
+}
+
+function computeFriction(db: Database, f: Filters, bucket: Bucket) {
   const { skill: _skill, ...rest } = f;
   const w = whereClause(rest, "o");
   const all = <T>(sql: string, params: Params = w.params) => db.query<T, Params>(sql).all(params);
@@ -53,18 +58,23 @@ export function friction(db: Database, f: Filters, bucket: Bucket) {
   const noisy = "HAVING errors + rejected + interrupts > 0";
   // Codex names its tool results differently from its tool calls: those outcomes have no tool to go with.
   const tools = all<FrictionCounts & { key: string | null }>(
-    `SELECT t.tool AS key, ${COUNTS} FROM outcomes o LEFT JOIN tool_calls t ON t.id = o.id
+    `SELECT o.tool AS key, ${COUNTS} FROM outcomes o
      ${w.sql ? `${w.sql} AND` : "WHERE"} o.kind <> 'interrupt' GROUP BY key ORDER BY errors + rejected DESC, ok DESC LIMIT 50`,
   ).map((r) => withRates({ ...r, key: r.key ?? "(none)" }));
   const models = all<FrictionCounts & { key: string | null }>(`SELECT o.model AS key, ${COUNTS} FROM outcomes o ${w.sql} GROUP BY key ORDER BY errors + rejected + interrupts DESC`).map((r) =>
     withRates({ ...r, key: r.key ?? "(none)" }),
   );
-  // Subagent sessions count toward the session that started them, which is the one to open.
+  // Subagent sessions count toward the session that started them, which is the one to open. Outcomes are counted per
+  // session first and titles looked up for the sessions listed only: per outcome row, both lookups cost seconds.
   const sessions = all<FrictionCounts & { id: string; title: string | null; project: string | null; provider: string; lastTs: number }>(
-    `SELECT COALESCE(s.parent_session_id, o.session_id) AS id, MAX(${sessionTitle("root")}) AS title, MAX(root.project) AS project,
-            MAX(o.provider) AS provider, MAX(o.ts) AS lastTs, ${COUNTS}
-     FROM outcomes o LEFT JOIN sessions s ON s.id = o.session_id LEFT JOIN sessions root ON root.id = COALESCE(s.parent_session_id, o.session_id)
-     ${w.sql} GROUP BY 1 ${noisy} ORDER BY errors + rejected + interrupts DESC LIMIT 100`,
+    `SELECT g.id, ${sessionTitle("root")} AS title, root.project, g.provider, g.lastTs, g.ok, g.errors, g.rejected, g.interrupts
+     FROM (SELECT COALESCE(s.parent_session_id, x.session_id) AS id, MAX(x.provider) AS provider, MAX(x.lastTs) AS lastTs,
+                  SUM(x.ok) AS ok, SUM(x.errors) AS errors, SUM(x.rejected) AS rejected, SUM(x.interrupts) AS interrupts
+           FROM (SELECT o.session_id, MAX(o.provider) AS provider, MAX(o.ts) AS lastTs, ${COUNTS} FROM outcomes o ${w.sql} GROUP BY o.session_id) x
+           LEFT JOIN sessions s ON s.id = x.session_id
+           GROUP BY 1 ${noisy} ORDER BY errors + rejected + interrupts DESC LIMIT 100) g
+     LEFT JOIN sessions root ON root.id = g.id
+     ORDER BY g.errors + g.rejected + g.interrupts DESC`,
   ).map((r) => withRates({ ...r, projectLabel: projectLabel(r.project) }));
 
   return {

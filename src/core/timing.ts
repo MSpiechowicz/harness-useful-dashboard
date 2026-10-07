@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { memo } from "./cache.ts";
 import { median } from "./drift.ts";
 import { type Bucket, fillBuckets, type Filters, projectLabel, whereClause } from "./queries.ts";
 
@@ -99,6 +100,11 @@ function spansBy(rows: Response[], key: (r: Response) => string): Map<string, [n
  * harness logs when they started and ended count.
  */
 export function timing(db: Database, f: Filters, bucket: Bucket) {
+  // Every timed response in the range is read: kept until the data changes.
+  return memo(db, `timing:${bucket}:${JSON.stringify(f)}`, () => computeTiming(db, f, bucket));
+}
+
+function computeTiming(db: Database, f: Filters, bucket: Bucket) {
   const w = whereClause(f);
   const cond = `m.start_ts IS NOT NULL AND m.end_ts > m.start_ts AND m.end_ts - m.start_ts <= ${MAX_RESPONSE_MS}`;
   const rows = db

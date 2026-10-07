@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { type AppConfig, loadConfig, resolveDbPath, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
 import { getMeta, openDb, setMeta } from "../core/db.ts";
@@ -8,6 +8,7 @@ import { activePlans, LimitsCache } from "../core/limits.ts";
 import { localIdentity } from "../core/paths.ts";
 import { BUILTIN_PRICES_VERSION, PriceBook } from "../core/pricing.ts";
 import { recomputeCosts } from "../core/ingest/writer.ts";
+import { redactStored } from "../core/redact.ts";
 import { Queries } from "../core/queries.ts";
 
 /** How often plan limits are read in the background, for the history on the plans view. */
@@ -33,7 +34,12 @@ export class App {
   private limitTimer: ReturnType<typeof setInterval> | null = null;
   /** Plan-limit readings, shared by the API and the background poll so providers are asked sparingly. */
   readonly limits = new LimitsCache();
+  /** The database file's identity on disk when it was opened, to notice a sync client replacing it. */
+  private dbFile: string | null = null;
   private scanning: Promise<ScanResult> | null = null;
+  private scanningFull = false;
+  /** A full rescan asked for while an incremental scan was running: it runs right after that one. */
+  private queuedFull: Promise<ScanResult> | null = null;
   lastScan: ScanResult | null = null;
   lastScanAt: number | null = null;
 
@@ -50,6 +56,7 @@ export class App {
     const { path, isDefault } = resolveDbPath(this.cfg, this.cliDbPath);
     this.db = openDb(path, { journalMode: this.cfg.journalMode, isDefaultPath: isDefault });
     this.dbPath = path;
+    this.dbFile = fileId(path);
     this.prices = PriceBook.fromDb(this.db);
     // History priced with an older built-in table is re-priced once. Only upwards, so machines on an older version
     // sharing the database don't undo it.
@@ -59,6 +66,7 @@ export class App {
         setMeta(this.db, "builtin_prices", String(BUILTIN_PRICES_VERSION));
       })();
     }
+    redactStored(this.db);
     this.queries = new Queries(this.db, () => this.prices);
     const last = getMeta(this.db, `last_scan:${this.identity.host}`);
     this.lastScanAt = last ? Number(last) : null;
@@ -88,9 +96,23 @@ export class App {
     }
   }
 
-  /** Runs one incremental scan; concurrent callers share the in-flight scan. */
+  /**
+   * Runs one incremental scan; concurrent callers share the in-flight scan. A full rescan asked for during an
+   * incremental one is queued behind it rather than answered by it, or Settings → Full rescan would do nothing.
+   */
   scanNow(full = false): Promise<ScanResult> {
-    if (this.scanning) return this.scanning;
+    if (this.scanning) {
+      if (!full || this.scanningFull) return this.scanning;
+      this.queuedFull ??= this.scanning
+        .catch(() => {})
+        .then(() => {
+          this.queuedFull = null;
+          return this.scanNow(true);
+        });
+      return this.queuedFull;
+    }
+    this.reopenIfReplaced();
+    this.scanningFull = full;
     let lastEmit = 0;
     this.scanning = scan(this.db, this.cfg, this.identity, {
       full,
@@ -112,6 +134,18 @@ export class App {
         this.scanning = null;
       });
     return this.scanning;
+  }
+
+  /**
+   * Some sync clients update a file by writing a new copy and renaming it over the old one. The open connection would
+   * go on reading and writing the old, unlinked file: open the one now at the path instead. Checked before each scan,
+   * when nothing else is using the connection.
+   */
+  private reopenIfReplaced(): void {
+    if (this.dbFile == null || fileId(this.dbPath) === this.dbFile || !existsSync(this.dbPath)) return;
+    this.db.close();
+    this.openDatabase();
+    this.emit({ type: "db-changed", path: this.dbPath });
   }
 
   get isScanning(): boolean {
@@ -186,5 +220,15 @@ export class App {
   close(): void {
     this.stopBackgroundScan();
     this.db.close();
+  }
+}
+
+/** Device and inode of a file, or null when it has none (an in-memory database, a missing file). */
+function fileId(path: string): string | null {
+  try {
+    const st = statSync(path);
+    return st.ino ? `${st.dev}:${st.ino}` : null;
+  } catch {
+    return null;
   }
 }

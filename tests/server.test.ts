@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "../src/cli.ts";
 import { parseSettings, scanInterval } from "../src/core/config.ts";
+import { getMeta } from "../src/core/db.ts";
 import { ensureAppDataDir } from "../src/core/paths.ts";
 import { App } from "../src/server/app.ts";
 import { createHandler, parseFilters } from "../src/server/http.ts";
@@ -123,6 +125,29 @@ describe("HTTP API", () => {
   });
 
   const get = (path: string, host = "localhost:4317") => handle(new Request(`http://${host}${path}`, { headers: { host } }));
+
+  // Windows doesn't let a file that is open be replaced, so a sync client can't do it there either.
+  test.skipIf(process.platform === "win32")("a database file replaced on disk is opened again before the next scan", async () => {
+    const path = app.dbPath;
+    const copy = `${path}.synced`;
+    app.db.query("VACUUM INTO ?").run(copy);
+    const other = new Database(copy);
+    other.exec("INSERT INTO meta (key, value) VALUES ('marker', 'from another machine')");
+    other.close();
+    renameSync(copy, path);
+    await app.scanNow();
+    expect(getMeta(app.db, "marker")).toBe("from another machine");
+    expect(((await (await get("/api/summary")).json()) as { messages: number }).messages).toBe(1);
+  });
+
+  test("a full rescan asked for during a scan runs after it, not as part of it", async () => {
+    const running = app.scanNow();
+    const full = app.scanNow(true);
+    expect(full).not.toBe(running);
+    expect(app.scanNow(true)).toBe(full);
+    expect((await running).filesParsed).toBe(0);
+    expect((await full).filesParsed).toBeGreaterThan(0);
+  });
 
   test("serves JSON endpoints", async () => {
     for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/files", "/api/files/hotspots?project=%2Fwork%2Falpha", "/api/files/list?q=a", "/api/cache", "/api/drift", "/api/tips", "/api/filters", "/api/settings", "/api/pricing"]) {

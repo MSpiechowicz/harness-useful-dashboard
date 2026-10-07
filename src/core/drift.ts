@@ -375,14 +375,25 @@ export function drift(db: Database, f: Filters, opts: { model?: string | null; e
       )
       .all({ ...uAll.params, model })
       .map((r) => r.effort);
-    // The first day each client version answered with this model: harness updates, marked on the charts.
+    // The first day each client version that answered with this model in the window was seen: harness updates,
+    // marked on the charts. First-seen days come from the sessions, which is far smaller than every response ever.
     const firstDay = new Set(days);
+    const used = new Set(
+      db
+        .query<{ client: string | null; version: string }, [string, number]>(
+          `SELECT DISTINCT s.client, s.client_version AS version FROM usage u JOIN sessions s ON s.id = u.session_id
+           WHERE u.model = ? AND u.ts >= ? AND s.client_version IS NOT NULL`,
+        )
+        .all(model, baselineFrom)
+        .map((v) => `${v.client ?? ""}\n${v.version}`),
+    );
     versions = db
-      .query<{ client: string | null; version: string; first: number }, [string]>(
-        `SELECT s.client, s.client_version AS version, MIN(u.ts) AS first FROM usage u JOIN sessions s ON s.id = u.session_id
-         WHERE u.model = ? AND s.client_version IS NOT NULL GROUP BY s.client, s.client_version ORDER BY first`,
+      .query<{ client: string | null; version: string; first: number }, []>(
+        `SELECT client, client_version AS version, MIN(started_at) AS first FROM sessions
+         WHERE client_version IS NOT NULL AND started_at IS NOT NULL GROUP BY client, client_version ORDER BY first`,
       )
-      .all(model)
+      .all()
+      .filter((v) => used.has(`${v.client ?? ""}\n${v.version}`))
       .map((v) => ({ day: dayKey(v.first), label: `${v.client ?? ""} ${v.version}`.trim() }))
       .filter((v) => firstDay.has(v.day) && v.day !== days[0])
       .slice(-15);
