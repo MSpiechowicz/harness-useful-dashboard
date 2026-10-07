@@ -54,7 +54,7 @@
 </script>
 
 <script lang="ts">
-  import { Check, TrendingDown } from "@lucide/svelte";
+  import { MoveRight, TrendingDown } from "@lucide/svelte";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, relative, until } from "../lib/format.ts";
 
@@ -111,7 +111,7 @@
             </span>
           </div>
           <!-- What's left ending short of the time left means the limit runs out before the window does: the gap between
-               them is hatched, and the tick and the note share the warning colour. -->
+               them is hatched, and the tick and the note share the warning colour. On pace, both are white. -->
           <div class="relative">
             <div class="relative h-2 overflow-hidden rounded-full bg-surface-3">
               <div class="h-full rounded-full transition-[width] duration-500" style:width={l > 0 ? `max(${l * 100}%, 4px)` : "0"} style:background={fill(l, r.provider)}></div>
@@ -128,8 +128,8 @@
           </div>
           {#if p?.outAt != null}
             {@const out = p.outAt < (w.resetsAt ?? 0)}
-            <div class="flex items-center gap-1.5 text-[11px] {out ? 'text-warn' : 'text-muted'}">
-              {#if out}<TrendingDown class="size-3.5 shrink-0" aria-hidden="true" />{:else}<Check class="size-3.5 shrink-0" aria-hidden="true" />{/if}
+            <div class="flex items-center gap-1.5 text-[11px] {out ? 'text-warn' : 'text-ink'}">
+              {#if out}<TrendingDown class="size-3.5 shrink-0" aria-hidden="true" />{:else}<MoveRight class="size-3.5 shrink-0" aria-hidden="true" />{/if}
               <span>{out ? t("live.pace.out", { time: clock(p.outAt) }) : t("live.pace.lasts")}</span>
             </div>
           {/if}
