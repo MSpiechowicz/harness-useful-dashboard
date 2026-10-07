@@ -7,6 +7,7 @@
  */
 import { rmSync } from "node:fs";
 import { openDb } from "../src/core/db.ts";
+import { apiErrorOf } from "../src/core/apiErrors.ts";
 import { failureOf } from "../src/core/failures.ts";
 import type { Provider } from "../src/core/ingest/types.ts";
 import { DbWriter, resolveSpawnRefs } from "../src/core/ingest/writer.ts";
@@ -134,11 +135,52 @@ function demoFailure(kind: string, tool: string, file: string | null) {
   return failureOf(kind, tool, kind === "tool_rejected" ? DECLINED : error!, input, 2000);
 }
 
+/**
+ * Model requests that failed, as each harness words them: drawn from a generator of their own too, so the rest of the
+ * picture stays the same as before API errors were read.
+ */
+let apiSeed = 11;
+const apiRand = () => {
+  apiSeed = (Math.imul(apiSeed, 1103515245) + 12345) | 0;
+  return ((apiSeed >>> 0) % 1_000_003) / 1_000_003;
+};
+const API_ERRORS: Partial<Record<Provider, [weight: number, message: string][]>> = {
+  claude: [
+    [5, 'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'],
+    [3, 'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed the rate limit for your organization of 80,000 output tokens per minute."}}'],
+    [2, "API Error: Request timed out."],
+    [1, 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'],
+    [1, "API Error: Connection error."],
+    [1, 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 204512 tokens > 200000 maximum"}}'],
+  ],
+  codex: [
+    [3, "stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"],
+    [2, "exceeded retry limit, last status: 429 Too Many Requests"],
+    [1, "You've hit your usage limit. Upgrade to Pro or try again in 2 hours."],
+    [1, "unexpected status 503 Service Unavailable: upstream connect error or disconnect/reset before headers"],
+  ],
+  omp: [
+    [2, "Codex error event: The usage limit has been reached (code=usage_limit_reached)"],
+    [1, "getaddrinfo ENOTFOUND chatgpt.com"],
+  ],
+  opencode: [
+    [2, "Provider returned error: 429 rate_limit_exceeded"],
+    [1, "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."],
+  ],
+};
+function demoApiError(provider: Provider, drifting: boolean) {
+  const options = API_ERRORS[provider] ?? API_ERRORS.claude!;
+  if (apiRand() >= (drifting ? 0.03 : 0.012)) return null;
+  let r = apiRand() * options.reduce((a, [w]) => a + w, 0);
+  const message = options.find(([w]) => (r -= w) < 0)?.[1] ?? options[0]![1];
+  return apiErrorOf(null, null, message, 2000);
+}
+
 /** Who works where, with what: each person has their own tools and habits. */
 const PEOPLE = [
   { user: "alex", host: "alex-mbp", weight: 5, harness: [["claude", 6], ["codex", 2], ["omp", 1], ["pi", 1]] as [Provider, number][] },
-  { user: "sam", host: "sam-desktop", weight: 3, harness: [["codex", 5], ["claude", 2], ["opencode", 1], ["cline", 1], ["kilo", 1]] as [Provider, number][] },
-  { user: "priya", host: "priya-laptop", weight: 2, harness: [["omp", 3], ["opencode", 2], ["claude", 2], ["zed", 1], ["roo", 1]] as [Provider, number][] },
+  { user: "sam", host: "sam-desktop", weight: 3, harness: [["codex", 5], ["claude", 2], ["opencode", 1], ["cline", 1], ["kilo", 1], ["gemini", 2]] as [Provider, number][] },
+  { user: "priya", host: "priya-laptop", weight: 2, harness: [["omp", 3], ["opencode", 2], ["claude", 2], ["zed", 1], ["roo", 1], ["copilot", 2]] as [Provider, number][] },
 ];
 const MODELS: Record<Provider, [string, number][]> = {
   claude: [["claude-opus-5-5", 5], ["claude-sonnet-5-5", 4], ["claude-haiku-4-5", 1]],
@@ -151,10 +193,13 @@ const MODELS: Record<Provider, [string, number][]> = {
   cline: [["claude-sonnet-5-5", 2], ["claude-opus-5-5", 1]],
   roo: [["claude-sonnet-5-5", 2], ["gpt-5", 1]],
   kilo: [["claude-sonnet-5-5", 1], ["gpt-5-codex", 1]],
+  gemini: [["gemini-3.5-flash", 3], ["gemini-3.1-pro-preview", 2]],
+  copilot: [["claude-sonnet-5-5", 3], ["gpt-5", 2]],
 };
 /** Output tokens per second each model usually streams at, for the drift view. */
 const SPEED: Record<string, number> = {
   "claude-opus-5-5": 55, "claude-sonnet-5-5": 80, "claude-haiku-4-5": 140, "gpt-5-codex": 50, "gpt-5": 60, "gpt-5-mini": 120,
+  "gemini-3.5-flash": 150, "gemini-3.1-pro-preview": 70,
 };
 const EFFORT: Partial<Record<Provider, [string, number][]>> = {
   claude: [["high", 3], ["xhigh", 2]],
@@ -169,6 +214,7 @@ const BILLING: Record<string, [string, number][]> = {
   omp: [["github-copilot", 5], ["anthropic", 3], ["openai-codex", 2]],
   pi: [["anthropic", 3], ["openai-codex", 1]],
   opencode: [["anthropic", 2], ["github-copilot", 2], ["openai", 1]],
+  copilot: [["github-copilot", 1]],
 };
 
 rmSync(out, { force: true });
@@ -213,6 +259,9 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
       ts = started + took;
       if (opts.until && ts > opts.until) break;
       const usageId = `${sessionId}:u${p}.${c}`;
+      // Now and then the request failed first and was sent again.
+      const failed = demoApiError(provider, drifting);
+      if (failed) w.outcome({ id: `${usageId}:api`, provider, sessionId, ts: started - 2_000, project: project.path, model, agent: "main", effort, ...failed });
       const write = c === 0 ? int(2_000, 12_000) : int(200, 3_000);
       w.usage({
         id: usageId, provider, sessionId, promptId, ts, project: project.path, model, skill, agent: "main", isSubagent: false,
@@ -259,6 +308,60 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
   return ts;
 }
 
+/**
+ * A Claude Code session handing work to subagents in parallel right now, as Claude Code logs it: each subagent's calls
+ * are in the parent's own session, tied to the Agent call that started it and named by what that call asked.
+ */
+function fanOut() {
+  const w = writers.get(PEOPLE[0]!.user)!;
+  const native = id();
+  const sessionId = `claude:${native}`;
+  const project = PROJECTS[1];
+  const start = NOW - 26 * MINUTE;
+  const model = "claude-opus-5-5";
+  w.session({ id: sessionId, provider: "claude", nativeId: native, project: project.path, title: "Audit the invoice service before the release", gitBranch: "release/2.4", client: "claude", clientVersion: "2.1.42", startedAt: start });
+  const promptId = `${sessionId}:p0`;
+  w.prompt({ id: promptId, sessionId, provider: "claude", ts: start, text: "Audit the invoice service before the release", skill: null, isCommand: false });
+  // The main agent plans, starts the subagents, and waits on them.
+  let ts = start;
+  for (let c = 0; c < 6; c++) {
+    ts += int(20, 50) * 1000;
+    const usageId = `${sessionId}:u${c}`;
+    w.usage({ id: usageId, provider: "claude", sessionId, promptId, ts, project: project.path, model, skill: null, agent: "main", isSubagent: false,
+      input: int(20, 400), output: int(200, 1_500), cacheRead: 20_000 + c * 3_000, cacheWrite: int(500, 3_000), cacheWrite1h: 0, reasoning: 0 });
+    w.responseMeta({ usageId, startTs: ts - 8_000, endTs: ts, stopReason: "tool_use" });
+  }
+  const RUNS: [string, string, number, number, boolean][] = [
+    // agent, what it was asked, started and last active (minutes ago), stopped with a failed call
+    ["Explore", "Map the invoice handlers and their callers", 22, 0.25, false],
+    ["Explore", "Find every place credits are applied", 21, 0.6, false],
+    ["general-purpose", "Review the 0042 credits migration", 20, 1, true],
+    ["Plan", "Draft the rollout steps for the credits change", 19, 9, false],
+    ["general-purpose", "Check the Stripe webhook retries and their backoff", 18, 12, true],
+    ["Explore", "List the tests that touch invoices", 17, 14, false],
+  ];
+  RUNS.forEach(([agent, brief, from, to, failing], i) => {
+    const spawn = `${sessionId}:spawn-${i}`;
+    const spawnTs = NOW - from * MINUTE;
+    w.tool({ id: spawn, usageId: `${sessionId}:u5`, sessionId, promptId, provider: "claude", ts: spawnTs, project: project.path, tool: "Agent", filePath: null, skill: null, agent: "main", brief });
+    const end = NOW - to * MINUTE;
+    let t = spawnTs;
+    for (let c = 0; t < end; c++) {
+      t = Math.min(end, t + int(25, 60) * 1000);
+      const usageId = `${sessionId}:a${i}.${c}`;
+      w.usage({ id: usageId, provider: "claude", sessionId, promptId: null, ts: t, project: project.path, model: "claude-sonnet-5-5", skill: null, agent,
+        isSubagent: true, spawnRef: spawn, input: int(20, 300), output: int(100, 900), cacheRead: 8_000 + c * 1_500, cacheWrite: int(300, 1_500), cacheWrite1h: 0, reasoning: 0 });
+      w.responseMeta({ usageId, startTs: t - 6_000, endTs: t, stopReason: t >= end && to > 2 ? "end_turn" : "tool_use" });
+      const tool = pick(["Read", "Grep", "Glob", "Bash"]);
+      const toolId = `${usageId}:t`;
+      w.tool({ id: toolId, usageId, sessionId, promptId: null, provider: "claude", ts: t, project: project.path, tool, filePath: tool === "Read" ? `${project.path}/${pick(project.files)}` : null, skill: null, agent, spawnRef: spawn });
+      const kind = failing && c % 8 === 3 ? "tool_error" : "tool_ok";
+      w.outcome({ id: toolId, provider: "claude", sessionId, ts: t, project: project.path, model: "claude-sonnet-5-5", agent, kind, ...demoFailure(kind, tool, null) });
+    }
+  });
+  w.session({ id: sessionId, provider: "claude", nativeId: native, endedAt: NOW - 15_000 });
+}
+
 db.transaction(() => {
   // Ten weeks of work days: busier on weekdays and lately, quiet at night and on most weekends.
   for (let d = DAYS; d >= 1; d--) {
@@ -275,6 +378,7 @@ db.transaction(() => {
   // The last hour, for the Live view: a Claude Code and a Codex session running side by side right now.
   session(PEOPLE[0]!, NOW - 58 * MINUTE, { provider: "claude", pace: 0.5, until: NOW - 20_000 });
   session(PEOPLE[1]!, NOW - 35 * MINUTE, { provider: "codex", pace: 0.4, until: NOW - 40_000 });
+  fanOut();
   // Codex's own reading of its plan limits, as it logs them.
   writers.get("sam")!.limit({ provider: "codex", windowId: "primary", windowMinutes: 300, usedPercent: 38, resetsAt: NOW + 2 * HOUR + 40 * MINUTE, plan: "pro", ts: NOW - 2 * MINUTE });
   writers.get("sam")!.limit({ provider: "codex", windowId: "secondary", windowMinutes: 10_080, usedPercent: 61, resetsAt: NOW + 3 * DAY, plan: "pro", ts: NOW - 2 * MINUTE });

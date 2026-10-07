@@ -86,10 +86,11 @@ export class DbWriter implements IngestSink {
       WHERE excluded.observed_at >= plan_limits.observed_at
     `);
     this.sTool = db.prepare(`
-      INSERT OR IGNORE INTO tool_calls (id, usage_id, session_id, prompt_id, provider, ts, project, user, tool,
-                                        file_path, skill, agent, spawn_ref)
+      INSERT INTO tool_calls (id, usage_id, session_id, prompt_id, provider, ts, project, user, tool,
+                              file_path, skill, agent, spawn_ref, brief)
       VALUES ($id, $usageId, $sessionId, $promptId, $provider, $ts, $project, $user, $tool, $filePath, $skill,
-              $agent, $spawnRef)
+              $agent, $spawnRef, $brief)
+      ON CONFLICT(id) DO UPDATE SET brief = COALESCE(tool_calls.brief, excluded.brief) WHERE excluded.brief IS NOT NULL
     `);
     this.sMeta = db.prepare(`
       INSERT INTO response_meta (usage_id, start_ts, end_ts, ttft_ms, effort, stop_reason)
@@ -105,12 +106,13 @@ export class DbWriter implements IngestSink {
     // An outcome carries the tool of the call it ended, whichever of the two is written first.
     this.sOutcome = db.prepare(`
       INSERT INTO outcomes (id, provider, session_id, ts, project, user, host, model, agent, effort, kind, tool, reason,
-                            detail, input)
+                            detail, input, status)
       VALUES ($id, $provider, $sessionId, $ts, $project, $user, $host, $model, $agent, $effort, $kind,
-              COALESCE((SELECT t.tool FROM tool_calls t WHERE t.id = $id), $tool), $reason, $detail, $input)
+              COALESCE((SELECT t.tool FROM tool_calls t WHERE t.id = $id), $tool), $reason, $detail, $input, $status)
       ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, model = COALESCE(outcomes.model, excluded.model),
         tool = COALESCE(outcomes.tool, excluded.tool), reason = excluded.reason,
-        detail = COALESCE(excluded.detail, outcomes.detail), input = COALESCE(excluded.input, outcomes.input)
+        detail = COALESCE(excluded.detail, outcomes.detail), input = COALESCE(excluded.input, outcomes.input),
+        status = COALESCE(excluded.status, outcomes.status)
     `);
     this.sOutcomeTool = db.prepare("UPDATE outcomes SET tool = $tool WHERE id = $id AND tool IS NULL");
   }
@@ -202,6 +204,7 @@ export class DbWriter implements IngestSink {
       skill: t.skill,
       agent: t.agent,
       spawnRef: t.spawnRef ?? null,
+      brief: t.brief ?? null,
     });
     this.sOutcomeTool.run({ id: t.id, tool: t.tool });
     this.stats.tools++;
@@ -235,6 +238,7 @@ export class DbWriter implements IngestSink {
       reason: o.reason ?? null,
       detail: o.detail ?? null,
       input: o.input ?? null,
+      status: o.status ?? null,
     });
   }
 

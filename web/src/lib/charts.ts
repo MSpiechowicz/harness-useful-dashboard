@@ -1191,6 +1191,45 @@ export function frictionChart(
   };
 }
 
+/** Failed model requests bucket by bucket, stacked by class (`name` labels a class, `color` paints it). */
+export function apiErrorChart(
+  buckets: string[],
+  series: { key: string; data: number[] }[],
+  bucket: string,
+  name: (key: string) => string,
+  color: (key: string) => string,
+): EChartsOption {
+  const c = chrome();
+  const labels = buckets.map((b) => bucketLabel(b, bucket));
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 8, top: 12, bottom: 4, containLabel: true },
+    legend: htmlLegend(series.map((s) => name(s.key)), series.map((s) => color(s.key))),
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "shadow", shadowStyle: { color: "rgba(127,127,127,0.08)" } },
+      formatter: (params: { dataIndex: number }[]) => {
+        const i = params[0]?.dataIndex ?? 0;
+        const shown = series.filter((s) => s.data[i]! > 0).map((s) => ({ color: color(s.key), name: name(s.key), value: integer(s.data[i]!) }));
+        return tooltipRows(labels[i]!, shown, shown.length > 1 ? integer(series.reduce((a, s) => a + s.data[i]!, 0)) : undefined);
+      },
+    },
+    xAxis: { type: "category", data: labels, axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel },
+    yAxis: { type: "value", minInterval: 1, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
+    series: series.map((s) => ({
+      name: name(s.key),
+      type: "bar",
+      stack: "apiErrors",
+      data: s.data.map((v) => v || null),
+      color: color(s.key),
+      barMaxWidth: BAR_WIDTH,
+      itemStyle: { borderColor: c.surface, borderWidth: 1, borderRadius: 2 },
+    })),
+  };
+}
+
 /**
  * Bucket by bucket, the hours agents were working, stacked by how many sessions ran at once. One session at a time
  * is the neutral data ink and parallel work wears the ramp, so the colored part of a bar is the time work overlapped.

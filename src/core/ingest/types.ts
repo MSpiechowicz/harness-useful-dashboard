@@ -1,6 +1,6 @@
 import { redact } from "../redact.ts";
 
-export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo";
+export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
 
 export interface SessionRecord {
   id: string;
@@ -71,6 +71,8 @@ export interface ToolRecord {
   skill: string | null;
   agent: string;
   spawnRef?: string | null;
+  /** A call that starts a subagent: what it asked of it (its short description, else the start of its prompt). */
+  brief?: string | null;
 }
 
 /** A plan-limit reading a harness logged: how much of a limit window was used and when it resets. */
@@ -103,8 +105,8 @@ export interface ResponseMetaRecord {
   stopReason?: string | null;
 }
 
-/** How a tool call ended, or a prompt the user interrupted. */
-export type OutcomeKind = "tool_ok" | "tool_error" | "tool_rejected" | "interrupt";
+/** How a tool call ended, a prompt the user interrupted, or a model request that failed (see apiErrors.ts). */
+export type OutcomeKind = "tool_ok" | "tool_error" | "tool_rejected" | "interrupt" | "api_error";
 
 export interface OutcomeRecord {
   id: string;
@@ -124,6 +126,8 @@ export interface OutcomeRecord {
   reason?: string | null;
   detail?: string | null;
   input?: string | null;
+  /** A failed model request's HTTP status, when the harness logged one. Its class is the reason, its message the detail. */
+  status?: number | null;
 }
 
 export interface IngestSink {

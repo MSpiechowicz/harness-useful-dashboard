@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
 import { type IngestSink, num, type Provider, truncate } from "./types.ts";
 
@@ -73,6 +74,8 @@ function outputExcludesReasoning(version: string | null): boolean {
 const PATCH_FILE_RE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
 /** A subagent session is titled "<description> (@<agent> subagent)". */
 const SUBAGENT_TITLE_RE = /\(@([\w.-]+) subagent\)\s*$/;
+/** A message's errors that are a failed model request (not the user stopping it, nor the reply running too long). */
+const API_ERRORS = new Set(["APIError", "ProviderAuthError", "ContextOverflowError", "UnknownError"]);
 /** Rows updated a little before the last read are read again: a write in progress then may have been half-seen. */
 const OVERLAP_MS = 5 * 60_000;
 
@@ -182,6 +185,20 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
       const model = typeof m.modelID === "string" ? m.modelID : null;
       if (m.error?.name === "MessageAbortedError") {
         sink.outcome?.({ id: `${oc(row.id)}:interrupt`, provider: flavor.provider, sessionId, ts, project, model, agent, kind: "interrupt" });
+      } else if (typeof m.error?.name === "string" && API_ERRORS.has(m.error.name)) {
+        // The provider failed the request: APIError carries its status and message, the others their message.
+        const e = m.error.data ?? {};
+        const code = m.error.name === "APIError" || m.error.name === "UnknownError" ? null : m.error.name;
+        sink.outcome?.({
+          id: `${oc(row.id)}:api`,
+          provider: flavor.provider,
+          sessionId,
+          ts: typeof m.time?.completed === "number" ? m.time.completed : ts,
+          project,
+          model,
+          agent,
+          ...apiErrorOf(code, typeof e.statusCode === "number" ? e.statusCode : null, typeof e.message === "string" ? e.message : null, opts.promptTextLimit),
+        });
       }
 
       for (const p of parts) {

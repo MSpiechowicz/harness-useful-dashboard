@@ -37,6 +37,8 @@
     exportName?: string;
     /** Server-side tables: every row matching the filters and search, for the export (the card has one page). */
     exportAll?: () => Promise<T[]>;
+    /** The exported rows made from the card's rows, when a table shows more than one line a row (Live's subagents). */
+    exportRows?: (rows: T[]) => unknown[];
     /** The table for the current page: rows to sort, and which slice of them to show. */
     children: Snippet<[{ rows: T[]; offset: number; limit: number | undefined }]>;
   }
@@ -56,6 +58,7 @@
     class: cls = "",
     exportName,
     exportAll,
+    exportRows,
     children,
   }: Props = $props();
 
@@ -79,7 +82,7 @@
   {#snippet actions()}
     <SearchInput bind:value={query} />
     <Dropdown label={t("common.sortBy")} bind:value={sortKey} options={sorts.map((s) => ({ value: s.value, label: s.label }))} onchange={(v) => (asc = !!sorts.find((s) => s.value === v)?.asc)} />
-    {#if exportName}<ExportMenu name={exportName} rows={() => (server && exportAll ? exportAll() : found)} />{/if}
+    {#if exportName}<ExportMenu name={exportName} rows={() => (server && exportAll ? exportAll() : exportRows ? exportRows(found) : found)} />{/if}
   {/snippet}
   {#if found.length}
     <div class="overflow-x-auto transition-opacity" class:loading-dim={loading}>

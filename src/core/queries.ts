@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { homedir } from "node:os";
 import { memo } from "./cache.ts";
+import { storedApiClass } from "./apiErrors.ts";
 import { storedReason } from "./failures.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
 import { type PromptMetric, promptStats } from "./promptStats.ts";
@@ -384,6 +385,81 @@ export class Queries {
   }
 
   /**
+   * A Live session's subagent runs with activity since `from`, newest first: the first LIVE_RUNS of them, and how many
+   * there were. A run is a child session (omp, pi, Codex, OpenCode) or, in Claude Code, the responses of one subagent in
+   * the parent's own log, keyed by the call that started it. A run's cost and tokens are all of its own, like the
+   * session's. Its status follows its own last response, as a session's follows its main agent's.
+   */
+  private liveRuns(id: string, project: string | null, from: number, now: number) {
+    // The run a row belongs to, and the rows of this session's subagents (not its main agent), per table alias.
+    const key = (a: string, spawn: string) =>
+      `CASE WHEN ${a}.session_id = $id THEN COALESCE(${spawn}, 'agent:' || ${a}.agent) ELSE ${a}.session_id END`;
+    const mine = (a: string) =>
+      `((${a}.session_id = $id AND ${a}.agent <> 'main') OR ${a}.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id))`;
+    const p = { id, from };
+    const all = this.all<{
+      key: string; sessionId: string | null; agent: string | null; brief: string | null;
+      tokens: number; cost: number; messages: number; firstTs: number; lastTs: number;
+    }>(
+      `SELECT r.key, r.sessionId, r.agent,
+              CASE WHEN r.sessionId IS NULL THEN (SELECT t.brief FROM tool_calls t WHERE t.id = r.spawnRef) ELSE r.brief END AS brief,
+              r.tokens, r.cost, r.messages, r.firstTs, r.lastTs
+       FROM (SELECT ${key("u", "u.spawn_ref")} AS key, CASE WHEN u.session_id = $id THEN NULL ELSE u.session_id END AS sessionId,
+                    MAX(u.spawn_ref) AS spawnRef, COALESCE(NULLIF(MAX(s.agent), ''), MAX(u.agent)) AS agent,
+                    COALESCE(NULLIF(MAX(s.brief), ''), NULLIF(MAX(s.title), '')) AS brief,
+                    SUM(u.total_tokens) AS tokens, SUM(u.cost_usd) AS cost, COUNT(*) AS messages, MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
+             FROM usage u JOIN sessions s ON s.id = u.session_id
+             WHERE ${mine("u")} GROUP BY key HAVING lastTs >= $from) r
+       ORDER BY r.lastTs DESC`,
+      p,
+    );
+    const shown = all.slice(0, Queries.LIVE_RUNS);
+    if (!shown.length) return { runs: [], runCount: 0 };
+    // Each run's last response, last tool call and failed calls in the window: one query each for all of them.
+    const stops = new Map(
+      this.all<{ key: string; stop: string | null }>(
+        `SELECT key, stop FROM (
+           SELECT ${key("u", "u.spawn_ref")} AS key, m.stop_reason AS stop, ROW_NUMBER() OVER (PARTITION BY ${key("u", "u.spawn_ref")} ORDER BY u.ts DESC) AS n
+           FROM usage u LEFT JOIN response_meta m ON m.usage_id = u.id WHERE ${mine("u")} AND u.ts >= $from
+         ) WHERE n = 1`,
+        p,
+      ).map((r) => [r.key, r.stop]),
+    );
+    const tools = new Map(
+      this.all<{ key: string; tool: string; file: string | null }>(
+        `SELECT key, tool, file FROM (
+           SELECT ${key("t", "t.spawn_ref")} AS key, t.tool, t.file_path AS file, ROW_NUMBER() OVER (PARTITION BY ${key("t", "t.spawn_ref")} ORDER BY t.ts DESC) AS n
+           FROM tool_calls t WHERE ${mine("t")} AND t.ts >= $from
+         ) WHERE n = 1`,
+        p,
+      ).map((r) => [r.key, r]),
+    );
+    const errors = new Map(
+      this.all<{ key: string; n: number }>(
+        `SELECT ${key("o", "t.spawn_ref")} AS key, COUNT(*) AS n
+         FROM outcomes o LEFT JOIN tool_calls t ON t.id = o.id
+         WHERE ${mine("o")} AND o.ts >= $from AND o.kind = 'tool_error' GROUP BY key`,
+        p,
+      ).map((r) => [r.key, r.n]),
+    );
+    return {
+      runs: shown.map((r) => {
+        const tool = tools.get(r.key);
+        return {
+          ...r,
+          status: liveStatus(r.lastTs, stops.get(r.key) ?? null, now),
+          lastTool: tool?.tool ?? null,
+          lastFile: tool?.file ? relativeTo(tool.file, project) : null,
+          errors: errors.get(r.key) ?? 0,
+        };
+      }),
+      runCount: all.length,
+    };
+  }
+  /** How many subagent runs Live lists under a session. The rest are counted. */
+  private static readonly LIVE_RUNS = 8;
+
+  /**
    * The last `minutes` minute by minute, for the Live view: tokens per minute by provider, and the sessions with
    * activity in that time. A subagent's usage counts toward the session that started it, as one line.
    */
@@ -409,6 +485,7 @@ export class Queries {
     const sessions = this.all<{
       id: string; title: string | null; project: string | null; provider: string; gitBranch: string | null;
       tokens: number; cost: number; messages: number; subagents: number; model: string | null; firstTs: number; lastTs: number;
+      ownTokens: number; ownCost: number;
     }>(
       `WITH active AS (
          SELECT DISTINCT COALESCE(s.parent_session_id, u.session_id) AS id
@@ -417,6 +494,8 @@ export class Queries {
        SELECT a.id, ${sessionTitle("root")} AS title, root.project, root.provider, root.git_branch AS gitBranch,
               COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost, COUNT(u.id) AS messages,
               COUNT(DISTINCT CASE WHEN u.session_id <> a.id THEN u.session_id END) AS subagents,
+              COALESCE(SUM(CASE WHEN u.session_id = a.id AND u.agent = 'main' THEN u.total_tokens END), 0) AS ownTokens,
+              COALESCE(SUM(CASE WHEN u.session_id = a.id AND u.agent = 'main' THEN u.cost_usd END), 0) AS ownCost,
               (SELECT u2.model FROM usage u2 WHERE u2.session_id = a.id ORDER BY u2.ts DESC LIMIT 1) AS model,
               MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
        FROM active a
@@ -447,11 +526,12 @@ export class Queries {
          FROM usage u WHERE ${tree} AND u.ts >= $recent AND (u.session_id <> $id OR u.agent <> 'main')`,
         p,
       )!.n;
-      const errors = this.get<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM outcomes o
-         WHERE (o.session_id = $id OR o.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id)) AND o.ts >= $from AND o.kind = 'tool_error'`,
+      const { errors, apiErrors } = this.get<{ errors: number; apiErrors: number }>(
+        `SELECT COALESCE(SUM(o.kind = 'tool_error'), 0) AS errors, COALESCE(SUM(o.kind = 'api_error'), 0) AS apiErrors FROM outcomes o
+         WHERE (o.session_id = $id OR o.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id)) AND o.ts >= $from
+           AND o.kind IN ('tool_error', 'api_error')`,
         p,
-      )!.n;
+      )!;
       return {
         ...r,
         projectLabel: projectLabel(r.project),
@@ -460,31 +540,34 @@ export class Queries {
         lastFile: tool?.file ? relativeTo(tool.file, r.project) : null,
         activeSubagents: active,
         errors,
+        apiErrors,
+        ...this.liveRuns(r.id, r.project, from, now),
       };
     });
 
-    // The latest happenings across sessions: prompts sent, tool calls that failed or were declined, prompts stopped.
-    // A failed call says why (failures.ts) and what its error was, and what it was given.
+    // The latest happenings across sessions: prompts sent, tool calls that failed or were declined, prompts stopped, model
+    // requests that failed. A failed call says why (failures.ts) and what its error was, and what it was given, a failed
+    // request its class (apiErrors.ts), status and message.
     const feed = this.all<{
       ts: number; kind: string; text: string | null; tool: string | null; reason: string | null; detail: string | null; input: string | null;
-      sessionId: string; title: string | null; provider: string;
+      status: number | null; model: string | null; sessionId: string; title: string | null; provider: string;
     }>(
       `SELECT * FROM (
-         SELECT p.ts, 'prompt' AS kind, p.text, NULL AS tool, NULL AS reason, NULL AS detail, NULL AS input, p.session_id AS sessionId,
-                ${sessionTitle("s")} AS title, p.provider
+         SELECT p.ts, 'prompt' AS kind, p.text, NULL AS tool, NULL AS reason, NULL AS detail, NULL AS input, NULL AS status, NULL AS model,
+                p.session_id AS sessionId, ${sessionTitle("s")} AS title, p.provider
          FROM prompts p JOIN sessions s ON s.id = p.session_id WHERE p.ts >= $from
          UNION ALL
-         SELECT o.ts, o.kind, NULL AS text, COALESCE(o.tool, t.tool) AS tool, o.reason, o.detail, o.input,
+         SELECT o.ts, o.kind, NULL AS text, COALESCE(o.tool, t.tool) AS tool, o.reason, o.detail, o.input, o.status, o.model,
                 COALESCE(s.parent_session_id, o.session_id) AS sessionId, ${sessionTitle("root")} AS title, o.provider
          FROM outcomes o LEFT JOIN tool_calls t ON t.id = o.id LEFT JOIN sessions s ON s.id = o.session_id
          LEFT JOIN sessions root ON root.id = COALESCE(s.parent_session_id, o.session_id)
-         WHERE o.ts >= $from AND o.kind IN ('tool_error', 'tool_rejected', 'interrupt')
+         WHERE o.ts >= $from AND o.kind IN ('tool_error', 'tool_rejected', 'interrupt', 'api_error')
        ) ORDER BY ts DESC LIMIT 300`,
       { from },
     ).map((e) => ({
       ...e,
       text: e.text ? e.text.replace(/\s+/g, " ").slice(0, 140) : null,
-      reason: e.kind === "tool_error" || e.kind === "tool_rejected" ? storedReason(e.kind, e.reason) : null,
+      reason: e.kind === "tool_error" || e.kind === "tool_rejected" ? storedReason(e.kind, e.reason) : e.kind === "api_error" ? storedApiClass(e.reason) : null,
     }));
 
     // Today so far, and a typical day up to the same time: the median of the last 14 days with any use.

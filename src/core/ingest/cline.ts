@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
 import type { OpencodeFlavor } from "./opencode.ts";
 import { type IngestSink, num, type Provider, truncate } from "./types.ts";
@@ -235,6 +236,20 @@ export function ingestClineTask(task: ClineTask, sink: IngestSink, opts: { promp
       if (info.cancelReason === "user_cancelled") {
         sink.outcome?.({ id: `${usageId}:interrupt`, provider, sessionId, ts, project, model: m.modelInfo?.modelId ?? modelAt(timeline, ts), agent, kind: "interrupt" });
       }
+      continue;
+    }
+    // A model call that failed: the extension asks whether to retry, with the provider's error as the text.
+    if (m.type === "ask" && m.ask === "api_req_failed") {
+      sink.outcome?.({
+        id: `${sessionId}:${ts}:api`,
+        provider,
+        sessionId,
+        ts,
+        project,
+        model: m.modelInfo?.modelId ?? modelAt(timeline, ts),
+        agent,
+        ...apiErrorOf(null, null, typeof m.text === "string" ? m.text : null, opts.promptTextLimit),
+      });
       continue;
     }
     // Tool calls the user was asked to approve, or that ran on their own.

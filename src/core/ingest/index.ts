@@ -8,6 +8,8 @@ import { PriceBook } from "../pricing.ts";
 import { normalizeProjects } from "../project.ts";
 import { claudeParser } from "./claude.ts";
 import { codexParser } from "./codex.ts";
+import { copilotParser } from "./copilot.ts";
+import { geminiParser, ingestGeminiJson } from "./gemini.ts";
 import { ompParser, piParser } from "./omp.ts";
 import { ingestOpencode, opencodeDatabases, sqliteStamp } from "./opencode.ts";
 import { ingestZed, zedDatabases } from "./zed.ts";
@@ -65,6 +67,17 @@ export async function discoverFiles(cfg: AppConfig): Promise<SourceFile[]> {
       const root = resolve(expandHome(dir));
       if (ompRoots.includes(root)) continue;
       for (const path of await listFiles(root, ["**/*.jsonl"])) files.push({ path, parser: piParser });
+    }
+  }
+  if (cfg.sources.enabled.gemini) {
+    // Chats since v0.39, a subagent's in a folder named after its parent. Older .json chats are read whole, below.
+    for (const dir of cfg.sources.geminiDirs ?? []) {
+      for (const path of await listFiles(expandHome(dir), ["tmp/*/chats/*.jsonl", "tmp/*/chats/*/*.jsonl"])) files.push({ path, parser: geminiParser });
+    }
+  }
+  if (cfg.sources.enabled.copilot) {
+    for (const dir of cfg.sources.copilotDirs ?? []) {
+      for (const path of await listFiles(expandHome(dir), ["session-state/*/events.jsonl"])) files.push({ path, parser: copilotParser });
     }
   }
   // Parse main transcripts before subagent transcripts so spawn refs resolve in one pass.
@@ -332,6 +345,14 @@ export async function scan(
           ingestClineSession(file, index.get(file.sessionId), writer, { promptTextLimit: cfg.promptTextLimit, legacyUntil: legacy ? taskLastTs(legacy) : 0 });
         },
       });
+    }
+  }
+  // Gemini CLI chats from before v0.39: one JSON object each.
+  if (cfg.sources.enabled.gemini) {
+    for (const dir of cfg.sources.geminiDirs ?? []) {
+      for (const path of await listFiles(expandHome(dir), ["tmp/*/chats/*.json", "tmp/*/chats/*/*.json"])) {
+        jsonFiles.push({ path, ingest: () => ingestGeminiJson(path, writer, { promptTextLimit: cfg.promptTextLimit }) });
+      }
     }
   }
   for (const file of jsonFiles) {

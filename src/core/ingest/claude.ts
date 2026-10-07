@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
+import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
 import {
   type FileContext,
@@ -99,6 +100,11 @@ export function parseClaudePrompt(content: unknown): ParsedPrompt | null {
   return { text, command: null };
 }
 
+/** The tools that start a subagent (Task in older Claude Code versions). */
+const SPAWN_TOOLS = new Set(["Agent", "Task"]);
+/** A text input's first line, if it has any words. */
+const firstText = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim().split("\n")[0]!.trim() || null : null);
+
 function subagentInfo(path: string): { agent: string | null; spawnRef: string | null } {
   const name = basename(path);
   if (!name.startsWith("agent-")) return { agent: null, spawnRef: null };
@@ -138,6 +144,24 @@ export const claudeParser: LineParser<ClaudeState> = {
       if (rec.type === "ai-title" || rec.type === "custom-title" || rec.type === "summary") {
         const title = rec.customTitle ?? rec.aiTitle ?? rec.summary;
         if (typeof title === "string" && !sidechain) sessions.touch({ id: sessionId, provider: "claude", nativeId: nativeSession, title });
+        continue;
+      }
+      // A request the API turned down that Claude Code then retried (older versions log each attempt).
+      if (rec.type === "system" && rec.subtype === "api_error" && ts != null) {
+        const e = rec.error ?? {};
+        const body = e.error?.error ?? e.error ?? {};
+        const message = [body.message, e.message, rec.cause?.message, rec.cause?.code].find((v) => typeof v === "string" && v.trim()) ?? null;
+        sink.outcome?.({
+          id: `${sessionId}:${rec.uuid ?? ts}:api`,
+          provider: "claude",
+          sessionId,
+          ts,
+          project: rec.cwd ?? null,
+          model: state.model ?? null,
+          agent,
+          effort: state.effort ?? null,
+          ...apiErrorOf(typeof body.type === "string" ? body.type : null, typeof e.status === "number" ? e.status : null, message, ctx.promptTextLimit),
+        });
         continue;
       }
       if (rec.type !== "user" && rec.type !== "assistant") continue;
@@ -199,6 +223,27 @@ export const claudeParser: LineParser<ClaudeState> = {
 
       // assistant
       const msg = rec.message ?? {};
+      // A request that failed for good: Claude Code shows its error as a reply ("API Error: 529 …", "Request timed out",
+      // "Login expired"), with the error's name and status beside it. The reply's model is "<synthetic>", so the error
+      // goes to the model the session was using.
+      if (rec.isApiErrorMessage === true && ts != null) {
+        sink.outcome?.({
+          id: `${sessionId}:${rec.uuid ?? ts}:api`,
+          provider: "claude",
+          sessionId,
+          ts,
+          project: rec.cwd ?? null,
+          model: state.model ?? null,
+          agent,
+          effort: state.effort ?? null,
+          ...apiErrorOf(
+            typeof rec.error === "string" ? rec.error : typeof rec.apiErrorCode === "string" ? rec.apiErrorCode : null,
+            typeof rec.apiErrorStatus === "number" ? rec.apiErrorStatus : null,
+            textOf(msg.content),
+            ctx.promptTextLimit,
+          ),
+        });
+      }
       const usage = msg.usage;
       if (!usage || ts == null) continue;
       const usageId = `claude:${msg.id ?? rec.requestId ?? rec.uuid}`;
@@ -242,7 +287,7 @@ export const claudeParser: LineParser<ClaudeState> = {
         state.responseStart = Math.max(state.inputTs ?? 0, prevEnd ?? 0) || null;
       }
       state.responseEnd = ts;
-      state.model = msg.model ?? state.model ?? null;
+      if (msg.model !== "<synthetic>") state.model = msg.model ?? state.model ?? null;
       if (typeof rec.effort === "string") state.effort = rec.effort;
       sink.responseMeta?.({
         usageId,
@@ -278,6 +323,8 @@ export const claudeParser: LineParser<ClaudeState> = {
           skill: state.skill,
           agent,
           spawnRef: sidechain ? state.spawnRef : null,
+          // A subagent's run is named by what the call that started it asked of it.
+          brief: SPAWN_TOOLS.has(block.name) ? truncate(firstText(input.description) ?? firstText(input.prompt), Math.min(200, ctx.promptTextLimit)) : null,
         });
         if (block.name === "Skill" && typeof input.skill === "string") state.skill = input.skill;
       }

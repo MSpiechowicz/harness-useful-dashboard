@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Ban, ChevronDown, ChevronUp, CircleStop, CircleX, Gauge, MessageSquareText } from "@lucide/svelte";
+  import { Ban, ChevronDown, ChevronUp, CircleStop, CircleX, Gauge, MessageSquareText, ServerCrash } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
@@ -16,6 +16,7 @@
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
+  import { everyWhileVisible } from "../lib/visibility.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
 
   interface LiveSession {
@@ -37,17 +38,46 @@
     lastFile: string | null;
     activeSubagents: number;
     errors: number;
+    /** Model requests that failed in the window (rate limits, overloads, …). */
+    apiErrors: number;
+    /** The main agent's own share of the totals, its subagents left out. */
+    ownTokens: number;
+    ownCost: number;
+    /** Its subagent runs with activity in the window, newest first (the first few), and how many there were. */
+    runs: LiveRun[];
+    runCount: number;
+  }
+  /** One subagent run: a child session (omp, pi, Codex, OpenCode), or one subagent in a Claude Code session's own log. */
+  interface LiveRun {
+    key: string;
+    /** The run's own session, when it has one to open. */
+    sessionId: string | null;
+    agent: string | null;
+    brief: string | null;
+    tokens: number;
+    cost: number;
+    messages: number;
+    firstTs: number;
+    lastTs: number;
+    status: "working" | "idle" | "error";
+    lastTool: string | null;
+    lastFile: string | null;
+    errors: number;
   }
   type FailureReason = "timeout" | "edit_mismatch" | "stale_read" | "not_found" | "permission" | "exit_code" | "bad_input" | "other" | "rejected";
+  type ApiClass = "rate_limit" | "overloaded" | "server_error" | "timeout" | "network" | "auth" | "billing" | "context_length" | "other";
   interface FeedItem {
     ts: number;
-    kind: "prompt" | "tool_error" | "tool_rejected" | "interrupt";
+    kind: "prompt" | "tool_error" | "tool_rejected" | "interrupt" | "api_error";
     text: string | null;
     tool: string | null;
-    /** Why a failed or declined call failed, its error text and what it was given. */
-    reason: FailureReason | null;
+    /** Why a failed or declined call failed, its error text and what it was given. A failed request's class and message. */
+    reason: FailureReason | ApiClass | null;
     detail: string | null;
     input: string | null;
+    /** A failed request's HTTP status and the model it went to. */
+    status: number | null;
+    model: string | null;
     sessionId: string;
     title: string | null;
     provider: string;
@@ -82,15 +112,15 @@
   }
 
   // The page refreshes itself once a minute, usage and limits together. The server rescans the logs first.
+  // A hidden tab skips it and refreshes once shown again.
   let tick = $state(0);
   let now = $state(Date.now());
-  $effect(() => {
-    const h = setInterval(() => {
+  $effect(() =>
+    everyWhileVisible(60_000, () => {
       tick++;
       now = Date.now();
-    }, 60_000);
-    return () => clearInterval(h);
-  });
+    }),
+  );
   const data = useFetch<LiveData>(() => `/api/live?minutes=${minutes}&t=${tick}`);
   // While the page is open, its own poll is the one refresh: each one counts as an update.
   $effect(() => {
@@ -180,22 +210,27 @@
     { value: "recent", label: t("sort.recent") },
     { value: "kind", label: t("live.feed.byKind") },
   ]);
-  const KIND_ORDER = { tool_error: 0, tool_rejected: 1, interrupt: 2, prompt: 3 } as const;
+  const KIND_ORDER = { tool_error: 0, api_error: 1, tool_rejected: 2, interrupt: 3, prompt: 4 } as const;
   const feedRows = $derived(
     [...(data.data?.feed ?? [])].sort((a, b) => (feedSort === "kind" ? KIND_ORDER[a.kind] - KIND_ORDER[b.kind] : 0) || b.ts - a.ts),
   );
-  const FEED_ICON = { prompt: MessageSquareText, tool_error: CircleX, tool_rejected: Ban, interrupt: CircleStop } as const;
+  const FEED_ICON = { prompt: MessageSquareText, tool_error: CircleX, tool_rejected: Ban, interrupt: CircleStop, api_error: ServerCrash } as const;
   const feedText = (e: FeedItem) =>
     e.kind === "prompt"
       ? (e.text ?? t("prompts.noText"))
       : e.kind === "interrupt"
         ? t("live.feed.interrupt")
-        : t(e.kind === "tool_error" ? "live.feed.error" : "live.feed.declined", { tool: e.tool ?? t("live.feed.aTool") });
+        : e.kind === "api_error"
+          ? t("live.feed.apiError", { model: e.model ? entityLabel("model", e.model, e.model) : t("live.feed.aModel") })
+          : t(e.kind === "tool_error" ? "live.feed.error" : "live.feed.declined", { tool: e.tool ?? t("live.feed.aTool") });
+  /** The cause's label: a tool failure's (friction.reason.*) or a failed request's (friction.api.*). */
+  const reasonLabel = (e: FeedItem) =>
+    !e.reason ? null : e.kind === "api_error" ? t(`friction.api.${e.reason as ApiClass}`) : t(`friction.reason.${e.reason as FailureReason}`);
+  const statusLine = (e: FeedItem) => (e.status ? t("friction.api.status", { code: e.status }) : null);
   // A failure's second line: why it failed and the start of its error, all of it on hover. What the call was given
   // (a command, a file) follows its name.
-  const feedWhy = (e: FeedItem) =>
-    e.reason ? [t(`friction.reason.${e.reason}`), e.detail?.replace(/\s+/g, " ")].filter(Boolean).join(" · ") : null;
-  const feedTitle = (e: FeedItem) => [feedText(e), e.reason ? t(`friction.reason.${e.reason}`) : null, e.input, e.detail].filter(Boolean).join("\n\n");
+  const feedWhy = (e: FeedItem) => (e.reason ? [reasonLabel(e), e.detail?.replace(/\s+/g, " ")].filter(Boolean).join(" · ") : null);
+  const feedTitle = (e: FeedItem) => [feedText(e), reasonLabel(e), statusLine(e), e.input, e.detail].filter(Boolean).join("\n\n");
   const quiet = $derived(!!total && total.sum === 0);
   const windowLabel = $derived(minutes < 60 ? t("live.lastMinutes", { n: minutes }) : minutes === 60 ? t("live.lastHour") : t("live.lastHours", { n: minutes / 60 }));
   const time = (ts: number) => new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts);
@@ -204,12 +239,36 @@
   let sort = $state<Sort>("recent");
   const SORTS = $derived((["recent", "tokens", "cost"] as const).map((value) => ({ value: value as Sort, label: t(`sort.${value}`) })));
   const titleOf = (s: LiveSession) => s.title ?? s.id.split(":").pop()?.slice(0, 13) ?? s.id;
+  // A session's subagents open beneath it: by default while any of them is working, else as last toggled on this page.
+  let runsOpen = $state<Record<string, boolean>>({});
+  const showRuns = (s: LiveSession) => s.runs.length > 0 && (runsOpen[s.id] ?? s.runs.some((r) => r.status === "working"));
+  // A finished subagent is done, not waiting for a prompt like an idle session.
+  const runStatus = (r: LiveRun) => t(r.status === "idle" ? "live.status.done" : `live.status.${r.status}`);
+  const runTarget = (s: LiveSession, r: LiveRun) => r.sessionId ?? s.id;
+  // The export has a line per session and per subagent listed under it, which names its session.
+  const exportSessions = (rows: LiveSession[]) =>
+    rows.flatMap(({ runs, ...s }) => [
+      { ...s, parent: null, agent: null, brief: null },
+      ...runs.map((r) => ({
+        id: r.sessionId ?? r.key, title: r.agent, parent: s.id, agent: r.agent, brief: r.brief, provider: s.provider, project: s.project,
+        status: r.status, lastTool: r.lastTool, lastFile: r.lastFile, tokens: r.tokens, cost: r.cost, messages: r.messages,
+        errors: r.errors, firstTs: r.firstTs, lastTs: r.lastTs,
+      })),
+    ]);
   // Every tool's color, so a session's swatch reads as the tool it ran in, not the plan it was billed to.
   // Tools with sessions in this window stand out and carry their count.
   const toolCounts = $derived(
     (data.data?.sessions ?? []).reduce((m, s) => m.set(s.provider, (m.get(s.provider) ?? 0) + 1), new Map<string, number>()),
   );
 </script>
+
+<!-- Failed calls as one small count after the title, so the title keeps its room. What failed is in the tooltip. -->
+{#snippet failed(errors: number, apiErrors: number)}
+  {@const label = [errors ? t("live.errors", { n: errors }) : null, apiErrors ? t("live.apiErrors", { n: apiErrors }) : null].filter(Boolean).join(" · ")}
+  <span class="inline-flex shrink-0 items-center gap-0.5 text-xs text-bad tabular" title={label} aria-label={label}>
+    <CircleX size={12} />{errors + apiErrors}
+  </span>
+{/snippet}
 
 <div class="flex flex-col gap-5">
   <PageHeader title={t("live.title")} subtitle={t("live.subtitle")}>
@@ -298,46 +357,45 @@
       title={t("live.sessions")}
       subtitle={t("live.sessionsHint")}
       rows={[...(data.data?.sessions ?? [])].sort((a, b) => (sort === "recent" ? b.lastTs - a.lastTs : b[sort] - a[sort]))}
-      searchText={(s) => `${s.title ?? ""} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider}`}
+      searchText={(s) => `${s.title ?? ""} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider} ${s.runs.map((r) => `${r.agent ?? ""} ${r.brief ?? ""}`).join(" ")}`}
       sorts={SORTS}
       bind:sortKey={sort}
       exportName="live-sessions"
+      exportRows={exportSessions}
     >
       {#snippet children(view)}
-        <table class="data fixed-cols">
+        <!-- Branch shares the project's cell, so the table fits a card about 1000px wide without scrolling sideways. -->
+        <table class="data fixed-cols !min-w-[52rem]">
           <colgroup>
             <col />
-            <col class="w-40" />
-            <col class="w-40" />
             <col class="w-36" />
             <col class="w-44" />
+            <col class="w-36" />
             <col class="w-24" />
             <col class="w-28" />
+            <col class="w-[5.5rem]" />
           </colgroup>
           <thead>
             <tr>
               <th>{t("col.title")}</th>
               <th>{t("col.status")}</th>
               <th>{t("col.project")}</th>
-              <th>{t("col.branch")}</th>
               <th>{t("col.lastTool")}</th>
               <th class="num">{t("col.cost")}</th>
               <th class="num">{t("col.lastSeen")}</th>
+              <th><span class="sr-only">{t("live.runs.show")}</span></th>
             </tr>
           </thead>
           <tbody>
             {#each view.rows.slice(view.offset, view.limit == null ? undefined : view.offset + view.limit) as s (s.id)}
+              {@const opened = showRuns(s)}
               <tr class="cursor-pointer" onclick={() => navigate("sessions", s.id)}>
                 <td>
+                  <!-- The title keeps room to be read: the error counts after it give way first. -->
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", s.provider)} title={s.provider}></span>
-                    <Link to="#/sessions/{encodeURIComponent(s.id)}" class="truncate font-medium">{titleOf(s)}</Link>
-                    {#if s.activeSubagents}
-                      <span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-ink-2">{t("live.subagentsWorking", { n: s.activeSubagents })}</span>
-                    {:else if s.subagents}
-                      <span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{t("live.subagents", { n: s.subagents })}</span>
-                    {/if}
-                    {#if s.errors}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-bad">{t("live.errors", { n: s.errors })}</span>{/if}
+                    <Link to="#/sessions/{encodeURIComponent(s.id)}" class="min-w-24 truncate font-medium" title={titleOf(s)}>{titleOf(s)}</Link>
+                    {#if s.errors || s.apiErrors}{@render failed(s.errors, s.apiErrors)}{/if}
                   </div>
                 </td>
                 <td>
@@ -346,14 +404,71 @@
                     {t(`live.status.${s.status}`)}
                   </span>
                 </td>
-                <td class="truncate text-ink-2" title={s.project}>{entityLabel("project", s.project, s.projectLabel)}</td>
-                <td class="truncate text-ink-2" title={s.gitBranch ?? ""}>{s.gitBranch ?? "–"}</td>
+                <td class="truncate text-ink-2" title={[s.project, s.gitBranch].filter(Boolean).join("\n")}>
+                  {entityLabel("project", s.project, s.projectLabel)}{#if s.gitBranch}<span class="ml-1 text-muted">· {s.gitBranch}</span>{/if}
+                </td>
                 <td class="truncate text-ink-2" title={s.lastFile ?? s.lastTool ?? ""}>
-                  {s.lastTool ?? "–"}{#if s.lastFile}<span class="text-muted"> · {s.lastFile.split(/[\\/]/).pop()}</span>{/if}
+                  {s.lastTool ?? "–"}{#if s.lastFile}<span class="ml-1 text-muted">· {s.lastFile.split(/[\\/]/).pop()}</span>{/if}
                 </td>
                 <td class="num font-medium">{usd(s.cost)}</td>
                 <td class="num text-ink-2">{relative(s.lastTs)}</td>
+                <td class="text-right">
+                  {#if s.runs.length}
+                    <!-- Down when closed, up when open, as in the activity table. The count is every subagent in the window. -->
+                    <button
+                      type="button"
+                      class="btn -my-1 !h-7 !gap-1 !px-2 tabular"
+                      aria-expanded={opened}
+                      aria-label={`${t(opened ? "live.runs.hide" : "live.runs.show")} (${s.runCount})`}
+                      title={t(opened ? "live.runs.hide" : "live.runs.show")}
+                      onclick={(ev) => {
+                        ev.stopPropagation();
+                        runsOpen[s.id] = !opened;
+                      }}
+                    >
+                      {s.runCount}{#if opened}<ChevronUp size={14} />{:else}<ChevronDown size={14} />{/if}
+                    </button>
+                  {/if}
+                </td>
               </tr>
+              {#if opened}
+                {@const more = s.runCount - s.runs.length}
+                {#each s.runs as r, i (r.key)}
+                  {@const last = i === s.runs.length - 1 && !more}
+                  <tr class="cursor-pointer" onclick={() => navigate("sessions", runTarget(s, r))}>
+                    <td class="relative">
+                      <!-- A tree line from the session's swatch to each of its subagents. -->
+                      <span class="absolute top-0 left-[calc(1.25rem+4px)] w-px bg-line {last ? 'h-1/2' : 'bottom-0'}"></span><span class="absolute top-1/2 left-[calc(1.25rem+4px)] h-px w-2.5 bg-line"></span>
+                      <div class="flex items-center gap-2 pl-[18px]">
+                        <Link to="#/sessions/{encodeURIComponent(runTarget(s, r))}" class="max-w-[60%] shrink-0 truncate text-ink">{r.agent ?? t("live.runs.subagent")}</Link>
+                        {#if r.brief && r.brief !== r.agent}<span class="min-w-0 truncate text-muted" title={r.brief}>{r.brief}</span>{/if}
+                        {#if r.errors}{@render failed(r.errors, 0)}{/if}
+                      </div>
+                    </td>
+                    <td>
+                      <span class="inline-flex items-center gap-2 text-ink-2">
+                        <span class="h-2 w-2 shrink-0 rounded-full" class:animate-pulse={r.status === "working"} style:background={STATUS_COLOR[r.status]}></span>
+                        {runStatus(r)}
+                      </span>
+                    </td>
+                    <td></td>
+                    <td class="truncate text-ink-2" title={r.lastFile ?? r.lastTool ?? ""}>
+                      {r.lastTool ?? "–"}{#if r.lastFile}<span class="ml-1 text-muted">· {r.lastFile.split(/[\\/]/).pop()}</span>{/if}
+                    </td>
+                    <td class="num text-ink-2">{usd(r.cost)}</td>
+                    <td class="num text-ink-2">{relative(r.lastTs)}</td>
+                    <td></td>
+                  </tr>
+                {/each}
+                {#if more > 0}
+                  <tr class="cursor-pointer" onclick={() => navigate("sessions", s.id)}>
+                    <td class="relative" colspan="7">
+                      <span class="absolute top-0 left-[calc(1.25rem+4px)] w-px bg-line h-1/2"></span><span class="absolute top-1/2 left-[calc(1.25rem+4px)] h-px w-2.5 bg-line"></span>
+                      <div class="pl-[18px] text-xs text-muted">{t("live.runs.more", { n: more })}</div>
+                    </td>
+                  </tr>
+                {/if}
+              {/if}
             {/each}
           </tbody>
         </table>
@@ -389,7 +504,7 @@
             {#each view.rows.slice(view.offset, view.limit == null ? undefined : view.offset + view.limit) as e, i (`${e.ts}:${e.kind}:${e.sessionId}:${i}`)}
               {@const Icon = FEED_ICON[e.kind]}
               {@const key = `${e.ts}:${e.kind}:${e.sessionId}:${i}`}
-              {@const expandable = !!(e.input || e.detail)}
+              {@const expandable = !!(e.input || e.detail || e.status)}
               {@const expanded = expandable && !!open[key]}
               <tr class="cursor-pointer" onclick={() => navigate("sessions", e.sessionId)}>
                 <td class="text-ink-2 tabular">{time(e.ts)}</td>
@@ -397,9 +512,9 @@
                   <!-- One line a row: what happened, and why as a pill. The command and the error text open below with the
                        button in the last column. -->
                   <span class="flex min-w-0 items-center gap-2.5">
-                    <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' ? 'text-bad' : 'text-warn'}" />
+                    <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' || e.kind === 'api_error' ? 'text-bad' : 'text-warn'}" />
                     <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class={e.kind === "prompt" ? "truncate text-ink" : "shrink-0 text-ink-2"} title={feedTitle(e)}>{feedText(e)}</Link>
-                    {#if e.reason}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] {e.kind === 'tool_error' ? 'text-bad' : 'text-muted'}">{t(`friction.reason.${e.reason}`)}</span>{/if}
+                    {#if e.reason}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] {e.kind === 'tool_error' || e.kind === 'api_error' ? 'text-bad' : 'text-muted'}">{reasonLabel(e)}</span>{/if}
                   </span>
                 </td>
                 <td>
@@ -432,6 +547,7 @@
                   <td></td>
                   <td colspan="3" class="!whitespace-normal">
                     {#if e.input}<pre class="mb-2 font-mono text-xs break-all whitespace-pre-wrap text-muted">{e.input}</pre>{/if}
+                    {#if statusLine(e)}<pre class="mb-2 font-mono text-xs text-muted">{statusLine(e)}</pre>{/if}
                     {#if e.detail}<pre class="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-ink-2">{e.detail}</pre>{/if}
                   </td>
                 </tr>

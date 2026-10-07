@@ -1,8 +1,8 @@
 # Harness Dashboard
 
 **Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the sessions that
-Claude Code, Codex, OpenCode, pi, omp (oh-my-pi), Zed and the Cline, Roo Code and Kilo Code extensions already write to
-disk, plus Cursor usage exports. It stores
+Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, pi, omp (oh-my-pi), Zed and the Cline, Roo Code and Kilo
+Code extensions already write to disk, plus Cursor usage exports. It stores
 everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
@@ -10,7 +10,7 @@ everything in a local SQLite database and shows clear, interactive charts of whe
 - **Trends**: hourly/daily/weekly/monthly series, a 7-day moving average, cumulative spend, peak day and a 30-day projection
 - **Per-prompt cost analytics**: what each request really consumed, call by call, including the subagents it spawned
 - **Tool and file heatmaps**: tools × projects, tools × hour of day, and the files that get read or edited most
-- **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads, OpenCode subagent sessions and omp subagents are tied back to the spawning prompt or parent session
+- **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads, OpenCode subagent sessions, Gemini CLI subagent chats and omp subagents are tied back to the spawning prompt or parent session
 - **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
 - **Cache analytics**: hit rate over time, money saved by caching, and what cache writes cost
 - **Branches**: what each piece of work cost, per git branch, with its sessions and the files it changed
@@ -23,6 +23,7 @@ everything in a local SQLite database and shows clear, interactive charts of whe
 - **Budgets and alerts**: daily, monthly and per-project spending caps, with desktop notifications at 80% and 100% and when a plan limit is 80% used
 - **Export**: every table and chart's data as CSV or JSON, following the current filters
 - **Claude Code status line**: this session's cost, today's cost and the 5-hour limit, right in Claude Code
+- **MCP server**: agents in Claude Code, Codex, Cursor, Zed or OpenCode can read your usage, budgets and plan limits themselves
 - **English, German, Spanish, French and Polish UI** (English by default), light and dark themes, responsive layout
 - **Shared database**: point several machines at one SQLite file on iCloud Drive, Dropbox, OneDrive or a network share
 
@@ -142,6 +143,7 @@ harness-dashboard --db ~/iCloud/harness/usage.db
 harness-dashboard scan [--full]  # ingest once and exit (cron-friendly)
 harness-dashboard import-cursor usage.csv
 harness-dashboard config get | path | set <key> <value>
+harness-dashboard mcp            # MCP server over stdio, started by an agent
 ```
 
 The dashboard runs a small local server on `127.0.0.1` and opens it in a chrome-less **app window** when a
@@ -163,6 +165,8 @@ through it sees the page but none of your data.
 | Cline | its folder in VS Code's extension storage (`~/.config/Code/User/globalStorage/saoudrizwan.claude-dev`, also Insiders, VSCodium, Cursor, Windsurf and JetBrains IDEs) and `~/.cline/data` (or `$CLINE_DATA_DIR`) | task folders (`tasks/<id>/ui_messages.json`) of Cline up to 3.x and Cline 4's session store: a row per model call with the cost Cline worked out, prompts, tools and subagents |
 | Roo Code | its folder in VS Code's extension storage (`…/globalStorage/rooveterinaryinc.roo-cline`, also the forks) | task folders: a row per model call with the cost Roo worked out, prompts, tools and subtasks |
 | Kilo Code | its folder in VS Code's extension storage (`…/globalStorage/kilocode.kilo-code`, also the forks) and `~/.local/share/kilo` | task folders of Kilo Code up to 5.x and Kilo Code 7's database: a row per model call with the cost Kilo worked out |
+| Gemini CLI | `~/.gemini/tmp/<project>/chats/` (or `$GEMINI_CLI_HOME/.gemini`) | per-response usage with cached and thinking tokens, prompts, tools and their errors, subagent chats, session summaries as titles. The project comes from the folder's `.project_root`. Chats from before v0.39 (one JSON file each) are read too |
+| GitHub Copilot CLI | `~/.copilot/session-state/<id>/events.jsonl` (or `$COPILOT_HOME`) | prompts, tools and their errors, and the tokens and premium requests per model and agent that Copilot writes when a session ends, as one row per model on that moment. Copilot logs no tokens per call, and a session that never ended cleanly has none. Billed through GitHub Copilot, cost shown at API prices |
 | Cursor | CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Import the CSV in **Settings** or with `import-cursor` |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
@@ -217,6 +221,74 @@ scan, every 30 seconds while the dashboard runs. A session not scanned yet shows
 | `--db <path>` | Read this database instead of the configured one |
 
 "Today" starts at local midnight and counts your own usage, by the user name in **Settings**.
+
+### MCP server
+
+`harness-dashboard mcp` is a local [MCP](https://modelcontextprotocol.io) server over stdio. With it an agent can check
+what a session or branch cost, how a budget stands or how much of a plan limit is left, for example before a large
+refactor. It is optional and runs only while a client has it started. It reads the database only: it never scans,
+writes, or makes a network request, and needs no sign-in. It finds the database like the other commands (`--db`,
+`HARNESS_DASHBOARD_DB`, then the config), so the numbers are as fresh as the last scan of the running dashboard.
+
+| Tool | What it returns |
+|---|---|
+| `usage_summary` | Cost, tokens by type, sessions, prompts and cache hit rate for a range (`today`, `7d`, `30d`, `month`, `all` or `custom`), compared with the period before |
+| `breakdown` | Cost and tokens by project, model, provider, user, skill or agent |
+| `session_cost` | One session with its subagents. Without an id, the current Claude Code session when known, else the latest one in the working directory |
+| `branch_cost` | A git branch over its whole life. Without a name, the branch checked out in the working directory |
+| `limits` | The latest stored plan-limit readings, with the share used, the reset time and their age |
+| `budget_status` | Today's and this month's spend against the caps from **Settings → Budgets and alerts** |
+| `failures` | Why tool calls failed, the tools that fail most, and the latest errors as stored (redacted, shortened) |
+| `tips` | The rule-based tips, largest monthly impact first |
+
+Times are ISO 8601. Costs are USD at API-equivalent prices. Range tools also filter by provider, project, model and user.
+
+**Claude Code**:
+
+```sh
+claude mcp add --scope user harness -- harness-dashboard mcp
+```
+
+**Codex** (`~/.codex/config.toml`, or `codex mcp add harness -- harness-dashboard mcp`):
+
+```toml
+[mcp_servers.harness]
+command = "harness-dashboard"
+args = ["mcp"]
+```
+
+**Cursor** (`~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project):
+
+```json
+{
+  "mcpServers": {
+    "harness": { "command": "harness-dashboard", "args": ["mcp"] }
+  }
+}
+```
+
+**Zed** (`settings.json`):
+
+```json
+{
+  "context_servers": {
+    "harness": { "command": "harness-dashboard", "args": ["mcp"], "env": {} }
+  }
+}
+```
+
+**OpenCode** (`opencode.json`, or `~/.config/opencode/opencode.json`):
+
+```json
+{
+  "mcp": {
+    "harness": { "type": "local", "command": ["harness-dashboard", "mcp"] }
+  }
+}
+```
+
+To read another database, add `--db <path>` after `mcp`. The server speaks MCP 2026-07-28 and the
+handshake-based versions before it (2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05).
 
 ### Budgets and alerts
 
@@ -285,7 +357,8 @@ exact same moment. The default 30-second rescan interval with a 15-second busy t
 Every data color comes from one palette (`web/src/lib/palette.ts`), and each color means one thing:
 
 - **Reserved.** Each harness has its own color: Claude Code orange, Codex blue, Cursor gold, omp plum, pi teal,
-  OpenCode crimson, Zed indigo, Cline lime, Roo Code magenta and Kilo Code amber. Models wear their maker's color whichever harness or plan they ran under (a Claude model through
+  OpenCode crimson, Zed indigo, Cline lime, Roo Code magenta, Kilo Code amber, Gemini CLI cyan (slate blue in the dark
+  theme) and Copilot CLI wine. Models wear their maker's color whichever harness or plan they ran under (a Claude model through
   omp or Copilot is still Claude orange), with shades generated from it so models of one maker stay apart in a stacked
   chart. The four token types have their own set (green-teal, olive, lilac, purple).
 - **General pool.** Projects, users, skills, agents and sources take the top values' colors by hue first (green, sky,

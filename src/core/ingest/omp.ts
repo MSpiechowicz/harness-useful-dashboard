@@ -1,3 +1,4 @@
+import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
@@ -259,6 +260,21 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
 
         const billing = typeof m.provider === "string" ? m.provider : null;
         if (billing) state.billing = billing;
+        // A response the provider failed: its message says why ("429 …", "usage limit has been reached (code=…)").
+        if (m.stopReason === "error" && ts != null) {
+          const at = parseTs(m.timestamp) ?? ts;
+          sink.outcome?.({
+            id: `${key(entry, m.timestamp ?? ts)}:api`,
+            provider: harness,
+            sessionId,
+            ts: at,
+            project: state.cwd,
+            model: typeof m.model === "string" ? m.model : state.model,
+            agent,
+            effort: state.effort ?? null,
+            ...apiErrorOf(null, typeof m.status === "number" ? m.status : null, typeof m.errorMessage === "string" ? m.errorMessage : null, ctx.promptTextLimit),
+          });
+        }
         const u = m.usage;
         if (!u || typeof u !== "object") continue;
         // The model that answered, when it differs from the one asked for (pi's responseModel).

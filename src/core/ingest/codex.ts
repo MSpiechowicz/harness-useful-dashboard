@@ -1,3 +1,4 @@
+import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
@@ -272,6 +273,17 @@ export const codexParser: LineParser<CodexState> = {
             tool: call.tool,
             ...failureOf(kind, call.tool, call.error, call.input, ctx.promptTextLimit),
           });
+          continue;
+        }
+        // A failed model request: "error" ends the turn, "stream_error" is an attempt Codex retries ("Reconnecting… 2/5").
+        // Newer versions name the cause (codex_error_info: "usage_limit_exceeded", { http_connection_failed: { http_status_code } }).
+        if ((p.type === "error" || p.type === "stream_error") && ts != null) {
+          const info = p.codex_error_info;
+          const code = typeof info === "string" ? info : info && typeof info === "object" ? (Object.keys(info)[0] ?? null) : null;
+          const inner = code && info && typeof info === "object" ? info[code] : null;
+          const status = typeof inner?.http_status_code === "number" ? inner.http_status_code : null;
+          const message = [p.message, p.additional_details].filter((v) => typeof v === "string" && v.trim()).join(": ") || null;
+          sink.outcome?.({ ...outcome, id: `codex:${state.threadId}:${rec.ordinal ?? `o${offset}`}:api`, ...apiErrorOf(code, status, message, ctx.promptTextLimit) });
           continue;
         }
         if (p.type === "turn_aborted") {

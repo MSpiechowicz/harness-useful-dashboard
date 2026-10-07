@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 12;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -223,6 +223,18 @@ const MIGRATIONS: Record<number, string> = {
     -- Read every log once more for the failures already ingested. Records are keyed by their place in the logs, so
     -- reading again changes nothing else.
     DELETE FROM ingest_files;
+  `,
+  // Failed model requests (rate limits, overloads, timeouts, …) as `api_error` outcomes: their class is the reason, the
+  // message the detail, and the HTTP status here. Read every log once more for the errors already in them.
+  11: /* sql */ `
+    ALTER TABLE outcomes ADD COLUMN status INTEGER;
+    DELETE FROM ingest_files;
+  `,
+  // What a call that started a subagent asked of it ("Find the login handlers"): Claude Code keeps its subagents in the
+  // parent's session, so the Live view names each run by the call that started it. Read the JSONL logs once more.
+  12: /* sql */ `
+    ALTER TABLE tool_calls ADD COLUMN brief TEXT;
+    DELETE FROM ingest_files WHERE path LIKE '%.jsonl';
   `,
 };
 

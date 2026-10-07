@@ -11,10 +11,11 @@
   import ValueBar from "../components/ValueBar.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
-  import { frictionChart } from "../lib/charts.ts";
-  import { colorFor } from "../lib/colors.svelte.ts";
+  import { apiErrorChart, frictionChart } from "../lib/charts.ts";
+  import { colorFor, rankKeys } from "../lib/colors.svelte.ts";
   import { compact, dateTime, decimal, entityLabel, percent, relative } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
+  import { PROVIDER_NAMES, type Provider } from "../lib/palette.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
 
   interface Counts {
@@ -35,6 +36,32 @@
     sessions: (Counts & { id: string; title: string | null; project: string | null; projectLabel: string; provider: string; lastTs: number })[];
     reasons: { reason: Reason; count: number; share: number; tools: { tool: string; count: number }[] }[];
     recent: Failure[];
+    apiErrors: ApiErrors;
+  }
+  /** Failed model requests (rate limits, overloads, timeouts, …), counted apart from the tool calls above. */
+  type ApiClass = "rate_limit" | "overloaded" | "server_error" | "timeout" | "network" | "auth" | "billing" | "context_length" | "other";
+  const API_CLASSES: ApiClass[] = ["rate_limit", "overloaded", "server_error", "timeout", "network", "auth", "billing", "context_length", "other"];
+  interface ApiError {
+    id: string;
+    ts: number;
+    provider: string;
+    model: string | null;
+    reason: ApiClass;
+    status: number | null;
+    detail: string | null;
+    sessionId: string;
+    title: string | null;
+    projectLabel: string;
+  }
+  interface ApiErrors {
+    total: number;
+    requests: number;
+    rate: number | null;
+    buckets: string[];
+    series: { key: ApiClass; data: number[] }[];
+    classes: { cls: ApiClass; count: number; share: number }[];
+    models: { provider: string; model: string; count: number; lastTs: number; topClass: ApiClass }[];
+    recent: ApiError[];
   }
   type Reason = "timeout" | "edit_mismatch" | "stale_read" | "not_found" | "permission" | "exit_code" | "bad_input" | "other" | "rejected";
   interface Failure {
@@ -134,6 +161,29 @@
     return [...(d.data?.sessions ?? [])].sort((a, b) => value(b) - value(a));
   });
   const titleOf = (s: { id: string; title: string | null }) => s.title ?? s.id.split(":").pop()?.slice(0, 13) ?? s.id;
+
+  // API errors: each class keeps its color whatever the range shows, "other" in grey.
+  rankKeys("apiError", API_CLASSES);
+  const api = $derived(d.data?.apiErrors);
+  const apiLabel = (c: ApiClass) => t(`friction.api.${c}`);
+  const apiOption = $derived.by(() =>
+    (void store.dark, api?.total ? apiErrorChart(api.buckets, api.series, store.bucket, (k) => apiLabel(k as ApiClass), (k) => colorFor("apiError", k)) : null),
+  );
+  const maxApiModel = $derived(Math.max(1, ...(api?.models ?? []).map((m) => m.count)));
+  type ApiSort = "recent" | "reason" | "model";
+  let apiSort = $state<ApiSort>("recent");
+  const API_SORTS = $derived<{ value: ApiSort; label: string; asc?: boolean }[]>([
+    { value: "recent", label: t("sort.recent") },
+    { value: "reason", label: t("friction.col.reason"), asc: true },
+    { value: "model", label: t("col.model"), asc: true },
+  ]);
+  const apiRecent = $derived.by(() => {
+    const rows = [...(api?.recent ?? [])];
+    if (apiSort === "reason") return rows.sort((a, b) => apiLabel(a.reason).localeCompare(apiLabel(b.reason)) || b.ts - a.ts);
+    if (apiSort === "model") return rows.sort((a, b) => (a.model ?? "").localeCompare(b.model ?? "") || b.ts - a.ts);
+    return rows;
+  });
+  const apiStatus = (e: ApiError) => (e.status ? t("friction.api.status", { code: e.status }) : null);
 </script>
 
 <div class="flex flex-col gap-5">
@@ -141,7 +191,7 @@
   <ViewGate ready={settled(d)}>
     {#if !d.data || !tot}
       <div class="card"><Empty compact title={t("common.loadFailed")} /></div>
-    {:else if !tot.calls && !tot.interrupts}
+    {:else if !tot.calls && !tot.interrupts && !d.data.apiErrors.total}
       <div class="card"><Empty /></div>
     {:else}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -378,6 +428,132 @@
           </table>
         {/snippet}
       </TableCard>
+
+      <!-- Failed model requests: not tool calls, so none of the numbers above count them. -->
+      {#if api && api.total}
+        <div class="grid gap-5 xl:grid-cols-3">
+          <Card
+            title={t("friction.api.overTime")}
+            subtitle={t("friction.api.overTimeHint", { rate: rate(api.rate) })}
+            class="xl:col-span-2"
+            exportName="friction-api-errors-by-class"
+            exportRows={() => api.classes.map((c) => ({ class: c.cls, label: apiLabel(c.cls), errors: c.count, share: c.share }))}
+          >
+            {#if apiOption}<Chart option={apiOption} height={280} fill dim={d.loading} />{/if}
+          </Card>
+          <Card
+            title={t("friction.api.byModel")}
+            subtitle={t("friction.api.byModelHint")}
+            exportName="friction-api-errors-by-model"
+            exportRows={() => api.models.map((m) => ({ provider: m.provider, model: m.model, errors: m.count, mainCause: m.topClass, lastTs: m.lastTs }))}
+          >
+            <ul class="flex flex-col gap-3" class:loading-dim={d.loading}>
+              {#each api.models.slice(0, 8) as m (`${m.provider}|${m.model}`)}
+                <li class="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1.5" title="{m.provider} · {m.model} · {apiLabel(m.topClass)}">
+                  <span class="flex min-w-0 items-center gap-2">
+                    <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", m.provider)}></span>
+                    <span class="truncate text-[13px] text-ink-2">{m.model === "(none)" ? m.provider : entityLabel("model", m.model, m.model)}</span>
+                  </span>
+                  <span class="tabular text-right text-[13px] font-medium text-ink">{compact(m.count)}</span>
+                  <span class="col-span-2 h-1.5 overflow-hidden rounded-full bg-surface-3">
+                    <span class="block h-full rounded-full" style:width="{Math.max(0.5, (m.count / maxApiModel) * 100)}%" style:background="var(--data)"></span>
+                  </span>
+                  <span class="col-span-2 truncate text-xs text-muted">{PROVIDER_NAMES[m.provider as Provider] ?? m.provider} · {apiLabel(m.topClass)}</span>
+                </li>
+              {/each}
+            </ul>
+          </Card>
+        </div>
+
+        <TableCard
+          title={t("friction.api.recent")}
+          subtitle={t("friction.api.recentHint", { n: compact(api.recent.length) })}
+          rows={apiRecent}
+          searchText={(e) => `${apiLabel(e.reason)} ${e.status ?? ""} ${e.provider} ${e.model ?? ""} ${e.detail ?? ""} ${e.title ?? ""}`}
+          sorts={API_SORTS}
+          bind:sortKey={apiSort}
+          exportName="friction-api-errors"
+        >
+          {#snippet children(view)}
+            <table class="data fixed-cols">
+              <colgroup>
+                <col class="w-32" />
+                <col class="w-44" />
+                <col class="w-44" />
+                <col />
+                <col class="w-56" />
+                <col class="w-16" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>{t("col.time")}</th>
+                  <th>{t("col.model")}</th>
+                  <th>{t("friction.col.reason")}</th>
+                  <th>{t("friction.col.error")}</th>
+                  <th>{t("col.session")}</th>
+                  <th><span class="sr-only">{t("friction.showError")}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each view.rows.slice(view.offset, view.offset + (view.limit ?? view.rows.length)) as e (e.id)}
+                  {@const expanded = !!open[e.id]}
+                  <tr class="cursor-pointer" onclick={() => navigate("sessions", e.sessionId)}>
+                    <td class="text-ink-2 tabular" title={dateTime(e.ts)}>{relative(e.ts)}</td>
+                    <td>
+                      <span class="flex min-w-0 items-center gap-2" title="{e.provider} · {e.model ?? ''}">
+                        <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", e.provider)}></span>
+                        <span class="truncate text-ink">{e.model ? entityLabel("model", e.model, e.model) : e.provider}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <span class="block max-w-full truncate rounded bg-surface-2 px-1.5 text-[11px] text-bad" style:width="fit-content" title={[apiLabel(e.reason), apiStatus(e)].filter(Boolean).join(" · ")}>{apiLabel(e.reason)}</span>
+                    </td>
+                    <td title={e.detail ?? ""}>
+                      {#if e.detail}
+                        <div class="truncate text-ink-2">{e.detail}</div>
+                      {:else}
+                        <div class="truncate text-muted italic">{apiStatus(e) ?? t("friction.noDetail")}</div>
+                      {/if}
+                    </td>
+                    <td>
+                      <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class="block truncate text-ink-2" title={e.title ?? e.sessionId}>{titleOf({ id: e.sessionId, title: e.title })}</Link>
+                    </td>
+                    <td class="text-right">
+                      {#if e.detail}
+                        <button
+                          type="button"
+                          class="btn !h-7 !px-2"
+                          aria-expanded={expanded}
+                          aria-label={t(expanded ? "friction.hideError" : "friction.showError")}
+                          title={t(expanded ? "friction.hideError" : "friction.showError")}
+                          onclick={(ev) => {
+                            ev.stopPropagation();
+                            open[e.id] = !expanded;
+                          }}
+                        >
+                          {#if expanded}<ChevronUp size={14} />{:else}<ChevronDown size={14} />{/if}
+                        </button>
+                      {/if}
+                    </td>
+                  </tr>
+                  {#if expanded}
+                    <tr class="bg-surface-2">
+                      <td colspan="6" class="!whitespace-normal">
+                        {#if apiStatus(e)}<pre class="mb-2 font-mono text-xs text-muted">{apiStatus(e)}</pre>{/if}
+                        <pre class="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-ink-2">{e.detail}</pre>
+                      </td>
+                    </tr>
+                  {/if}
+                {/each}
+              </tbody>
+            </table>
+          {/snippet}
+        </TableCard>
+      {:else}
+        <Card title={t("friction.api.overTime")} subtitle={t("friction.api.noneHint")}>
+          <Empty compact title={t("friction.api.none")} />
+        </Card>
+      {/if}
     {/if}
   </ViewGate>
 </div>
