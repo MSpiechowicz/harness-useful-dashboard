@@ -5,6 +5,7 @@ import { openDb } from "./db.ts";
 import { codexLimits } from "./limits.ts";
 import { PriceBook } from "./pricing.ts";
 import { type Dimension, type Filters, Queries } from "./queries.ts";
+import { tagUsage } from "./tagUsage.ts";
 import { LIMIT_FRESH_MS, type LimitInfo, storedFiveHour } from "./statusline.ts";
 
 /**
@@ -114,12 +115,13 @@ export function filtersOf(q: Queries, args: Record<string, unknown>, range: Reso
   if (typeof args.model === "string" && args.model) f.model = args.model;
   if (typeof args.user === "string" && args.user) f.user = args.user;
   if (typeof args.project === "string" && args.project) f.project = resolveProject(q, args.project);
+  if (typeof args.tag === "string" && args.tag.trim()) f.tag = args.tag.trim().toLowerCase();
   return f;
 }
 
 export const filtersOut = (f: Filters) => {
   const out: Record<string, string> = {};
-  for (const k of ["provider", "project", "model", "user"] as const) if (f[k]) out[k] = f[k]!;
+  for (const k of ["provider", "project", "model", "user", "tag"] as const) if (f[k]) out[k] = f[k]!;
   return Object.keys(out).length ? out : undefined;
 };
 
@@ -270,11 +272,11 @@ export function todayReport(c: ReportContext, args: Record<string, unknown> = {}
 
 export type TodayReport = ReturnType<typeof todayReport>;
 
-export const REPORT_BY = ["project", "model", "provider", "user", "day", "week", "month"] as const;
+export const REPORT_BY = ["project", "model", "provider", "user", "tag", "day", "week", "month"] as const;
 export type ReportBy = (typeof REPORT_BY)[number];
 
 /**
- * `report`: a breakdown (project, model, provider, user) or a time series (day, week, month) for a range. Rows keep
+ * `report`: a breakdown (project, model, provider, user, tag) or a time series (day, week, month) for a range. Rows keep
  * the dashboard's own field names, as its table export does.
  */
 export function usageReport(c: ReportContext, args: Record<string, unknown>) {
@@ -287,6 +289,9 @@ export function usageReport(c: ReportContext, args: Record<string, unknown>) {
   let rows: Record<string, unknown>[];
   if (by === "day" || by === "week" || by === "month") {
     rows = c.queries.periods(f, by).map((r) => ({ ...r, share: s.cost ? r.cost / s.cost : 0 }));
+  } else if (by === "tag") {
+    // A session with several tags is in each row: the rows can add up to more than the total.
+    rows = tagUsage(c.db, f).rows.map((r) => ({ ...r }));
   } else {
     // Every row: the human table shortens the list itself, files and scripts get all of it.
     rows = c.queries.breakdown(f, by, 100_000).rows;

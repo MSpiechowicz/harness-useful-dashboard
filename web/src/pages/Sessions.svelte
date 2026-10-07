@@ -6,6 +6,7 @@
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import TagPills from "../components/TagPills.svelte";
   import { apiUrl, getJson, settled, useFetch } from "../lib/api.svelte.ts";
   import { sessionScatter, type SessionPoint } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
@@ -28,6 +29,7 @@
     prompts: number;
     subagentMessages: number;
     lastTs: number;
+    tags: string[];
   }
 
   const keep = keeper();
@@ -135,6 +137,7 @@
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
                     <Link to="#/sessions/{encodeURIComponent(r.id)}" class="truncate font-medium">{titleOf(r)}</Link>
                     {#if r.sessionAgent}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{r.sessionAgent}</span>{/if}
+                    <TagPills tags={r.tags} />
                   </div>
                 </td>
                 <td class="max-w-48 truncate text-ink-2" title={r.project}>{entityLabel("project", r.project, r.projectLabel)}</td>

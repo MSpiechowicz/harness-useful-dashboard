@@ -7,6 +7,7 @@
   import PageHeader from "../components/PageHeader.svelte";
   import PlanLimits, { type LimitsResult } from "../components/PlanLimits.svelte";
   import TableCard from "../components/TableCard.svelte";
+  import TagPills from "../components/TagPills.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import { settled, useFetch } from "../lib/api.svelte.ts";
   import Dropdown from "../components/Dropdown.svelte";
@@ -37,6 +38,7 @@
     lastTool: string | null;
     lastFile: string | null;
     activeSubagents: number;
+    tags: string[];
     errors: number;
     /** Model requests that failed in the window (rate limits, overloads, …). */
     apiErrors: number;
@@ -357,7 +359,7 @@
       title={t("live.sessions")}
       subtitle={t("live.sessionsHint")}
       rows={[...(data.data?.sessions ?? [])].sort((a, b) => (sort === "recent" ? b.lastTs - a.lastTs : b[sort] - a[sort]))}
-      searchText={(s) => `${s.title ?? ""} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider} ${s.runs.map((r) => `${r.agent ?? ""} ${r.brief ?? ""}`).join(" ")}`}
+      searchText={(s) => `${s.title ?? ""} ${s.tags.join(" ")} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider} ${s.runs.map((r) => `${r.agent ?? ""} ${r.brief ?? ""}`).join(" ")}`}
       sorts={SORTS}
       bind:sortKey={sort}
       exportName="live-sessions"
@@ -395,6 +397,7 @@
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", s.provider)} title={s.provider}></span>
                     <Link to="#/sessions/{encodeURIComponent(s.id)}" class="min-w-24 truncate font-medium" title={titleOf(s)}>{titleOf(s)}</Link>
+                    <TagPills tags={s.tags} />
                     {#if s.errors || s.apiErrors}{@render failed(s.errors, s.apiErrors)}{/if}
                   </div>
                 </td>

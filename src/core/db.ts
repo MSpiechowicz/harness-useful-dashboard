@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 import { CURSOR_REKEY } from "./ingest/cursor.ts";
 
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -248,6 +248,26 @@ const MIGRATIONS: Record<number, string> = {
     ALTER TABLE tool_calls ADD COLUMN model TEXT;
     CREATE INDEX IF NOT EXISTS idx_tools_lines ON tool_calls(ts) WHERE lines_added IS NOT NULL;
     DELETE FROM ingest_files WHERE path LIKE '%.jsonl' OR path LIKE '%.json' OR (path LIKE '%.db' AND path NOT LIKE '%threads.db');
+  `,
+  // Tags and notes the user gives sessions (a client, "billable"), and a default tag per project. They are the user's
+  // own data, not ingested from logs: retention never trims them, and on a shared database every machine sees them.
+  15: /* sql */ `
+    CREATE TABLE IF NOT EXISTS session_tags (
+      session_id TEXT NOT NULL,
+      tag        TEXT NOT NULL,         -- trimmed, lowercase (tags.ts)
+      PRIMARY KEY (session_id, tag)
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
+    CREATE TABLE IF NOT EXISTS session_notes (
+      session_id TEXT PRIMARY KEY,
+      note       TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS project_tags (
+      project TEXT PRIMARY KEY,         -- absolute project path
+      tag     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_tags_tag ON project_tags(tag);
   `,
 };
 

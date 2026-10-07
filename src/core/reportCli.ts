@@ -73,7 +73,7 @@ function outputFormat(flags: Flags, csv: boolean): "text" | "json" | "csv" {
 /** --range, --from, --to and the filters, as reports.ts takes them. --from or --to alone make the range custom. */
 function filterArgs(flags: Flags): Record<string, unknown> {
   const args: Record<string, unknown> = {};
-  for (const k of ["range", "from", "to", "provider", "project", "model", "user"]) if (flags[k] !== undefined) args[k] = text(flags, k);
+  for (const k of ["range", "from", "to", "provider", "project", "model", "user", "tag"]) if (flags[k] !== undefined) args[k] = text(flags, k);
   if (args.range !== undefined && !(RANGES as readonly string[]).includes(args.range as string)) {
     throw new InputError(`--range must be one of today, 7d, 30d, month, all, got "${String(args.range)}"`);
   }
@@ -227,7 +227,7 @@ function rangeLabel(r: UsageReport["range"]): string {
   return span ? `${RANGE_NAMES[r.name]} (${span})` : RANGE_NAMES[r.name]!;
 }
 
-const BY_TITLES: Record<string, string> = { project: "Project", model: "Model", provider: "Provider", user: "User", day: "Day", week: "Week of", month: "Month" };
+const BY_TITLES: Record<string, string> = { project: "Project", model: "Model", provider: "Provider", user: "User", tag: "Tag", day: "Day", week: "Week of", month: "Month" };
 
 export function renderReport(r: UsageReport, p: Paint, limit: number): string {
   const lines = [p("bold", `Usage by ${r.by}, ${rangeLabel(r.range)}`), ...filterLine(r.filters, p), ""];

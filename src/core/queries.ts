@@ -5,6 +5,7 @@ import { storedApiClass } from "./apiErrors.ts";
 import { storedReason } from "./failures.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
 import { type PromptMetric, promptStats } from "./promptStats.ts";
+import { allTags, tagsForSessions } from "./tags.ts";
 
 export interface Filters {
   from?: number;
@@ -15,6 +16,8 @@ export interface Filters {
   model?: string;
   skill?: string;
   agent?: string;
+  /** A session tag: its sessions, their subagents' sessions, and the projects with that tag as their default. */
+  tag?: string;
 }
 
 export type Dimension = "provider" | "project" | "user" | "model" | "skill" | "agent" | "session" | "prompt" | "host";
@@ -25,6 +28,17 @@ export type Metric = "tokens" | "cost";
 type Params = Record<string, string | number | null>;
 
 const FILTER_COLUMNS: (keyof Filters)[] = ["provider", "project", "user", "model", "skill", "agent"];
+
+/**
+ * Rows of the sessions a tag reaches, resolved when the query runs, so tagging or untagging a session needs no rewrite
+ * of its rows: the tagged session itself, the sessions of its subagents (their parent carries the tag), and every row
+ * of a project that has the tag as its default. `alias` is the alias of a table with session_id and project.
+ */
+function tagCondition(alias: string): string {
+  return `(${alias}.session_id IN (SELECT session_id FROM session_tags WHERE tag = $tag
+            UNION SELECT s.id FROM sessions s JOIN session_tags g ON g.session_id = s.parent_session_id WHERE g.tag = $tag)
+          OR ${alias}.project IN (SELECT project FROM project_tags WHERE tag = $tag))`;
+}
 
 /** Builds a WHERE clause over the `usage` table (alias `u`). */
 export function whereClause(f: Filters, alias = "u"): { sql: string; params: Params } {
@@ -47,6 +61,10 @@ export function whereClause(f: Filters, alias = "u"): { sql: string; params: Par
       params[col] = v as string;
     }
   }
+  if (f.tag) {
+    parts.push(tagCondition(alias));
+    params.tag = f.tag;
+  }
   return { sql: parts.length ? `WHERE ${parts.join(" AND ")}` : "", params };
 }
 
@@ -63,7 +81,7 @@ const FILE_COUNTS = `COUNT(*) AS calls,
   SUM(CASE WHEN t.tool IN (${READ_TOOLS}) THEN 1 ELSE 0 END) AS reads,
   SUM(CASE WHEN t.tool IN (${EDIT_TOOLS}) THEN 1 ELSE 0 END) AS edits`;
 
-const TOKEN_SUMS = `
+export const TOKEN_SUMS = `
   COALESCE(SUM(u.total_tokens), 0)          AS tokens,
   COALESCE(SUM(u.input_tokens), 0)          AS input,
   COALESCE(SUM(u.output_tokens), 0)         AS output,
@@ -525,6 +543,7 @@ export class Queries {
     // Each session with what its main agent last did, its last tool and file, the subagents working right now and the
     // tool errors in the window. A session's subagents are its child sessions (omp, Codex) or other agents in it (Claude).
     const tree = "(u.session_id = $id OR u.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id))";
+    const tags = tagsForSessions(this.db, sessions.map((r) => r.id));
     const detailed = sessions.map((r) => {
       const p = { id: r.id, from, recent: now - 3 * MINUTE };
       const lastStop = this.get<{ stop: string | null }>(
@@ -551,6 +570,7 @@ export class Queries {
       return {
         ...r,
         projectLabel: projectLabel(r.project),
+        tags: tags.get(r.id) ?? [],
         status: liveStatus(r.lastTs, lastStop, now),
         lastTool: tool?.tool ?? null,
         lastFile: tool?.file ? relativeTo(tool.file, r.project) : null,
@@ -630,7 +650,9 @@ export class Queries {
     const params: Params = { ...w.params, limit: opts.limit ?? 50, offset: opts.offset ?? 0 };
     let having = "";
     if (opts.q) {
-      having = "HAVING title LIKE $q OR s.project LIKE $q OR s.id LIKE $q";
+      // A tag is found too, whether the session or its parent session carries it.
+      having = `HAVING title LIKE $q OR s.project LIKE $q OR s.id LIKE $q
+                OR EXISTS (SELECT 1 FROM session_tags g WHERE g.tag LIKE $q AND g.session_id IN (u.session_id, s.parent_session_id))`;
       params.q = `%${opts.q}%`;
     }
     const sortCol = { cost: "cost", tokens: "tokens", recent: "lastTs", messages: "messages", prompts: "prompts" }[opts.sort ?? "recent"] ?? "lastTs";
@@ -653,7 +675,8 @@ export class Queries {
        GROUP BY u.session_id ${having})`,
       opts.q ? { ...w.params, q: params.q! } : w.params,
     )!.n;
-    return { total: count, rows: rows.map((r) => ({ ...r, projectLabel: projectLabel(r.project as string | null) })) };
+    const tags = tagsForSessions(this.db, rows.map((r) => r.id));
+    return { total: count, rows: rows.map((r) => ({ ...r, projectLabel: projectLabel(r.project as string | null), tags: tags.get(r.id) ?? [] })) };
   }
 
   sessionDetail(id: string) {
@@ -997,6 +1020,8 @@ export class Queries {
         model: values("model"),
         skill: values("skill").filter((v) => v.value !== "(none)"),
         agent: values("agent"),
+        // Every tag in use, whatever the range: a tag is the user's own label, and picking one never comes up empty-handed.
+        tag: allTags(this.db).map((t) => ({ value: t.tag, label: t.tag, n: t.sessions })),
         range,
       };
     });

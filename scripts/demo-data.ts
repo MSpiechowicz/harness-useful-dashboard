@@ -395,5 +395,15 @@ db.transaction(() => {
   writers.get("sam")!.limit({ provider: "codex", windowId: "secondary", windowMinutes: 10_080, usedPercent: 61, resetsAt: NOW + 3 * DAY, plan: "pro", ts: NOW - 2 * MINUTE });
 })();
 resolveSpawnRefs(db);
+// Tags and notes: a client per project, billable and experiment on some sessions, one note.
+db.exec(`
+  INSERT INTO project_tags(project, tag) VALUES ('/Users/demo/code/storefront', 'acme'), ('/Users/demo/code/billing-api', 'globex'), ('/Users/demo/code/infra', 'internal');
+  INSERT OR IGNORE INTO session_tags(session_id, tag)
+    SELECT id, 'billable' FROM sessions WHERE parent_session_id IS NULL AND project IN ('/Users/demo/code/storefront', '/Users/demo/code/billing-api') AND rowid % 3 = 0;
+  INSERT OR IGNORE INTO session_tags(session_id, tag)
+    SELECT id, 'experiment' FROM sessions WHERE parent_session_id IS NULL AND project IN ('/Users/demo/code/mobile-app', '/Users/demo/code/data-pipeline') AND rowid % 4 = 0;
+  INSERT OR IGNORE INTO session_notes(session_id, note, updated_at)
+    SELECT id, 'Checkout rewrite for the spring campaign. Bill to the Acme retainer.', ${NOW} FROM sessions WHERE project = '/Users/demo/code/storefront' AND parent_session_id IS NULL ORDER BY started_at DESC LIMIT 1;
+`);
 db.close();
 console.log(`demo database written to ${out}`);

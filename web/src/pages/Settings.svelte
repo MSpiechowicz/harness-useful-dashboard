@@ -1,23 +1,25 @@
 <script lang="ts">
-  import { Bell, Check, Cloud, Download, FileUp, Info, Loader, Plus, Power, RefreshCw, Shrink, Trash2, TriangleAlert, Users } from "@lucide/svelte";
+  import { Bell, Check, Cloud, Download, FileText, FileUp, Info, Loader, Plus, Power, RefreshCw, Shrink, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import LangPicker from "../components/LangPicker.svelte";
+  import MarkdownView from "../components/MarkdownView.svelte";
   import NumberField from "../components/NumberField.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import PathList from "../components/PathList.svelte";
   import SettingRow from "../components/SettingRow.svelte";
+  import TagRules from "../components/TagRules.svelte";
   import Switch from "../components/Switch.svelte";
   import ThemeToggle from "../components/ThemeToggle.svelte";
   import { getJson, send } from "../lib/api.svelte.ts";
   import { decimal, relative } from "../lib/format.ts";
-  import { t } from "../lib/i18n.svelte.ts";
+  import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
   import { checkUpdate, installUpdate, updater } from "../lib/update.svelte.ts";
 
   type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
   type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs" | "zedDirs" | "clineDirs" | "rooDirs" | "kiloDirs" | "geminiDirs" | "copilotDirs";
-  type LimitKey = "claude" | "codex" | "omp" | "pi" | "opencode";
+  type LimitKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "copilot";
   interface Config {
     dbPath: string;
     journalMode: "auto" | "wal" | "delete";
@@ -31,6 +33,7 @@
     limits: Record<LimitKey, boolean>;
     budgets?: { daily: number | null; monthly: number | null; projects: Record<string, number>; notify: boolean; limitAlerts: boolean };
     cursorSync?: boolean;
+    digest?: { enabled: boolean; day: number; hour: number; dir: string };
   }
   interface Settings {
     config: Config;
@@ -64,7 +67,7 @@
     { key: "copilot", dirs: "copilotDirs" },
   ];
   /** Where plan limits can be read from (see Live). */
-  const LIMIT_SOURCES: LimitKey[] = ["claude", "codex", "opencode", "pi", "omp"];
+  const LIMIT_SOURCES: LimitKey[] = ["claude", "codex", "copilot", "opencode", "pi", "omp"];
 
   let cfg = $state<Config | null>(null);
   let currentDb = $state("");
@@ -160,6 +163,10 @@
     budgetDaily = b?.daily ?? 0;
     budgetMonthly = b?.monthly ?? 0;
     projectBudgets = Object.entries(b?.projects ?? {}).map(([project, cap]) => ({ project, cap }));
+    const g = s.config.digest;
+    digestDay = String(g?.day ?? 1);
+    digestHour = String(g?.hour ?? 9);
+    digestDir = g?.dir ?? "";
   }
 
   async function saveBudgets() {
@@ -180,6 +187,51 @@
     }
   }
 
+  // The weekly digest: the settings save as they change, the folder with its Save button. The last one is read on demand.
+  const DIGEST_DAYS = [1, 2, 3, 4, 5, 6, 0];
+  const digestDays = $derived(DIGEST_DAYS.map((d) => ({ value: String(d), label: new Intl.DateTimeFormat(i18n.locale, { weekday: "long" }).format(new Date(2024, 0, 7 + d)) })));
+  const digestHours = Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, "0")}:00` }));
+  let digestDay = $state("1");
+  let digestHour = $state("9");
+  let digestDir = $state("");
+  let digestDefaultDir = $state("");
+  let digestLast = $state<{ path: string; markdown: string } | null>(null);
+  let digestShown = $state(false);
+  let digestMsg = $state<string | null>(null);
+
+  async function saveDigest() {
+    if (!cfg?.digest) return;
+    busy = true;
+    errorMsg = null;
+    try {
+      const r = await send<Settings>("/api/settings", { digest: { enabled: cfg.digest.enabled, day: Number(digestDay), hour: Number(digestHour), dir: digestDir.trim() } });
+      apply(r);
+      flash(t("settings.saved"));
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function writeDigest() {
+    digestMsg = null;
+    try {
+      const r = await send<{ path: string; markdown: string }>("/api/digest");
+      digestLast = r;
+      digestShown = true;
+      digestMsg = t("settings.digestWritten", { path: r.path });
+    } catch (e) {
+      digestMsg = (e as Error).message;
+    }
+  }
+
+  async function loadDigest() {
+    const r = await getJson<{ last: { path: string; markdown: string } | null; dir: string }>("/api/digest");
+    digestLast = r.last;
+    digestDefaultDir = r.dir;
+  }
+
   async function testNotification() {
     testMsg = null;
     try {
@@ -196,6 +248,7 @@
     getJson<{ project: { value: string; label: string }[] }>("/api/filters")
       .then((f) => (projectOptions = f.project.map((o) => ({ value: o.value, label: o.label }))))
       .catch(() => {});
+    loadDigest().catch(() => {});
     getJson<CursorSync>("/api/cursor/sync")
       .then((s) => (cursorSync = s))
       .catch(() => {});
@@ -503,23 +556,21 @@
           <PathList bind:paths={dirs[src.key]} disabled={!cfg!.sources.enabled[src.key]} />
         </SettingRow>
       {/each}
-      <SettingRow label={t("settings.cursorSync")} hint={t("settings.cursorSyncHint")} wide>
-        {#snippet lead()}<Switch bind:checked={cfg!.cursorSync} label={t("settings.cursorSync")} onchange={toggleCursorSync} />{/snippet}
-        <div class="flex w-full flex-wrap items-center gap-3">
-          <button class="btn w-fit" onclick={syncCursor} disabled={!cfg.cursorSync || cursorSyncing || busy}>
-            {#if cursorSyncing}<Loader size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}{t("settings.cursorSyncNow")}
-          </button>
-          {#if cursorStatus}<span class="text-xs" class:text-bad={cursorStatus.bad} class:text-ink-2={!cursorStatus.bad}>{cursorStatus.text}</span>{/if}
-        </div>
-      </SettingRow>
+      <!-- Cursor keeps its usage on cursor.com: one row with both ways in, syncing (the switch) and a CSV import. -->
       <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} wide>
-        {#snippet lead()}<span class="block w-7"></span>{/snippet}
-        <div class="flex w-full flex-wrap items-center gap-3">
-          <label class="btn w-fit">
-            <FileUp size={14} />{t("settings.cursorImport")}
-            <input type="file" accept=".csv,text/csv" class="hidden" onchange={importCursor} />
-          </label>
-          {#if importMsg}<span class="text-xs text-ink-2">{importMsg}</span>{/if}
+        {#snippet lead()}<Switch bind:checked={cfg!.cursorSync} label={t("settings.cursorSync")} onchange={toggleCursorSync} />{/snippet}
+        <div class="flex w-full flex-col items-end gap-2">
+          <div class="flex flex-wrap justify-end gap-2">
+            <button class="btn" onclick={syncCursor} disabled={!cfg.cursorSync || cursorSyncing || busy}>
+              {#if cursorSyncing}<Loader size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}{t("settings.cursorSyncNow")}
+            </button>
+            <label class="btn cursor-pointer">
+              <FileUp size={14} />{t("settings.cursorImport")}
+              <input type="file" accept=".csv,text/csv" class="hidden" onchange={importCursor} />
+            </label>
+          </div>
+          {#if importMsg}<span class="text-right text-xs text-ink-2">{importMsg}</span>
+          {:else if cfg.cursorSync && cursorStatus}<span class="text-right text-xs" class:text-bad={cursorStatus.bad} class:text-ink-2={!cursorStatus.bad}>{cursorStatus.text}</span>{/if}
         </div>
       </SettingRow>
       {#snippet footer()}
@@ -578,6 +629,37 @@
         {/snippet}
       </Card>
     {/if}
+
+    {#if cfg.digest}
+      <Card title={t("settings.digest")} subtitle={t("settings.digestHint")} divided>
+        <SettingRow label={t("settings.digestEnable")} hint={t("settings.digestEnableHint")}>
+          <Switch bind:checked={cfg.digest.enabled} label={t("settings.digestEnable")} onchange={() => saveDigest()} />
+        </SettingRow>
+        <SettingRow label={t("settings.digestWhen")} hint={t("settings.digestWhenHint")}>
+          <div class="min-w-0 flex-1"><Dropdown full label={t("settings.digestDay")} bind:value={digestDay} options={digestDays} onchange={() => saveDigest()} /></div>
+          <div class="w-28 shrink-0"><Dropdown full label={t("settings.digestHour")} bind:value={digestHour} options={digestHours} onchange={() => saveDigest()} /></div>
+        </SettingRow>
+        <SettingRow label={t("settings.digestDir")} hint={t("settings.digestDirHint", { path: digestDefaultDir })} wide>
+          <input class="input w-full font-mono text-xs placeholder:font-sans" bind:value={digestDir} placeholder={t("settings.digestDirDefault")} aria-label={t("settings.digestDirLabel")} spellcheck="false" autocomplete="off" />
+        </SettingRow>
+        <SettingRow label={t("settings.digestNow")} hint={digestMsg ?? t("settings.digestNowHint")}>
+          <button class="btn" onclick={writeDigest}><FileText size={14} />{t("settings.digestNowButton")}</button>
+        </SettingRow>
+        <SettingRow label={t("settings.digestLast")} hint={digestLast ? digestLast.path : t("settings.digestNone")}>
+          {#if digestLast}
+            <button class="btn" onclick={() => (digestShown = !digestShown)} aria-expanded={digestShown}>{digestShown ? t("settings.digestHide") : t("settings.digestView")}</button>
+          {/if}
+        </SettingRow>
+        {#if digestShown && digestLast}
+          <div class="border-t border-line py-4"><MarkdownView source={digestLast.markdown} /></div>
+        {/if}
+        {#snippet footer()}
+          <button class="btn btn-primary" onclick={saveDigest} disabled={busy}>{t("settings.save")}</button>
+        {/snippet}
+      </Card>
+    {/if}
+
+    <TagRules />
 
     <Card title={t("settings.pricing")} subtitle={t("settings.pricingHint")} divided>
       <div class="card-flush -mx-5 overflow-x-auto">

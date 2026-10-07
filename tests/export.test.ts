@@ -38,14 +38,15 @@ describe("toCsv", () => {
 });
 
 describe("normalizeRow", () => {
-  test("timestamps become ISO 8601, nested values JSON, undefined dropped", () => {
+  test("timestamps become ISO 8601, lists of words joined, nested values JSON, undefined dropped", () => {
     const ts = Date.UTC(2026, 9, 7, 12, 30);
-    expect(normalizeRow({ ts, lastTs: ts, startedAt: ts, cost: 1.25, tags: ["a", "b"], meta: { k: 1 }, gone: undefined, n: null })).toEqual({
+    expect(normalizeRow({ ts, lastTs: ts, startedAt: ts, cost: 1.25, tags: ["a", "b"], ids: [1, 2], meta: { k: 1 }, gone: undefined, n: null })).toEqual({
       ts: "2026-10-07T12:30:00.000Z",
       lastTs: "2026-10-07T12:30:00.000Z",
       startedAt: "2026-10-07T12:30:00.000Z",
       cost: 1.25,
-      tags: '["a","b"]',
+      tags: "a, b",
+      ids: "[1,2]",
       meta: '{"k":1}',
       n: null,
     });

@@ -2,7 +2,7 @@
   import { onMount, untrack, type Component } from "svelte";
   import {
     ArrowDownUp, CalendarRange, Coins, CornerDownLeft, Cpu, Eraser, FolderKanban, GitBranch, Keyboard, Languages, Layers, MessageSquareText, Monitor, Moon, RefreshCw, Search,
-    Settings as SettingsIcon, Sun,
+    Settings as SettingsIcon, Sun, Tag,
   } from "@lucide/svelte";
   import { getJson, qs, send, type FilterOptions } from "../lib/api.svelte.ts";
   import { entityLabel } from "../lib/format.ts";
@@ -31,7 +31,7 @@
   }
   let { pages, help = false, filtersShown, onclose }: Props = $props();
 
-  type Group = "recent" | "pages" | "actions" | "sessions" | "prompts" | "branches" | "projects" | "models";
+  type Group = "recent" | "pages" | "actions" | "sessions" | "prompts" | "branches" | "projects" | "models" | "tags";
   const GROUP_LABEL: Record<Group, MessageKey> = {
     recent: "palette.recent",
     pages: "palette.pages",
@@ -41,6 +41,7 @@
     branches: "nav.branches",
     projects: "nav.projects",
     models: "nav.models",
+    tags: "nav.tags",
   };
   interface Item {
     id: string;
@@ -210,12 +211,13 @@
         .filter((b) => b.branch !== "(none)")
         .map((b): Item => ({ id: `branch:${b.id}`, group: "branches", label: b.branch, hint: entityLabel("project", b.project, b.projectLabel), icon: GitBranch, run: () => navigate("branches", b.id) }));
       items.push(...rank(branches, q, [], false).slice(0, PER_GROUP));
-      const options = (key: "project" | "model", group: Group, icon: Component<any>) =>
+      const options = (key: "project" | "model" | "tag", group: Group, icon: Component<any>) =>
         (lists!.filters?.[key] ?? [])
           .filter((o) => o.value !== "(none)")
           .map((o): Item => ({ id: `${key}:${o.value}`, group, label: entityLabel(key, o.value, o.label), hint: t("palette.setFilter"), icon, run: () => setFilter(key, o.value) }));
       items.push(...rank(options("project", "projects", FolderKanban), q, [], false).slice(0, PER_GROUP));
       items.push(...rank(options("model", "models", Cpu), q, [], false).slice(0, PER_GROUP));
+      items.push(...rank(options("tag", "tags", Tag), q, [], false).slice(0, PER_GROUP));
     }
     return items;
   });

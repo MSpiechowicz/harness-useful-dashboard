@@ -3,7 +3,7 @@
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
-    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Search, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
+    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Search, Settings as SettingsIcon, Sparkles, Tag, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
@@ -30,6 +30,7 @@
     sessions: () => import("./pages/Sessions.svelte"),
     promptDetail: () => import("./pages/PromptDetail.svelte"),
     prompts: () => import("./pages/Prompts.svelte"),
+    tags: () => import("./pages/Tags.svelte"),
     tools: () => import("./pages/Tools.svelte"),
     files: () => import("./pages/Files.svelte"),
     time: () => import("./pages/Time.svelte"),
@@ -69,6 +70,7 @@
       { page: "users", label: "nav.users", icon: Users },
       { page: "skills", label: "nav.skills", icon: Sparkles },
       { page: "agents", label: "nav.agents", icon: Bot },
+      { page: "tags", label: "nav.tags", icon: Tag },
     ] },
     { label: "nav.group.activity", items: [
       { page: "sessions", label: "nav.sessions", icon: Layers },

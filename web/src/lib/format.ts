@@ -171,6 +171,6 @@ export function shortPath(p: string | null | undefined, keep = 2): string {
 export function entityLabel(dim: string, key: string | null, label: string): string {
   if (key === "__other__") return t("chart.other");
   if (dim === "type") return t(`tok.${key}` as "tok.input");
-  if (key == null || key === "(none)") return dim === "project" ? t("common.noProject") : t("common.none");
+  if (key == null || key === "(none)") return dim === "project" ? t("common.noProject") : dim === "tag" ? t("tags.untagged") : t("common.none");
   return label;
 }

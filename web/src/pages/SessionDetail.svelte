@@ -7,6 +7,7 @@
   import Empty from "../components/Empty.svelte";
   import ListCard from "../components/ListCard.svelte";
   import Pager from "../components/Pager.svelte";
+  import TagEditor from "../components/TagEditor.svelte";
   import ValueBar from "../components/ValueBar.svelte";
   import Kpi from "../components/Kpi.svelte";
   import { qs, settled, useFetch, type Totals } from "../lib/api.svelte.ts";
@@ -31,6 +32,10 @@
     files: { key: string; calls: number }[];
     children: { id: string; agent: string | null; title: string | null; tokens: number; cost: number }[];
     lines: { added: number; removed: number; changed: number; files: number; costPer100: number | null };
+    tags: string[];
+    inherited: string[];
+    rule: string | null;
+    note: { note: string; updatedAt: number } | null;
   }
 
   const d = useFetch<Detail>(() => `/api/session${qs({ id })}`);
@@ -112,6 +117,8 @@
           />
         </div>
       </div>
+
+      <TagEditor {id} tags={d.data.tags} inherited={d.data.inherited} rule={d.data.rule} note={d.data.note} />
 
       {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} prompts={d.data.prompts.length > 1 ? promptNo : undefined} />{/if}
 

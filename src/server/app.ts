@@ -12,6 +12,7 @@ import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
 import { redactStored } from "../core/redact.ts";
 import { Queries } from "../core/queries.ts";
 import { compact, type DbSize, dbSize, trimDetail, trimDue } from "../core/retention.ts";
+import { buildDigest, type Digest, type DigestContext, type DigestWeek, digestDir, dueSlot, latestSlot, markSlot, notificationText, rememberDigest, writeDigestFile } from "../core/digest.ts";
 import { notify } from "./notify.ts";
 import { type CursorSyncState, syncCursor, syncState } from "../core/cursorSync.ts";
 
@@ -19,6 +20,8 @@ import { type CursorSyncState, syncCursor, syncState } from "../core/cursorSync.
 const LIMIT_POLL_MS = 5 * 60_000;
 /** How often the Cursor sync looks whether it's due (every 6 hours, or after a backoff, see cursorSync.ts). */
 const CURSOR_CHECK_MS = 10 * 60_000;
+/** How often the weekly digest looks whether it is due. */
+const DIGEST_CHECK_MS = 10 * 60_000;
 /** Only the plans used this recently are asked about: a quiet machine asks nobody. */
 const LIMIT_ACTIVE_MS = 30 * 60_000;
 
@@ -40,6 +43,11 @@ export class App {
   private timer: ReturnType<typeof setInterval> | null = null;
   private limitTimer: ReturnType<typeof setInterval> | null = null;
   private cursorTimer: ReturnType<typeof setInterval> | null = null;
+  /** Shows the digest's notification. A field so tests can stand in for the desktop. */
+  notifier: typeof notify = notify;
+  private digestTimer: ReturnType<typeof setInterval> | null = null;
+  /** The digest slot that failed to write: not tried again until the next start, so a bad folder doesn't repeat every check. */
+  private digestFailed: number | null = null;
   /** The Cursor sync in flight, shared by the timer and Sync now. */
   private cursorSyncing: Promise<CursorSyncState> | null = null;
   /** Plan-limit readings, shared by the API and the background poll so providers are asked sparingly. */
@@ -183,13 +191,18 @@ export class App {
     const cursor = () => void this.syncCursor().catch((err) => console.error("[cursor]", err));
     this.cursorTimer = setInterval(cursor, CURSOR_CHECK_MS);
     if (this.cfg.cursorSync) cursor();
+    // Opt-in, and checked against the settings each time: due once a week, caught up when the app was off.
+    this.digestTimer = setInterval(() => this.checkDigest(), DIGEST_CHECK_MS);
+    this.checkDigest();
   }
 
   stopBackgroundScan(): void {
     if (this.timer) clearInterval(this.timer);
     if (this.limitTimer) clearInterval(this.limitTimer);
     if (this.cursorTimer) clearInterval(this.cursorTimer);
+    if (this.digestTimer) clearInterval(this.digestTimer);
     this.cursorTimer = null;
+    this.digestTimer = null;
     this.timer = null;
     this.limitTimer = null;
   }
@@ -212,6 +225,39 @@ export class App {
         this.cursorSyncing = null;
       });
     return this.cursorSyncing;
+  }
+
+  /**
+   * Builds the digest of a week and writes it into the digest folder. Open windows aren't told: the caller shows it.
+   * `ref` is the moment the week counts back from (see buildDigest).
+   */
+  writeDigest(week: DigestWeek, ref?: number): { digest: Digest; path: string } {
+    const { user, host } = this.identity;
+    const c: DigestContext = {
+      db: this.db, queries: this.queries, budgets: this.cfg.budgets, user, host, now: Date.now(), prices: this.prices, lang: this.cfg.language, hiddenTips: this.cfg.tips.hidden,
+    };
+    const digest = buildDigest(c, week, ref);
+    const path = writeDigestFile(digestDir(this.cfg.digest), digest);
+    rememberDigest(this.db, host, path);
+    return { digest, path };
+  }
+
+  /** Writes last week's digest and shows the notification when its slot has come and none was written for it. */
+  checkDigest(now = Date.now()): { digest: Digest; path: string } | null {
+    const { host } = this.identity;
+    const slot = dueSlot(this.db, host, this.cfg.digest, now);
+    if (slot == null || slot === this.digestFailed) return null;
+    try {
+      const done = this.writeDigest("last", slot);
+      markSlot(this.db, host, slot);
+      const { title, body } = notificationText(done.digest, this.cfg.language);
+      this.notifier(title, body).catch(() => {});
+      return done;
+    } catch (err) {
+      this.digestFailed = slot;
+      console.error("[digest]", err);
+      return null;
+    }
   }
 
   /** Reads the limits of the plans in use, which keeps them in the history. */
@@ -260,14 +306,21 @@ export class App {
   }
 
   updateConfig(patch: SettingsPatch): AppConfig {
-    const { sources, limits, budgets, ...rest } = patch;
+    const { sources, limits, budgets, digest, ...rest } = patch;
+    const was = this.cfg.digest;
     this.cfg = {
       ...this.cfg,
       ...rest,
       sources: { ...this.cfg.sources, ...sources, enabled: { ...this.cfg.sources.enabled, ...sources?.enabled } },
       limits: { ...this.cfg.limits, ...limits },
       budgets: { ...this.cfg.budgets, ...budgets },
+      digest: { ...this.cfg.digest, ...digest },
     };
+    // Turned on, or moved to another time, in the middle of a week: that week's slot has passed already, so the first
+    // digest is the next one.
+    const d = this.cfg.digest;
+    if (d.enabled && (!was.enabled || d.day !== was.day || d.hour !== was.hour)) markSlot(this.db, this.identity.host, latestSlot(Date.now(), d.day, d.hour));
+    this.digestFailed = null;
     saveConfig(this.cfg);
     this.startBackgroundScan();
     if (patch.detailRetentionMonths !== undefined) this.trimIfDue();

@@ -167,6 +167,14 @@ export interface BillingRow {
   estimated: boolean;
 }
 
+/** One tag's usage (/api/tags): the sessions that carry it, a subagent's included. */
+export interface TagRow extends BreakdownRow {
+  added: number;
+  removed: number;
+  changed: number;
+  costPer100: number | null;
+}
+
 export interface Breakdown {
   total: { tokens: number; cost: number };
   rows: BreakdownRow[];
@@ -209,6 +217,7 @@ export interface FilterOptions {
   model: FilterOption[];
   skill: FilterOption[];
   agent: FilterOption[];
+  tag: FilterOption[];
   range: { minTs: number | null; maxTs: number | null; rows: number };
 }
 

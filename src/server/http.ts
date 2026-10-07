@@ -5,6 +5,7 @@ import { type CursorSyncState, syncState } from "../core/cursorSync.ts";
 import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
 import { branchDetail, branches } from "../core/branches.ts";
 import { LINES_DIMS, lines, linesSeries, sessionLines } from "../core/changes.ts";
+import { type DigestWeek, digestDir, lastDigest } from "../core/digest.ts";
 import { drift } from "../core/drift.ts";
 import { friction } from "../core/friction.ts";
 import { parseSettings } from "../core/config.ts";
@@ -15,6 +16,8 @@ import { activePlans } from "../core/limits.ts";
 import { limitHistory, planValue } from "../core/plans.ts";
 import { budgetStatus, message } from "../core/budgets.ts";
 import { generateTips } from "../core/tips.ts";
+import { addTag, allTags, projectRules, removeTag, sessionTags, setNote, setProjectRules } from "../core/tags.ts";
+import { tagUsage } from "../core/tagUsage.ts";
 import { timing } from "../core/timing.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
@@ -34,7 +37,7 @@ export function parseFilters(sp: URLSearchParams): Filters {
     return Number.isFinite(x) ? x : undefined;
   };
   const s = (k: string) => sp.get(k) || undefined;
-  return { from: n("from"), to: n("to"), provider: s("provider"), project: s("project"), user: s("user"), model: s("model"), skill: s("skill"), agent: s("agent") };
+  return { from: n("from"), to: n("to"), provider: s("provider"), project: s("project"), user: s("user"), model: s("model"), skill: s("skill"), agent: s("agent"), tag: s("tag")?.trim().toLowerCase().slice(0, 100) };
 }
 
 function pick<T extends string>(v: string | null, allowed: readonly T[], fallback: T): T {
@@ -265,8 +268,14 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/session": {
           const id = sp.get("id") ?? "";
           const detail = q.sessionDetail(id);
-          return json({ ...detail, lines: sessionLines(app.db, id, detail.totals?.cost ?? 0) });
+          return json({ ...detail, lines: sessionLines(app.db, id, detail.totals?.cost ?? 0), ...sessionTags(app.db, id) });
         }
+        case "/api/tags":
+          return json(tagUsage(app.db, f));
+        case "/api/tags/all":
+          return json(allTags(app.db));
+        case "/api/tags/rules":
+          return json(projectRules(app.db));
         case "/api/lines":
           return json(lines(app.db, f, sp.has("dim") ? pick(sp.get("dim"), LINES_DIMS, "model") : undefined));
         case "/api/lines/series":
@@ -317,6 +326,9 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         }
         case "/api/cursor/sync":
           return json(cursorSyncStatus(app, syncState(app.db, app.identity.host)));
+        case "/api/digest":
+          // The latest digest this machine wrote, for the view in Settings, and the folder they go to.
+          return json({ last: lastDigest(app.db, app.identity.host), dir: digestDir(app.cfg.digest) });
         case "/api/budgets": {
           const b = app.cfg.budgets;
           return json({ config: b, items: budgetStatus(app.db, b, app.identity.user) });
@@ -338,8 +350,24 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
       }
     }
 
-    if (method === "POST" || method === "PUT") {
+    if (method === "POST" || method === "PUT" || method === "DELETE") {
+      if (method === "DELETE" && path !== "/api/tags") return error(`no route for ${method} ${url.pathname}`, 404);
       switch (path) {
+        // Tags and notes are the user's own data: written here, never by a scan. { session, tag } and { session, note }.
+        case "/api/tags":
+        case "/api/session/note":
+        case "/api/tags/rules": {
+          const body = (await jsonBody(req)) as Record<string, unknown> | undefined;
+          if (!body || typeof body !== "object") return error("expected a JSON object");
+          let result;
+          if (path === "/api/tags/rules" && method === "PUT") result = setProjectRules(app.db, body.rules);
+          else if (path === "/api/session/note" && method === "PUT") result = setNote(app.db, body.session, body.note);
+          else if (path === "/api/tags" && method === "POST") result = addTag(app.db, body.session, body.tag);
+          else if (path === "/api/tags" && method === "DELETE") result = removeTag(app.db, body.session, body.tag);
+          else return error(`no route for ${method} ${url.pathname}`, 404);
+          if ("error" in result) return error(result.error);
+          return json(result.ok);
+        }
         case "/api/scan": {
           const result = await app.scanNow(sp.get("full") === "1");
           return json(result);
@@ -408,6 +436,11 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/db/compact":
           // VACUUM: rewrites the whole file, and no scan runs until it is done.
           return json(await app.compactDb());
+        case "/api/digest": {
+          // Write one now: the last 7 days by default, or last week's Monday to Sunday with ?week=last.
+          const { digest, path } = app.writeDigest(pick(sp.get("week"), ["last", "this"] as const satisfies readonly DigestWeek[], "this"));
+          return json({ path, ...digest });
+        }
         case "/api/notify/test": {
           const lang = app.cfg.language;
           return json({ shown: await notify(message(lang, "title"), message(lang, "test")) });

@@ -151,6 +151,7 @@ harness-dashboard mcp            # MCP server over stdio, started by an agent
 harness-dashboard today          # today's cost and usage against yesterday
 harness-dashboard report --range 7d --by model --csv
 harness-dashboard limits --check # exit code 10 near a plan limit or budget, 11 at it
+harness-dashboard digest         # last week as a short Markdown report
 ```
 
 The dashboard runs a small local server on `127.0.0.1` and opens it in a chrome-less **app window** when a
@@ -182,13 +183,14 @@ bytes appended since the last one, so rescans take milliseconds.
 ### Plan limits
 
 The **Live** view shows how much of each plan limit is left, only for the plans the sessions in its time window run on:
-Claude Code counts against the Claude plan of its login, Codex against the ChatGPT plan it uses, and OpenCode, pi and
-omp against whatever they billed a call through, read with their own logins.
+Claude Code counts against the Claude plan of its login, Codex against the ChatGPT plan it uses, Copilot CLI against the
+GitHub Copilot plan of its login, and OpenCode, pi and omp against whatever they billed a call through, read with their own logins.
 
 | Plan | Where the limits come from |
 |---|---|
 | Claude (Pro, Max) | Anthropic, asked with the login Claude Code keeps on the machine (`~/.claude/.credentials.json`, or the macOS keychain). The same numbers Claude Code's `/usage` shows. An expired login is reported, never renewed, so Claude Code stays signed in. |
 | Codex (ChatGPT plans) | The rate limits Codex writes into its session logs, read while ingesting. No network request. A reading is as fresh as the last Codex session. |
+| GitHub Copilot (Copilot CLI) | GitHub, asked with the login Copilot CLI keeps: the `copilot-cli` entry in the OS keychain (macOS Keychain, Linux libsecret), `~/.copilot/config.json` (or `$COPILOT_HOME`) when it was stored there, or the GitHub CLI's login as Copilot CLI itself falls back to. Shows premium requests used this month. Never renewed. Windows Credential Manager is not read yet |
 | Everything omp is logged in to | `omp usage --json`: Claude, ChatGPT/Codex, GitHub Copilot premium requests, Gemini and more |
 | Everything OpenCode or pi is logged in to | Their logins (`~/.local/share/opencode/auth.json`, `~/.pi/agent/auth.json`), each asked at its own provider: Anthropic for a Claude plan, ChatGPT for a Codex plan, GitHub for Copilot premium requests. Logins are never renewed, so an expired one is reported until the tool is used again |
 
@@ -305,6 +307,54 @@ limit_mark() {
   [ "$code" = 11 ] && printf '[limit hit] '
 }
 PS1='$(limit_mark)'"$PS1"
+```
+
+### Weekly digest
+
+A short Markdown report of a week of usage, for people who would rather read one page on Monday than open the dashboard.
+It has the cost and tokens against the week before (with the change in percent), sessions, prompts, lines changed and
+what 100 changed lines cost, the top 5 projects, models and providers, how the monthly budgets stand with their pace,
+the peak of each plan limit, the most common causes of tool failures with the API error count, and the 3 tips with the
+most at stake. It is written in the language of the dashboard and reads as well as plain text as in a Markdown viewer.
+
+```text
+# Weekly digest: 2026-09-28 to 2026-10-04
+
+| | Last week | Week before | Change |
+|---|---:|---:|---:|
+| Cost | $187.74 | $125.07 | +50% |
+| Tokens | 612M | 408M | +50% |
+| Sessions | 73 | 71 | +3% |
+| Prompts | 285 | 221 | +29% |
+| Lines changed | 46.2k | | |
+| Cost per 100 lines | $0.41 | $0.38 | +6% |
+
+## Top projects
+
+- `storefront`: $63.65 (34%)
+- `billing-api`: $36.29 (19%)
+```
+
+Turn it on in **Settings → Weekly digest**. It is off by default. Pick the day and hour (Monday at 9:00 local time
+unless you change it) and a folder. The folder is `digests` in the app data folder unless you set one. The dashboard
+writes `<year>-W<week>.md` there, for the Monday to Sunday before, and shows one desktop notification when it is ready.
+Nothing is sent anywhere. A digest is written once a week. If the dashboard was not running at that hour, it is written
+when it starts again, but never for a week older than the last one. **Write one now** covers the last 7 days up to now,
+and **View** shows the latest one in the app.
+
+On the command line it prints to the terminal and reads the database only, like the reports above:
+
+```sh
+harness-dashboard digest                          # the previous Monday to Sunday
+harness-dashboard digest --week this              # the last 7 days up to now
+harness-dashboard digest --out ~/digests/week.md  # write a file instead of printing
+harness-dashboard digest --json                   # the numbers as JSON
+```
+
+A digest every Monday at 8:00 from cron, without the dashboard running (it reads what the last scan stored):
+
+```sh
+0 8 * * 1  harness-dashboard digest --out "$HOME/reports/ai-usage-$(date +\%G-W\%V).md"
 ```
 
 ### MCP server
@@ -434,6 +484,18 @@ month's pace. The dashboard sends a desktop notification when a budget reaches 8
 plan limit is 80% used. Each one once per day, month or limit window. Notifications come from the background server, so
 they arrive with no dashboard window open: through `notify-send` on Linux (from libnotify), the Notification Center on
 macOS and a toast on Windows. **Send test** checks that your system lets them through.
+
+### Tags and notes
+
+Open a session and add tags such as a client name (`acme`), `experiment` or `billable`, and a short note. Tags are
+lowercase, up to 32 characters of letters, digits and `. _ : / -`. Then filter by **Tag** like by any other dimension,
+see what each tag cost under **Tags** (with sessions and lines changed, and an export), and group a report with
+`report --by tag` or filter it with `--tag acme`. A subagent's session takes its parent's tags. In **Settings → Tags**,
+give every session of a project a tag automatically. A session with several tags counts in each of them, so totals
+across tags can be higher than the overall total.
+
+Tags and notes are kept in the database, never trimmed by retention. On a shared database every machine sees them.
+Secrets in a note are removed when it is saved.
 
 ### Shared database (iCloud, Dropbox, network share)
 

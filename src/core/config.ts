@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { type AlertLang, type BudgetConfig, DEFAULT_BUDGETS } from "./budgets.ts";
+import { DEFAULT_DIGEST, type DigestConfig } from "./digest.ts";
 import { configPath, defaultDbPath, expandHome, localIdentity } from "./paths.ts";
 
 export type OpenMode = "app" | "browser" | "none";
@@ -54,7 +55,7 @@ export interface AppConfig {
   checkUpdates: boolean;
   sources: SourceConfig;
   /** Where the Live view reads how much of each plan limit is left (see limits.ts). */
-  limits: { claude: boolean; omp: boolean; codex: boolean; pi: boolean; opencode: boolean };
+  limits: { claude: boolean; omp: boolean; codex: boolean; pi: boolean; opencode: boolean; copilot: boolean };
   /**
    * Asks cursor.com for this account's usage with the login Cursor keeps on this machine (see cursorSync.ts). Off until
    * the user turns it on: it is the one source that is not on disk.
@@ -64,6 +65,8 @@ export interface AppConfig {
   planPrices: Record<string, number>;
   /** Spending caps and the desktop alerts that come with them (see budgets.ts). */
   budgets: BudgetConfig;
+  /** The weekly digest: written to a folder on a schedule when on (see digest.ts). */
+  digest: DigestConfig;
   /** The UI's language, which the desktop alerts use too. */
   language: AlertLang;
   /** Tips the user put away: `hidden` holds rule ids (never shown again), `read` holds tip keys (seen, kept on the Tips page). */
@@ -107,10 +110,11 @@ export function defaultConfig(): AppConfig {
       copilotDirs: [process.env.COPILOT_HOME ?? join(home, ".copilot")],
       enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true },
     },
-    limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
+    limits: { claude: true, omp: true, codex: true, pi: true, opencode: true, copilot: true },
     cursorSync: false,
     planPrices: {},
     budgets: { ...DEFAULT_BUDGETS, projects: {} },
+    digest: { ...DEFAULT_DIGEST },
     language: "en",
     tips: { hidden: [], read: [] },
   };
@@ -180,6 +184,7 @@ function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {
     },
     limits: { ...base.limits, ...(patch.limits ?? {}) },
     budgets: { ...base.budgets, ...(patch.budgets ?? {}) },
+    digest: { ...base.digest, ...(patch.digest ?? {}) },
     tips: { ...base.tips, ...(patch.tips ?? {}) },
   };
 }
@@ -221,11 +226,12 @@ export function retentionMonths(months: unknown): number {
 
 const SOURCE_DIRS = ["claudeDirs", "codexDirs", "ompDirs", "piDirs", "opencodeDirs", "zedDirs", "clineDirs", "rooDirs", "kiloDirs", "geminiDirs", "copilotDirs"] as const;
 const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo", "gemini", "copilot"] as const;
-const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode"] as const;
+const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode", "copilot"] as const;
 
 /** A settings change: what `parseSettings` lets through, merged into the config by the server. */
-export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips" | "budgets">> & {
+export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips" | "budgets" | "digest">> & {
   budgets?: Partial<BudgetConfig>;
+  digest?: Partial<DigestConfig>;
   sources?: Partial<Omit<SourceConfig, "enabled">> & { enabled?: Partial<SourceConfig["enabled"]> };
   limits?: Partial<AppConfig["limits"]>;
 };
@@ -335,6 +341,28 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
       budgets.projects = projects;
     }
     patch.budgets = budgets;
+  }
+  if (has("digest")) {
+    const g = body.digest;
+    if (!isObject(g)) return invalid("digest");
+    const digest: Partial<DigestConfig> = {};
+    if ("enabled" in g) {
+      if (typeof g.enabled !== "boolean") return invalid("digest.enabled");
+      digest.enabled = g.enabled;
+    }
+    for (const [k, max] of [["day", 6], ["hour", 23]] as const) {
+      if (!(k in g)) continue;
+      const v = g[k];
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > max) return invalid(`digest.${k}`);
+      digest[k] = v;
+    }
+    if ("dir" in g) {
+      // A folder to write into: absolute (or under the home folder), so the files never land in a surprising place.
+      const dir = typeof g.dir === "string" ? g.dir.trim() : null;
+      if (dir == null || dir.length > 4096 || dir.includes("\0") || (dir !== "" && !isAbsolute(expandHome(dir)))) return invalid("digest.dir");
+      digest.dir = dir;
+    }
+    patch.digest = digest;
   }
   if (has("language")) {
     if (!["en", "de", "es", "fr", "pl"].includes(body.language as string)) return invalid("language");

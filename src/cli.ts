@@ -6,6 +6,7 @@ import { openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
 import { fallbackLine, gather, parseInput, render, useColor } from "./core/statusline.ts";
 import { REPORT_COMMANDS, type ReportCommand, runReport } from "./core/reportCli.ts";
+import { runDigest } from "./core/digest.ts";
 import { InputError } from "./core/reports.ts";
 import { importCursorCsv } from "./core/ingest/cursor.ts";
 import { McpServer, serveStream } from "./mcp/server.ts";
@@ -27,8 +28,9 @@ Usage:
   ${BIN_NAME} scan [--full]          Ingest new usage from local logs and exit
   ${BIN_NAME} import-cursor <file>   Import a Cursor usage CSV export
   ${BIN_NAME} today                  Today's cost, tokens and sessions against yesterday
-  ${BIN_NAME} report [options]       Cost by project, model, provider, user, day, week or month
+  ${BIN_NAME} report [options]       Cost by project, model, provider, user, tag, day, week or month
   ${BIN_NAME} limits [--check]       Plan limits and budgets, with exit codes for scripts
+  ${BIN_NAME} digest [options]       The last week as a Markdown report: cost, projects, budgets, limits, tips
   ${BIN_NAME} statusline             Print one status line for Claude Code (reads its JSON on stdin)
   ${BIN_NAME} mcp                    Serve usage data to AI agents over MCP (stdio, read-only)
   ${BIN_NAME} update [--check]       Update to the latest release
@@ -46,12 +48,18 @@ Statusline options:
                     Placeholders: {model} {session} {today} {limit}
   --no-color        Plain text (NO_COLOR is honored too)
 
+Digest options:
+  --week <w>        last (the previous Monday to Sunday, default) or this (the last 7 days up to now)
+  --out <file>      Write the Markdown to a file instead of printing it
+  --json            The numbers as JSON
+
 Report options (today, report, limits):
   --range <r>       today, 7d, 30d, month or all (report default 30d)
   --from <date>     Start day, YYYY-MM-DD in local time (with --to, instead of --range)
   --to <date>       Last day, included
-  --by <what>       project, model, provider, user, day, week or month (default project)
-  --provider, --project, --model, --user <value>   Only this harness, project, model or user
+  --by <what>       project, model, provider, user, tag, day, week or month (default project)
+  --provider, --project, --model, --user, --tag <value>   Only this harness, project, model, user or session tag
+                    With --by tag a session with several tags counts in each, so rows can exceed the total
   --json, --csv     Machine-readable output (CSV for report only)
   --limit <n>       Rows in the report table (default 25, 0 for all)
   --scan            Scan the local logs first (writes the database)
@@ -67,7 +75,7 @@ interface Args {
 }
 
 /** Flags that take a value: `--db x` as well as `--db=x`. */
-const VALUE_FLAGS = ["db", "port", "format", "range", "from", "to", "by", "provider", "project", "model", "user", "warn", "limit"];
+const VALUE_FLAGS = ["db", "port", "format", "range", "from", "to", "by", "provider", "project", "model", "user", "warn", "limit", "week", "out"];
 
 export function parseArgs(argv: string[]): Args {
   const flags: Record<string, string | boolean> = {};
@@ -243,6 +251,22 @@ async function report(cmd: ReportCommand, args: Args, dbFlag: string | undefined
   }
 }
 
+/** `digest`: a week's Markdown report from the database, printed or written to a file. Writes nothing else. */
+function digest(args: Args, dbFlag: string | undefined): void {
+  try {
+    const cfg = loadConfig();
+    const { user, host } = localIdentity();
+    const { out, wrote } = runDigest(args.flags, {
+      dbPath: resolveDbPath(cfg, dbFlag).path, budgets: cfg.budgets, hiddenTips: cfg.tips.hidden, lang: cfg.language, user: cfg.userName || user, host, now: Date.now(),
+    });
+    if (wrote) console.error(`Wrote ${wrote}`);
+    else process.stdout.write(out);
+  } catch (err) {
+    console.error(`error: ${(err as Error).message}`);
+    process.exitCode = err instanceof InputError ? 2 : 1;
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.flags.help || args.cmd === "help") return void console.log(HELP);
@@ -251,6 +275,7 @@ async function main(): Promise<void> {
   if (args.cmd === "statusline") return statusline(args, typeof args.flags.db === "string" ? args.flags.db : undefined);
   // Read-only as well: no app data folder is created for it.
   if (args.cmd === "mcp") return mcp(typeof args.flags.db === "string" ? args.flags.db : undefined);
+  if (args.cmd === "digest") return digest(args, typeof args.flags.db === "string" ? args.flags.db : undefined);
   // Reports read the database only: no app data folder either, unless --scan writes one.
   if ((REPORT_COMMANDS as readonly string[]).includes(args.cmd)) return report(args.cmd as ReportCommand, args, typeof args.flags.db === "string" ? args.flags.db : undefined);
   ensureAppDataDir();

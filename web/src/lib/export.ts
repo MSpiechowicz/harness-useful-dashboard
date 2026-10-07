@@ -13,13 +13,14 @@ const BOM = "﻿";
 /** A field holding epoch milliseconds: `ts`, `lastTs`, `firstTs`, `startedAt`… */
 const isTimeKey = (k: string) => k === "ts" || /(Ts|At)$/.test(k);
 
-/** One table row as flat cells: timestamps to ISO 8601, nested values to JSON text, everything else as it is. */
+/** One table row as flat cells: timestamps to ISO 8601, a list of words (tags) joined, other nested values to JSON text, everything else as it is. */
 export function normalizeRow(row: object): ExportRow {
   const out: ExportRow = {};
   for (const [k, v] of Object.entries(row)) {
     if (v === undefined || typeof v === "function") continue;
     if (typeof v === "number" && isTimeKey(k) && Number.isFinite(v) && v > 1e11) out[k] = new Date(v).toISOString();
     else if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
+    else if (Array.isArray(v) && v.every((x) => typeof x === "string" && !x.includes(", "))) out[k] = v.join(", ");
     else out[k] = JSON.stringify(v);
   }
   return out;

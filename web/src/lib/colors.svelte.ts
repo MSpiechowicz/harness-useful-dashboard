@@ -32,7 +32,7 @@ export async function loadColorRanking(): Promise<void> {
     type Options = Record<string, { value: string }[]>;
     const [recent, all] = await Promise.all([getJson<Options>(`/api/filters?from=${from}`), getJson<Options>("/api/filters")]);
     const r: Record<string, string[]> = {};
-    for (const dim of ["project", "user", "model", "skill", "agent"]) {
+    for (const dim of ["project", "user", "model", "skill", "agent", "tag"]) {
       r[dim] = [...new Set([...(recent[dim] ?? []), ...(all[dim] ?? [])].map((o) => o.value))];
     }
     ranking = r;

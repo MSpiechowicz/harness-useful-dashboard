@@ -16,8 +16,9 @@
   const visible = $derived(
     FILTER_KEYS.filter((k) => {
       const list = opts.data?.[k] ?? [];
-      // Hide dimensions with nothing to choose between, unless a value is selected.
-      return store[k] !== "" || list.length > 1;
+      // Hide dimensions with nothing to choose between, unless a value is selected. A single tag is a choice still:
+      // the sessions with it and the ones without.
+      return store[k] !== "" || list.length > (k === "tag" ? 0 : 1);
     }),
   );
 
