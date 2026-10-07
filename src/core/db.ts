@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -198,6 +198,14 @@ const MIGRATIONS: Record<number, string> = {
     -- Read the omp, pi and Codex logs once more for the briefs of the subagents already ingested. Records are keyed
     -- by their place in the logs, so reading again changes nothing else.
     DELETE FROM ingest_files WHERE path LIKE '%.jsonl';
+  `,
+  // The Live view looked up subagent sessions by parent and outcomes by session or time with full table scans (seconds
+  // per poll on a year of history), and every scan read the projects of this host through the project index.
+  8: /* sql */ `
+    CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
+    CREATE INDEX IF NOT EXISTS idx_outcomes_ts ON outcomes(ts);
+    CREATE INDEX IF NOT EXISTS idx_outcomes_session ON outcomes(session_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_usage_host_project ON usage(host, project);
   `,
 };
 

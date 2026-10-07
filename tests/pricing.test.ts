@@ -61,6 +61,19 @@ describe("PriceBook", () => {
     expect(book.lookup("claude-opus-4-1-20250805").rule).toBe("claude-opus-4-1*");
   });
 
+  test.each([
+    ["gpt-4.1-nano-2025-04-14", 0.1, 0.4],
+    ["gpt-4.1-2025-04-14", 2, 8],
+    ["o3-pro", 20, 80],
+    ["o3-mini", 1.1, 4.4],
+    ["o3", 2, 8],
+    ["gpt-5-pro", 15, 120],
+  ])("OpenAI %p is priced at its own list price", (model, input, output) => {
+    const hit = book.lookup(model);
+    expect(hit.estimated).toBe(false);
+    expect([hit.price.input, hit.price.output]).toEqual([input, output]);
+  });
+
   test("fast mode doubles the price", () => {
     const std = book.cost("claude-opus-5-5", { ...zero, output: M });
     const fast = book.cost("claude-opus-5-5", { ...zero, output: M }, "fast");

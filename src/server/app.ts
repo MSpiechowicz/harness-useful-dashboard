@@ -1,12 +1,13 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { type AppConfig, loadConfig, resolveDbPath, saveConfig } from "../core/config.ts";
-import { getMeta, openDb } from "../core/db.ts";
+import { type AppConfig, loadConfig, resolveDbPath, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
+import { getMeta, openDb, setMeta } from "../core/db.ts";
 import { type ScanResult, scan } from "../core/ingest/index.ts";
 import { activePlans, LimitsCache } from "../core/limits.ts";
 import { localIdentity } from "../core/paths.ts";
-import { PriceBook } from "../core/pricing.ts";
+import { BUILTIN_PRICES_VERSION, PriceBook } from "../core/pricing.ts";
+import { recomputeCosts } from "../core/ingest/writer.ts";
 import { Queries } from "../core/queries.ts";
 
 /** How often plan limits are read in the background, for the history on the plans view. */
@@ -50,6 +51,14 @@ export class App {
     this.db = openDb(path, { journalMode: this.cfg.journalMode, isDefaultPath: isDefault });
     this.dbPath = path;
     this.prices = PriceBook.fromDb(this.db);
+    // History priced with an older built-in table is re-priced once. Only upwards, so machines on an older version
+    // sharing the database don't undo it.
+    if (Number(getMeta(this.db, "builtin_prices") ?? 0) < BUILTIN_PRICES_VERSION) {
+      this.db.transaction(() => {
+        recomputeCosts(this.db, this.prices);
+        setMeta(this.db, "builtin_prices", String(BUILTIN_PRICES_VERSION));
+      })();
+    }
     this.queries = new Queries(this.db, () => this.prices);
     const last = getMeta(this.db, `last_scan:${this.identity.host}`);
     this.lastScanAt = last ? Number(last) : null;
@@ -111,10 +120,12 @@ export class App {
 
   startBackgroundScan(): void {
     this.stopBackgroundScan();
-    if (this.cfg.scanIntervalSec > 0) {
+    // Kept in range here too: the config file can be edited by hand.
+    const sec = scanInterval(this.cfg.scanIntervalSec);
+    if (sec > 0) {
       this.timer = setInterval(() => {
         this.scanNow().catch((err) => console.error("[scan]", err));
-      }, this.cfg.scanIntervalSec * 1000);
+      }, sec * 1000);
     }
     this.limitTimer = setInterval(() => {
       this.pollLimits().catch((err) => console.error("[limits]", err));
@@ -153,8 +164,14 @@ export class App {
     this.emit({ type: "db-changed", path: this.dbPath });
   }
 
-  updateConfig(patch: Partial<AppConfig>): AppConfig {
-    this.cfg = { ...this.cfg, ...patch, sources: { ...this.cfg.sources, ...(patch.sources ?? {}) }, limits: { ...this.cfg.limits, ...(patch.limits ?? {}) } };
+  updateConfig(patch: SettingsPatch): AppConfig {
+    const { sources, limits, ...rest } = patch;
+    this.cfg = {
+      ...this.cfg,
+      ...rest,
+      sources: { ...this.cfg.sources, ...sources, enabled: { ...this.cfg.sources.enabled, ...sources?.enabled } },
+      limits: { ...this.cfg.limits, ...limits },
+    };
     saveConfig(this.cfg);
     this.startBackgroundScan();
     return this.cfg;

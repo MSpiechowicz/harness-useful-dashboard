@@ -229,14 +229,18 @@ export async function scan(
     }
   }
 
-  resolveSpawnRefs(db);
+  // A scan that found nothing new writes nothing: on a database in a synced folder every write is another upload,
+  // on every machine, every 30 seconds. The tidy-ups below only write when they change something.
+  if (result.filesParsed > 0) {
+    resolveSpawnRefs(db);
+    setMeta(db, `last_scan:${identity.host}`, String(Date.now()));
+  }
   normalizeProjects(db, identity.host, writer.project);
   applyCodexTitles(db, cfg);
   result.usageRows = writer.stats.usage;
   result.prompts = writer.stats.prompts;
   result.tools = writer.stats.tools;
   result.durationMs = Math.round(performance.now() - started);
-  setMeta(db, `last_scan:${identity.host}`, String(Date.now()));
   return result;
 }
 

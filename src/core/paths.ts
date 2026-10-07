@@ -1,3 +1,4 @@
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
 import { join } from "node:path";
 
@@ -14,6 +15,23 @@ export function appDataDir(): string {
       return join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), APP_ID);
     default:
       return join(process.env.XDG_CONFIG_HOME ?? join(home, ".config"), APP_ID);
+  }
+}
+
+/**
+ * Creates the app data folder and keeps it private to this account: it holds prompt text, the config and the app
+ * window's browser profile. Earlier versions left it readable by everyone, so existing files are tightened too.
+ * Windows keeps the folder private already.
+ */
+export function ensureAppDataDir(dir = appDataDir()): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") return;
+  for (const path of [dir, ...["config.json", "usage.db", "usage.db-wal", "usage.db-shm", "usage.db-journal"].map((f) => join(dir, f))]) {
+    try {
+      if (existsSync(path)) chmodSync(path, path === dir ? 0o700 : 0o600);
+    } catch {
+      /* owned by someone else: leave it as it is */
+    }
   }
 }
 

@@ -37,6 +37,19 @@ describe("incremental scanning", () => {
     expect(rows[1].prompt_id).toBe(rows[0].prompt_id);
   });
 
+  test("a scan that finds nothing new doesn't write to the database", async () => {
+    const root = tempDir();
+    writeJsonl(file(root), [claudeUser("one", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }), claudeAssistant({ id: "m1", ts: "2026-09-01T10:00:01.000Z" })]);
+    const db = memDb();
+    const cfg = testConfig(root);
+    await scan(db, cfg, ID);
+    const changes = () => db.query<{ n: number }, []>("SELECT total_changes() AS n").get()!.n;
+    const before = changes();
+    const r = await scan(db, cfg, ID);
+    expect(r.filesParsed).toBe(0);
+    expect(changes()).toBe(before);
+  });
+
   test("a partially written trailing line is consumed only once complete", async () => {
     const root = tempDir();
     const path = file(root);

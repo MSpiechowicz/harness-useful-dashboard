@@ -18,6 +18,9 @@ export interface PriceRule extends Price {
   source: "builtin" | "user";
 }
 
+/** Raised whenever BUILTIN_PRICES changes: a database priced with an older table is re-priced once on open. */
+export const BUILTIN_PRICES_VERSION = 2;
+
 /**
  * Built-in list prices (first-party API rates). Claude Code and Codex subscription users don't pay these
  * per token; the dashboard reports them as "API-equivalent" cost. Edit or extend them in Settings → Pricing.
@@ -51,11 +54,16 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   // Exact families only: newer point releases (gpt-5.x) have their own prices and fall back as "estimated".
   { pattern: "gpt-5", input: 1.25, output: 10, cacheRead: 0.125, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
   { pattern: "gpt-5-codex*", input: 1.25, output: 10, cacheRead: 0.125, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
+  // Pro models have no cached-input discount.
+  { pattern: "gpt-5-pro*", input: 15, output: 120, cacheRead: 15, cacheWrite5m: 15, cacheWrite1h: 15 },
+  { pattern: "gpt-4.1-nano*", input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite5m: 0.1, cacheWrite1h: 0.1 },
   { pattern: "gpt-4.1-mini*", input: 0.4, output: 1.6, cacheRead: 0.1, cacheWrite5m: 0.4, cacheWrite1h: 0.4 },
   { pattern: "gpt-4.1*", input: 2, output: 8, cacheRead: 0.5, cacheWrite5m: 2, cacheWrite1h: 2 },
   { pattern: "gpt-4o-mini*", input: 0.15, output: 0.6, cacheRead: 0.075, cacheWrite5m: 0.15, cacheWrite1h: 0.15 },
   { pattern: "gpt-4o*", input: 2.5, output: 10, cacheRead: 1.25, cacheWrite5m: 2.5, cacheWrite1h: 2.5 },
   { pattern: "o4-mini*", input: 1.1, output: 4.4, cacheRead: 0.275, cacheWrite5m: 1.1, cacheWrite1h: 1.1 },
+  { pattern: "o3-pro*", input: 20, output: 80, cacheRead: 20, cacheWrite5m: 20, cacheWrite1h: 20 },
+  { pattern: "o3-mini*", input: 1.1, output: 4.4, cacheRead: 0.55, cacheWrite5m: 1.1, cacheWrite1h: 1.1 },
   { pattern: "o3", input: 2, output: 8, cacheRead: 0.5, cacheWrite5m: 2, cacheWrite1h: 2 },
   { pattern: "codex-mini*", input: 1.5, output: 6, cacheRead: 0.375, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
   // Google

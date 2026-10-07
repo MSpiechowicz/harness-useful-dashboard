@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "../src/cli.ts";
+import { parseSettings, scanInterval } from "../src/core/config.ts";
+import { ensureAppDataDir } from "../src/core/paths.ts";
 import { App } from "../src/server/app.ts";
 import { createHandler, parseFilters } from "../src/server/http.ts";
 import { assetName, compareVersions, installedPath, installedVersion } from "../src/server/update.ts";
@@ -47,6 +49,39 @@ describe("parseFilters", () => {
     expect(parseFilters(new URLSearchParams("from=10&to=abc&provider=claude&model="))).toEqual({
       from: 10, to: undefined, provider: "claude", project: undefined, user: undefined, model: undefined, skill: undefined, agent: undefined,
     });
+  });
+});
+
+describe("settings input", () => {
+  test("keeps known keys of the right type and rounds numbers into range", () => {
+    expect(parseSettings({ userName: " ada ", scanIntervalSec: 1.4, promptTextLimit: -5, openMode: "browser", other: 1 })).toEqual({
+      patch: { userName: "ada", scanIntervalSec: 5, promptTextLimit: 0, openMode: "browser" },
+    });
+    expect(parseSettings({ sources: { claudeDirs: ["/a"], enabled: { codex: false } }, limits: { omp: false } })).toEqual({
+      patch: { sources: { claudeDirs: ["/a"], enabled: { codex: false } }, limits: { omp: false } },
+    });
+  });
+  test("refuses values of the wrong type", () => {
+    for (const body of [null, [], { scanIntervalSec: "5" }, { scanIntervalSec: Number.NaN }, { port: 70000 }, { openMode: "kiosk" }, { checkUpdates: "yes" }, { sources: { claudeDirs: "/a" } }, { sources: { enabled: { claude: 1 } } }, { limits: [] }]) {
+      expect("error" in parseSettings(body), JSON.stringify(body)).toBe(true);
+    }
+  });
+  test("a scan interval is off, or between 5 seconds and a day", () => {
+    expect([scanInterval(0), scanInterval(-1), scanInterval("x"), scanInterval(0.001), scanInterval(30), scanInterval(1e9)]).toEqual([0, 0, 0, 5, 30, 86_400]);
+  });
+});
+
+describe("app data folder", () => {
+  test.skipIf(process.platform === "win32")("is private to this account, also when an older version left it open", () => {
+    const dir = join(tempDir(), "home");
+    mkdirSync(dir, { mode: 0o755 });
+    writeFileSync(join(dir, "usage.db"), "", { mode: 0o644 });
+    writeFileSync(join(dir, "config.json"), "{}", { mode: 0o644 });
+    ensureAppDataDir(dir);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(join(dir, "usage.db")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, "config.json")).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(dir, "usage.db-wal"))).toBe(false);
   });
 });
 
@@ -116,6 +151,42 @@ describe("HTTP API", () => {
     expect(ok.status).toBe(200);
   });
 
+  test("every response carries the security headers", async () => {
+    for (const res of [await get("/"), await get("/api/status"), await get("/api/status", "evil.example")]) {
+      expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(res.headers.get("content-security-policy")).toContain("script-src 'self';");
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    }
+  });
+
+  test("the API refuses requests a browser marks as coming from another site", async () => {
+    const req = (headers: Record<string, string>) => handle(new Request("http://localhost/api/limits?force=1", { headers: { host: "localhost", ...headers } }));
+    expect((await req({ "sec-fetch-site": "cross-site" })).status).toBe(403);
+    expect((await req({ "sec-fetch-site": "same-site" })).status).toBe(403);
+    expect((await req({ origin: "https://evil.example" })).status).toBe(403);
+    expect((await req({ origin: "null" })).status).toBe(403);
+    expect((await get("/api/status")).status).toBe(200);
+    const same = await handle(new Request("http://localhost/api/status", { headers: { host: "localhost", "sec-fetch-site": "same-origin", origin: "http://localhost:5173" } }));
+    expect(same.status).toBe(200);
+    // Pages are still served, so the app opens from a link or a bookmark.
+    expect((await handle(new Request("http://localhost/", { headers: { host: "localhost", "sec-fetch-site": "cross-site" } }))).status).toBe(200);
+  });
+
+  test("settings with a bad value are refused and change nothing", async () => {
+    const post = (body: unknown) =>
+      handle(new Request("http://localhost/api/settings", { method: "POST", headers: { host: "localhost", "x-harness-dashboard": "1", "content-type": "application/json" }, body: JSON.stringify(body) }));
+    const interval = app.cfg.scanIntervalSec;
+    const res = await post({ scanIntervalSec: "0.001", userName: "mallory" });
+    expect(res.status).toBe(400);
+    expect(app.cfg.scanIntervalSec).toBe(interval);
+    expect(app.cfg.userName).not.toBe("mallory");
+    expect((await post({ dbPath: 42 })).status).toBe(400);
+    const bad = await handle(new Request("http://localhost/api/settings", { method: "POST", headers: { host: "localhost", "x-harness-dashboard": "1" }, body: "{" }));
+    expect(bad.status).toBe(400);
+  });
+
   test("tip state: hides rules and marks keys read, and keeps them in the config", async () => {
     const post = (body: unknown) =>
       handle(new Request("http://localhost/api/tips/state", { method: "POST", headers: { host: "localhost", "x-harness-dashboard": "1", "content-type": "application/json" }, body: JSON.stringify(body) }));
@@ -138,6 +209,17 @@ describe("HTTP API", () => {
     expect(res.status).toBe(200);
     const after = ((await (await get("/api/summary")).json()) as { cost: number }).cost;
     expect(after).toBeCloseTo(before * 100, 6);
+  });
+
+  test("price rules of the wrong shape are skipped, not a server error", async () => {
+    const res = await handle(
+      new Request("http://localhost/api/pricing", {
+        method: "PUT",
+        headers: { host: "localhost", "x-harness-dashboard": "1", "content-type": "application/json" },
+        body: JSON.stringify([{ pattern: 5, input: 1, output: 1 }, { pattern: "x*", input: -1, output: 1 }, null]),
+      }),
+    );
+    expect(res.status).toBe(200);
   });
 
   test("unknown routes 404", async () => {

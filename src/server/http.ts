@@ -5,6 +5,7 @@ import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
 import { branchDetail, branches } from "../core/branches.ts";
 import { drift } from "../core/drift.ts";
 import { friction } from "../core/friction.ts";
+import { parseSettings } from "../core/config.ts";
 import { defaultDbPath } from "../core/paths.ts";
 import type { Bucket, Dimension, Filters, Metric, SeriesGroup } from "../core/queries.ts";
 import { SHARED_FOLDER, dbTarget, findSyncFolders } from "../core/syncFolders.ts";
@@ -102,21 +103,72 @@ export interface ServerHooks {
   shutdown(): void;
 }
 
+const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
+
 /**
- * Guards against DNS-rebinding and cross-site requests: the Host header must be a loopback name,
- * and state-changing requests must carry a custom header (which forces a CORS preflight we never allow).
+ * Guards against DNS-rebinding and cross-site requests: the Host header must be a loopback name, and state-changing
+ * requests must carry a custom header (which forces a CORS preflight we never allow). The API also refuses requests a
+ * browser marks as coming from another site: they can't read the answer, but even a GET has effects here (a scan, a
+ * signed-in plan-limit check, an update check).
  */
 function isAllowed(req: Request, url: URL): boolean {
   const host = (req.headers.get("host") ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
-  if (!["localhost", "127.0.0.1", "::1"].includes(host)) return false;
-  if (req.method !== "GET" && req.method !== "HEAD" && url.pathname.startsWith("/api/")) {
-    return req.headers.get("x-harness-dashboard") === "1";
-  }
+  if (!LOOPBACK.includes(host)) return false;
+  if (!url.pathname.startsWith("/api/")) return true;
+  const site = req.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = req.headers.get("origin");
+  if (origin && !isLoopbackOrigin(origin)) return false;
+  if (req.method !== "GET" && req.method !== "HEAD") return req.headers.get("x-harness-dashboard") === "1";
   return true;
 }
 
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    return u.protocol === "http:" && LOOPBACK.includes(u.hostname.replace(/^\[|\]$/g, ""));
+  } catch {
+    return false; // "null": a sandboxed frame or a file
+  }
+}
+
+/**
+ * Sent with every response. No other page may frame the app (clickjacking onto Quit or Install & restart), scripts
+ * only come from the app itself, and nothing about it leaks through referrers or cross-origin reads.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "Content-Security-Policy":
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin",
+};
+
+function secured(res: Response): Response {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+  return res;
+}
+
+/** A request's JSON body, or undefined when it isn't JSON. */
+async function jsonBody(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    return undefined;
+  }
+}
+
+const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+const optionalPrice = (v: unknown): number | null => (isPrice(v) ? v : null);
+
 export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks) {
   return async function handle(req: Request): Promise<Response> {
+    return secured(await respond(req));
+  };
+
+  async function respond(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (!isAllowed(req, url)) return error("forbidden", 403);
     const sp = url.searchParams;
@@ -130,7 +182,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
       console.error("[http]", err);
       return error((err as Error).message, 500);
     }
-  };
+  }
 
   async function api(req: Request, url: URL, path: string, sp: URLSearchParams): Promise<Response> {
     const f = parseFilters(sp);
@@ -242,31 +294,25 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           return json(result);
         }
         case "/api/settings": {
-          const body = (await req.json()) as Record<string, any>;
-          const patch: Record<string, unknown> = {};
-          for (const k of ["userName", "openMode", "scanIntervalSec", "promptTextLimit", "checkUpdates", "journalMode", "port"]) {
-            if (k in body) patch[k] = body[k];
-          }
-          if (body.sources) patch.sources = body.sources;
-          if (body.limits && typeof body.limits === "object") patch.limits = body.limits;
-          if (body.planPrices && typeof body.planPrices === "object") {
-            const prices: Record<string, number> = {};
-            for (const [k, v] of Object.entries(body.planPrices)) if (typeof v === "number" && Number.isFinite(v) && v >= 0) prices[k] = v;
-            patch.planPrices = prices;
-          }
+          const body = await jsonBody(req);
+          const parsed = parseSettings(body);
+          if ("error" in parsed) return error(parsed.error);
+          const { dbPath, copyDb } = body as { dbPath?: unknown; copyDb?: unknown };
+          if (dbPath !== undefined && (typeof dbPath !== "string" || dbPath.length > 4096)) return error("invalid value for dbPath");
+          const patch = parsed.patch;
           app.updateConfig(patch);
-          if (typeof body.dbPath === "string") {
-            const target = dbTarget(body.dbPath, app.dbPath, defaultDbPath());
+          if (typeof dbPath === "string") {
+            const target = dbTarget(dbPath, app.dbPath, defaultDbPath());
             if (target.state === "missing" || target.state === "invalid") return error(`Can't use ${target.file}: ${target.state === "missing" ? "its folder doesn't exist" : "the path isn't absolute"}`);
             const file = target.state === "default" ? "" : target.file;
-            if (target.state !== "current" && file !== app.cfg.dbPath) await app.switchDatabase(file, body.copyDb === true);
+            if (target.state !== "current" && file !== app.cfg.dbPath) await app.switchDatabase(file, copyDb === true);
           }
-          if (body.sources) app.scanNow().catch(() => {});
+          if (patch.sources) app.scanNow().catch(() => {});
           return json({ config: app.cfg, dbPath: app.dbPath });
         }
         case "/api/tips/state": {
           // Lists of ids to add to or take out of each set: { hide, unhide, read, unread }.
-          const body = (await req.json()) as Record<string, unknown>;
+          const body = ((await jsonBody(req)) ?? {}) as Record<string, unknown>;
           const ids = (k: string) => (Array.isArray(body[k]) ? (body[k] as unknown[]).filter((v): v is string => typeof v === "string" && v.length <= 300) : []);
           const apply = (list: string[], add: string[], remove: string[]) => {
             const drop = new Set(remove);
@@ -278,14 +324,15 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks)
           return json(tips);
         }
         case "/api/pricing": {
-          const rules = (await req.json()) as { pattern: string; input: number; output: number; cacheRead?: number | null; cacheWrite5m?: number | null; cacheWrite1h?: number | null }[];
+          const rules = await jsonBody(req);
           if (!Array.isArray(rules)) return error("expected an array of price rules");
-          const ins = app.db.prepare("INSERT INTO pricing (pattern, input, output, cache_read, cache_write_5m, cache_write_1h) VALUES (?, ?, ?, ?, ?, ?)");
+          const ins = app.db.prepare("INSERT OR REPLACE INTO pricing (pattern, input, output, cache_read, cache_write_5m, cache_write_1h) VALUES (?, ?, ?, ?, ?, ?)");
           app.db.transaction(() => {
             app.db.exec("DELETE FROM pricing");
-            for (const r of rules) {
-              if (!r.pattern || !Number.isFinite(r.input) || !Number.isFinite(r.output)) continue;
-              ins.run(r.pattern.trim().toLowerCase(), r.input, r.output, r.cacheRead ?? null, r.cacheWrite5m ?? null, r.cacheWrite1h ?? null);
+            for (const r of rules as Record<string, unknown>[]) {
+              const pattern = typeof r?.pattern === "string" ? r.pattern.trim().toLowerCase() : "";
+              if (!pattern || pattern.length > 200 || !isPrice(r.input) || !isPrice(r.output)) continue;
+              ins.run(pattern, r.input, r.output, optionalPrice(r.cacheRead), optionalPrice(r.cacheWrite5m), optionalPrice(r.cacheWrite1h));
             }
           })();
           app.reloadPrices();

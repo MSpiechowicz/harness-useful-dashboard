@@ -6,18 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Harness Dashboard</title>
-    <script>
-      // Apply the saved theme before first paint to avoid a flash.
-      try {
-        const q = new URLSearchParams(location.search);
-        if (q.get("theme")) localStorage.setItem("hd.theme", q.get("theme"));
-        if (q.get("lang")) localStorage.setItem("hd.lang", q.get("lang"));
-        const t = localStorage.getItem("hd.theme");
-        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
-        const l = localStorage.getItem("hd.lang");
-        if (l) document.documentElement.lang = l;
-      } catch {}
-    </script>
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="app"></div>

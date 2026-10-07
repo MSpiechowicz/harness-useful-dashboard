@@ -171,7 +171,106 @@ export function loadConfig(path = configPath()): AppConfig {
 
 export function saveConfig(cfg: AppConfig, path = configPath()): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n");
+  // Only this account may read it: it names the database and every folder read from.
+  writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+}
+
+/** Seconds between background scans: 0 (or anything not a positive number) turns them off, others are kept in range. */
+export function scanInterval(sec: unknown): number {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(86_400, Math.max(5, Math.round(n)));
+}
+
+const SOURCE_DIRS = ["claudeDirs", "codexDirs", "ompDirs", "piDirs", "opencodeDirs", "zedDirs", "clineDirs", "rooDirs", "kiloDirs"] as const;
+const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo"] as const;
+const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode"] as const;
+
+/** A settings change: what `parseSettings` lets through, merged into the config by the server. */
+export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips">> & {
+  sources?: Partial<Omit<SourceConfig, "enabled">> & { enabled?: Partial<SourceConfig["enabled"]> };
+  limits?: Partial<AppConfig["limits"]>;
+};
+
+/**
+ * Checks a settings change sent to the server: only known keys, each of the right type. Numbers are rounded and kept
+ * in range. Anything else is refused, so a bad value can't end up in the config file.
+ */
+export function parseSettings(body: unknown): { patch: SettingsPatch } | { error: string } {
+  const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  if (!isObject(body)) return { error: "expected an object" };
+  const patch: SettingsPatch = {};
+  const invalid = (key: string) => ({ error: `invalid value for ${key}` });
+  const has = (key: string) => key in body && body[key] !== undefined;
+  const booleans = <K extends string>(value: unknown, keys: readonly K[]): Partial<Record<K, boolean>> | null => {
+    if (!isObject(value)) return null;
+    const out: Partial<Record<K, boolean>> = {};
+    for (const k of keys) {
+      if (!(k in value)) continue;
+      if (typeof value[k] !== "boolean") return null;
+      out[k] = value[k] as boolean;
+    }
+    return out;
+  };
+
+  if (has("userName")) {
+    if (typeof body.userName !== "string" || body.userName.length > 200) return invalid("userName");
+    patch.userName = body.userName.trim();
+  }
+  if (has("openMode")) {
+    if (!["app", "browser", "none"].includes(body.openMode as string)) return invalid("openMode");
+    patch.openMode = body.openMode as OpenMode;
+  }
+  if (has("journalMode")) {
+    if (!["auto", "wal", "delete"].includes(body.journalMode as string)) return invalid("journalMode");
+    patch.journalMode = body.journalMode as JournalMode;
+  }
+  if (has("checkUpdates")) {
+    if (typeof body.checkUpdates !== "boolean") return invalid("checkUpdates");
+    patch.checkUpdates = body.checkUpdates;
+  }
+  if (has("scanIntervalSec")) {
+    if (typeof body.scanIntervalSec !== "number" || !Number.isFinite(body.scanIntervalSec)) return invalid("scanIntervalSec");
+    patch.scanIntervalSec = scanInterval(body.scanIntervalSec);
+  }
+  if (has("promptTextLimit")) {
+    if (typeof body.promptTextLimit !== "number" || !Number.isFinite(body.promptTextLimit)) return invalid("promptTextLimit");
+    patch.promptTextLimit = Math.min(100_000, Math.max(0, Math.round(body.promptTextLimit)));
+  }
+  if (has("port")) {
+    const port = body.port;
+    if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535) return invalid("port");
+    patch.port = port;
+  }
+  if (has("sources")) {
+    const src = body.sources;
+    if (!isObject(src)) return invalid("sources");
+    const sources: NonNullable<SettingsPatch["sources"]> = {};
+    for (const key of SOURCE_DIRS) {
+      if (!(key in src)) continue;
+      const dirs = src[key];
+      if (!Array.isArray(dirs) || dirs.length > 100 || !dirs.every((d) => typeof d === "string" && d.length <= 4096)) return invalid(`sources.${key}`);
+      sources[key] = dirs as string[];
+    }
+    if ("enabled" in src) {
+      const enabled = booleans(src.enabled, SOURCES);
+      if (!enabled) return invalid("sources.enabled");
+      sources.enabled = enabled;
+    }
+    patch.sources = sources;
+  }
+  if (has("limits")) {
+    const limits = booleans(body.limits, LIMIT_SOURCES);
+    if (!limits) return invalid("limits");
+    patch.limits = limits;
+  }
+  if (has("planPrices")) {
+    if (!isObject(body.planPrices)) return invalid("planPrices");
+    const prices: Record<string, number> = {};
+    for (const [k, v] of Object.entries(body.planPrices)) if (k.length <= 200 && typeof v === "number" && Number.isFinite(v) && v >= 0) prices[k] = v;
+    patch.planPrices = prices;
+  }
+  return { patch };
 }
 
 export function updateConfig(patch: Partial<AppConfig>, path = configPath()): AppConfig {

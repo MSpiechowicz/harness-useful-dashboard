@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { readFileSync } from "node:fs";
-import { configPath } from "./core/paths.ts";
+import { configPath, ensureAppDataDir } from "./core/paths.ts";
 import { loadConfig, resolveDbPath, updateConfig } from "./core/config.ts";
 import { openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
@@ -119,6 +119,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.flags.help || args.cmd === "help") return void console.log(HELP);
   if (args.flags.version || args.cmd === "version") return void console.log(VERSION);
+  ensureAppDataDir();
 
   const dbFlag = typeof args.flags.db === "string" ? args.flags.db : undefined;
   switch (args.cmd) {
