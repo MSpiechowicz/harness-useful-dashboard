@@ -375,43 +375,31 @@
             <col class="w-20" />
             <col />
             <col class="w-72" />
+            <col class="w-16" />
           </colgroup>
           <thead>
             <tr>
               <th>{t("col.time")}</th>
               <th>{t("live.feed.event")}</th>
               <th>{t("col.session")}</th>
+              <th><span class="sr-only">{t("friction.showError")}</span></th>
             </tr>
           </thead>
           <tbody>
             {#each view.rows.slice(view.offset, view.limit == null ? undefined : view.offset + view.limit) as e, i (`${e.ts}:${e.kind}:${e.sessionId}:${i}`)}
               {@const Icon = FEED_ICON[e.kind]}
               {@const key = `${e.ts}:${e.kind}:${e.sessionId}:${i}`}
-              {@const expandable = !!(e.input || e.detail)}
-              {@const expanded = expandable && !!open[key]}
+              {@const expanded = !!e.detail && !!open[key]}
               <tr class="cursor-pointer" onclick={() => navigate("sessions", e.sessionId)}>
                 <td class="text-ink-2 tabular">{time(e.ts)}</td>
                 <td>
-                  <!-- One line a row: what happened and why. The command and the error text open below on demand. -->
+                  <!-- One line a row: what happened, why, and the command or file it was about. The error text opens below
+                       with the button in the last column. -->
                   <span class="flex min-w-0 items-center gap-2.5">
                     <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' ? 'text-bad' : 'text-warn'}" />
                     <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class={e.kind === "prompt" ? "truncate text-ink" : "shrink-0 text-ink-2"} title={feedTitle(e)}>{feedText(e)}</Link>
-                    {#if e.reason}<span class="min-w-0 truncate text-xs text-muted">· {t(`friction.reason.${e.reason}`)}</span>{/if}
-                    {#if expandable}
-                      <button
-                        type="button"
-                        class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded text-muted hover:bg-surface-2 hover:text-ink"
-                        aria-expanded={expanded}
-                        aria-label={t(expanded ? "friction.hideError" : "friction.showError")}
-                        title={t(expanded ? "friction.hideError" : "friction.showError")}
-                        onclick={(ev) => {
-                          ev.stopPropagation();
-                          open[key] = !expanded;
-                        }}
-                      >
-                        {#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
-                      </button>
-                    {/if}
+                    {#if e.reason}<span class="shrink-0 text-xs text-muted">· {t(`friction.reason.${e.reason}`)}</span>{/if}
+                    {#if e.input}<span class="min-w-0 truncate font-mono text-xs text-muted" title={e.input}>{e.input}</span>{/if}
                   </span>
                 </td>
                 <td>
@@ -420,13 +408,30 @@
                     <span class="truncate" title={e.title ?? e.sessionId}>{e.title ?? e.sessionId}</span>
                   </span>
                 </td>
+                <td class="text-right">
+                  {#if e.detail}
+                    <button
+                      type="button"
+                      class="btn !h-7 !px-2"
+                      aria-expanded={expanded}
+                      aria-label={t(expanded ? "friction.hideError" : "friction.showError")}
+                      title={t(expanded ? "friction.hideError" : "friction.showError")}
+                      onclick={(ev) => {
+                        ev.stopPropagation();
+                        open[key] = !expanded;
+                      }}
+                    >
+                      {#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+                    </button>
+                  {/if}
+                </td>
               </tr>
               {#if expanded}
                 <tr class="bg-surface-2">
                   <td></td>
-                  <td colspan="2" class="!whitespace-normal">
+                  <td colspan="3" class="!whitespace-normal">
                     {#if e.input}<pre class="mb-2 font-mono text-xs break-all whitespace-pre-wrap text-muted">{e.input}</pre>{/if}
-                    {#if e.detail}<pre class="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-ink-2">{e.detail}</pre>{/if}
+                    <pre class="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-ink-2">{e.detail}</pre>
                   </td>
                 </tr>
               {/if}
