@@ -1,3 +1,12 @@
+# [1.17.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.16.1...v1.17.0) (2026-10-07)
+
+
+### Features
+
+* a weekly digest, written to a folder with one notification ([86cf6e1](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/86cf6e14983b33b4e0ef09483cdf3d2d9cb24b00))
+* GitHub Copilot premium requests on Live for Copilot CLI sessions ([b3b8641](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b3b8641c542cb04c44400ff06738bbd3dc3867e5))
+* session tags and notes, and Cursor in one row in Settings ([f15c88d](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/f15c88d3094de96a70701b292f9debc9fa0d1ee0))
+
 ## [1.16.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.16.0...v1.16.1) (2026-10-07)
 
 
