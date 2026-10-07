@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.0...v1.13.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* one line per failed call in Live and Friction, the error opens on click ([b261351](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b261351ecbb8862eec55adff3502697cd9508b34))
+
 # [1.13.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.12.0...v1.13.0) (2026-10-07)
 
 
