@@ -6,6 +6,7 @@
  *   bun scripts/demo-data.ts /tmp/demo.db
  */
 import { rmSync } from "node:fs";
+import { hostname } from "node:os";
 import { openDb } from "../src/core/db.ts";
 import { apiErrorOf } from "../src/core/apiErrors.ts";
 import { failureOf } from "../src/core/failures.ts";
@@ -405,5 +406,23 @@ db.exec(`
   INSERT OR IGNORE INTO session_notes(session_id, note, updated_at)
     SELECT id, 'Checkout rewrite for the spring campaign. Bill to the Acme retainer.', ${NOW} FROM sessions WHERE project = '/Users/demo/code/storefront' AND parent_session_id IS NULL ORDER BY started_at DESC LIMIT 1;
 `);
+// AI session labels: a kind for seven in ten root sessions, and an AI title for those the harness left without one.
+db.exec(`
+  INSERT OR IGNORE INTO session_labels(session_id, title, kind, model, created_at)
+    SELECT id,
+      CASE rowid % 8 WHEN 0 THEN 'Add a saved filter to the orders table' WHEN 1 THEN 'Fix the checkout total when a coupon applies' WHEN 2 THEN 'Split the billing service into modules'
+        WHEN 3 THEN 'Cover the invoice export with tests' WHEN 4 THEN 'Write the setup guide for the new API' WHEN 5 THEN 'Compare queue libraries for the worker' WHEN 6 THEN 'Rotate the deploy keys and tidy the pipeline' ELSE 'Small cleanups' END,
+      CASE rowid % 8 WHEN 0 THEN 'feature' WHEN 1 THEN 'bugfix' WHEN 2 THEN 'refactor' WHEN 3 THEN 'tests' WHEN 4 THEN 'docs' WHEN 5 THEN 'research' WHEN 6 THEN 'ops' ELSE 'other' END,
+      'haiku', ${NOW}
+    FROM sessions WHERE parent_session_id IS NULL AND agent IS NULL AND rowid % 10 < 7;
+  UPDATE sessions SET title = NULL WHERE rowid % 4 = 0 AND id IN (SELECT session_id FROM session_labels);
+`);
+// Plan limits for Live: the readings Codex writes into its logs, kept under this machine's name as a scan would, so the
+// dashboard shows them without asking any provider (screenshots run with network limit sources off).
+const limitRow = db.prepare(
+  "INSERT OR REPLACE INTO plan_limits (provider, host, window_id, window_minutes, used_percent, resets_at, plan, observed_at) VALUES ('codex', ?, ?, ?, ?, ?, 'pro', ?)",
+);
+limitRow.run(hostname(), "primary", 300, 38, NOW + 2 * 3_600_000 + 17 * 60_000, NOW - 90_000);
+limitRow.run(hostname(), "secondary", 10_080, 61, NOW + 3 * 86_400_000 + 5 * 3_600_000, NOW - 90_000);
 db.close();
 console.log(`demo database written to ${out}`);
