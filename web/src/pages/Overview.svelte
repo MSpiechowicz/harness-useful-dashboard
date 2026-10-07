@@ -19,6 +19,7 @@
   import { type ActivityDay, activityStats, daySpan, spanMonths } from "../lib/activity.ts";
   import { apiUrl, settled, useFetch, type Breakdown, type Lines, type Summary, type Tip, type TimeSeries } from "../lib/api.svelte.ts";
   import { breakdownItems, heatMax, seriesLabel, weekHeatmap } from "../lib/charts.ts";
+  import { sankeyChart, type FlowRow } from "../lib/sankey.ts";
   import { bucketLabel, compact, integer, metricValue, percent, trimmed, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { seriesRows } from "../lib/export.ts";
@@ -36,6 +37,7 @@
   const projects = useFetch<Breakdown>(() => apiUrl("/api/breakdown", { dim: "project", limit: 8, sort: store.metric }));
   const models = useFetch<Breakdown>(() => apiUrl("/api/breakdown", { dim: "model", limit: 8, sort: store.metric }));
   const providers = useFetch<Breakdown>(() => apiUrl("/api/breakdown", { dim: "provider", limit: 8, sort: store.metric }));
+  const flow = useFetch<FlowRow[]>(() => apiUrl("/api/flow"));
   const heat = useFetch<{ cells: [number, number, number, number][] }>(() => apiUrl("/api/heatmap", { metric: store.metric }));
   const calendar = useFetch<ActivityDay[]>(() => apiUrl("/api/calendar"));
   const span = $derived(daySpan(calendar.data ?? [], store.filters));
@@ -61,6 +63,13 @@
 
   const heatOption = $derived.by(() => (void store.dark, heat.data ? weekHeatmap(heat.data.cells, store.metric) : null));
 
+  const flowOption = $derived.by(() => (void store.dark, flow.data?.length ? sankeyChart(flow.data, store.metric, (v) => metricValue(v, store.metric)) : null));
+  // Clicking a named node filters the dashboard by it, "Other" has nothing to filter by.
+  function flowClick(p: { data?: unknown }) {
+    const d = p.data as { dim?: "provider" | "model" | "project"; key?: string; source?: string } | undefined;
+    if (d?.dim && d.key && d.key !== "__other__" && !d.source) store.setFilter(d.dim, d.key);
+  }
+
   const groups: { value: Group; label: string }[] = $derived([
     { value: "type", label: t("trends.type") },
     { value: "provider", label: t("filter.provider") },
@@ -75,7 +84,7 @@
 
 <div class="flex flex-col gap-5">
   <PageHeader title={t("nav.overview")} subtitle={t("app.tagline")} />
-  <ViewGate ready={settled(summary, lines, series, spark, projects, models, providers, heat, calendar, tips)}>
+  <ViewGate ready={settled(summary, lines, series, spark, projects, models, providers, flow, heat, calendar, tips)}>
 
     {#if empty}
       <div class="card"><Empty /></div>
@@ -150,6 +159,12 @@
           <UsageChart ts={series.data} dim={group} bucket={store.bucket} metric={store.metric} valueKind={group === "type" ? "tokens" : store.metric} height={300} loading={series.loading} />
         {/if}
       </Card>
+
+      {#if flowOption}
+        <Card title={t("chart.flow")} subtitle={t("chart.flowHint", { metric: t(`metric.${store.metric}`) })}>
+          <Chart option={flowOption} height={380} dim={flow.loading} onclick={flowClick} />
+        </Card>
+      {/if}
 
       <div class="grid gap-5 xl:grid-cols-2">
         <Card title={t("chart.topProjects")} exportName="projects" exportRows={() => projects.data?.rows ?? []}>

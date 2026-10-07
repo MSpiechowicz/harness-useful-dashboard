@@ -75,6 +75,16 @@ describe("Queries", () => {
     expect(b.rows.reduce((a, r) => a + r.tokenShare, 0)).toBeCloseTo(1, 6);
   });
 
+  test("flow sums provider, model and project together and respects filters", () => {
+    const { q } = seed();
+    const rows = q.flow({});
+    expect(rows.length).toBe(3);
+    expect(rows.find((r) => r.provider === "codex")).toMatchObject({ model: "gpt-5", project: "/work/beta", tokens: 5100 });
+    expect(rows.find((r) => r.model === "claude-sonnet-4-5")!.tokens).toBe(1000 + 1900);
+    expect(rows.reduce((a, r) => a + r.tokens, 0)).toBe(q.summary({}).tokens);
+    expect(q.flow({ provider: "codex" }).map((r) => r.model)).toEqual(["gpt-5"]);
+  });
+
   test("timeseries zero-fills idle days and groups the tail into 'other'", () => {
     const { q } = seed();
     const ts = q.timeseries({ from: T0 - (T0 % 1) }, "day", "provider", "tokens");
@@ -219,5 +229,25 @@ describe("tips", () => {
     // A read mark covers what the tip is about: the file and session of an edit churn, nothing more for a whole-range rule.
     expect(tips.find((t) => t.id === "edit-churn")).toMatchObject({ category: "workflow", key: "edit-churn:app.ts|sessions/claude%3Ad0" });
     expect(tips.find((t) => t.id === "output-heavy")).toMatchObject({ category: "models", key: "output-heavy" });
+  });
+});
+
+describe("pairs", () => {
+  test("sums a dimension split by a second one, with labels and filters", () => {
+    const { q } = seed();
+    const rows = q.pairs({}, "project", "model", "tokens");
+    expect(rows.find((r) => r.label === "beta")).toMatchObject({ key: "/work/beta", sub: "gpt-5", subLabel: "gpt-5", value: 5100 });
+    expect(new Set(rows.map((r) => r.label))).toEqual(new Set(["alpha", "beta"]));
+    const byProject = q.pairs({ provider: "codex" }, "model", "project", "tokens");
+    expect(byProject.map((r) => [r.key, r.subLabel])).toEqual([["gpt-5", "beta"]]);
+  });
+  test("folds what isn't among the biggest into other, keeping the total", () => {
+    const { q } = seed();
+    const full = q.pairs({}, "project", "model", "tokens");
+    const one = q.pairs({}, "project", "model", "tokens", { rows: 1, cols: 1 });
+    const sum = (rows: { value: number }[]) => rows.reduce((a, r) => a + r.value, 0);
+    expect(sum(one)).toBe(sum(full));
+    expect(new Set(one.map((r) => r.key)).size).toBeLessThanOrEqual(2);
+    expect(one.some((r) => r.key === "__other__" && r.label === "other")).toBe(true);
   });
 });

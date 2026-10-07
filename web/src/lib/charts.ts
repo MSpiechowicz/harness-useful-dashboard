@@ -16,7 +16,7 @@ const STACK_GAP = 2;
 const STACK_MIN = 2;
 
 /** Shared chrome: recessive hairline grid, muted axis text, surface-colored tooltip. */
-function chrome() {
+export function chrome() {
   const ink = cssVar("--ink");
   const ink2 = cssVar("--ink-2");
   const muted = cssVar("--muted");
@@ -73,7 +73,7 @@ export function trendAverage(bucket: string, intervals: number): { window: numbe
 }
 
 /** Header, one row per series, then an optional total and reference rows (e.g. a moving average) below a rule. */
-function tooltipRows(header: string, rows: TooltipRow[], total?: string, notes: TooltipRow[] = []): string {
+export function tooltipRows(header: string, rows: TooltipRow[], total?: string, notes: TooltipRow[] = []): string {
   const body = rows.map(tooltipRow).join("");
   const sum = total ? `<div style="line-height:1.7"><b>${total}</b> <span style="opacity:.7">${t("common.total")}</span></div>` : "";
   const foot = sum || notes.length ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid ${cssVar("--grid")}">${sum}${notes.map(tooltipRow).join("")}</div>` : "";
@@ -538,7 +538,7 @@ export function driftLine(o: {
 
 /** Running total of a single series. */
 /** A #rrggbb color with an alpha channel, for gradient fills. */
-function withAlpha(hex: string, alpha: number): string {
+export function withAlpha(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1, 7), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
@@ -853,7 +853,7 @@ export function intervalBars(
  * agent has a soft fill; up to four subagents wear their agent colours and names, more share one muted entry. Prompt
  * starts, when there are several prompts, are thin numbered rules.
  */
-export function contextByAgent(rows: (CallRow & { promptId?: string | null })[], prompts?: Map<string, number>): EChartsOption {
+export function contextByAgent(rows: CallRow[]): EChartsOption {
   const c = chrome();
   // The main agent where it worked, else (a subagent's own page) the agent of the calls.
   const own = rows.some((r) => (r.agent ?? "main") === "main") ? "main" : (rows[0]?.agent ?? "main");
@@ -896,40 +896,12 @@ export function contextByAgent(rows: (CallRow & { promptId?: string | null })[],
     line(runs.get(own)?.pts ?? [], own === "main" ? t("timeline.mainAgent") : own, ownColor, true),
     ...sub.map((r) => (named.length ? line(r.pts, r.agent, colorFor("agent", r.agent), false) : line(r.pts, otherName, c.muted, false))),
   ];
-  // Where each later prompt began, numbered as the session's prompt list numbers them (a prompt without model calls
-  // keeps its number, so later ones still match the list). Starts closer than 2% of the span share one rule,
-  // labelled "Prompts 2–3", so labels never print over each other.
-  const starts: { ts: number; n: number }[] = [];
-  if (prompts) {
-    for (const r of rows) {
-      const n = r.promptId ? prompts.get(r.promptId) : undefined;
-      if (n != null && n > 1 && !starts.some((x) => x.n === n)) starts.push({ ts: r.ts, n });
-    }
-  }
-  const marks: { ts: number; from: number; to: number }[] = [];
-  for (const { ts, n } of starts) {
-    const last = marks[marks.length - 1];
-    if (last && ts - last.ts < span * 0.02) {
-      last.ts = ts;
-      last.to = n;
-    } else marks.push({ ts, from: n, to: n });
-  }
-  const markLabel = (m: { from: number; to: number }) => (m.from === m.to ? t("timeline.promptN", { n: m.to }) : t("timeline.promptsN", { from: m.from, to: m.to }));
-  if (marks.length && marks.length <= 15) {
-    series[0]!.markLine = {
-      silent: true,
-      symbol: "none",
-      lineStyle: { color: c.muted, type: "dashed", width: 1 },
-      label: { position: "end", color: c.muted, fontSize: 10, formatter: (p: { dataIndex: number }) => (marks[p.dataIndex] ? markLabel(marks[p.dataIndex]!) : "") },
-      data: marks.map((m) => ({ xAxis: m.ts })),
-    };
-  }
   const legendNames = [series[0]!.name as string, ...(named.length ? named : subs.length ? [otherName] : [])];
   const legendColors = [ownColor, ...(named.length ? named.map((a) => colorFor("agent", a)) : subs.length ? [c.muted] : [])];
   return {
     animationDuration: 300,
     textStyle: c.text,
-    grid: { left: 8, right: 16, top: marks.length ? 24 : 12, bottom: 4, containLabel: true },
+    grid: { left: 8, right: 16, top: 12, bottom: 4, containLabel: true },
     legend: legendNames.length > 1 ? htmlLegend(legendNames, legendColors) : undefined,
     tooltip: {
       ...c.tooltip,
@@ -941,6 +913,95 @@ export function contextByAgent(rows: (CallRow & { promptId?: string | null })[],
     xAxis: { type: "time", axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel, splitLine: { show: false } },
     yAxis: { type: "value", splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
     series,
+  };
+}
+
+/**
+ * A session's prompts as dots: across, the prompt's number in the session, up, the context it added (what its main
+ * agent's last call sent, less what the prompt before it ended with), and the bigger the dot, the more model calls it
+ * made. A compaction would drop far below the rest and flatten them, so it is a hollow ring at the foot of the chart
+ * instead, its real drop in the tooltip. Idle time between prompts takes no room.
+ */
+export function contextPerPrompt(rows: (CallRow & { promptId?: string | null })[], prompts: { id: string; n: number; text: string | null }[]): EChartsOption {
+  const c = chrome();
+  const context = (r: CallRow) => r.cacheRead + r.cacheWrite + r.input;
+  const own = rows.some((r) => (r.agent ?? "main") === "main") ? "main" : (rows[0]?.agent ?? "main");
+  const per = new Map<string, { first: number | null; last: number | null; calls: number }>();
+  for (const r of rows) {
+    if (!r.promptId) continue;
+    const p = per.get(r.promptId) ?? { first: null, last: null, calls: 0 };
+    p.calls++;
+    if ((r.agent ?? "main") === own) {
+      p.first ??= context(r);
+      p.last = context(r);
+    }
+    per.set(r.promptId, p);
+  }
+  const points: { id: string; n: number; text: string | null; added: number; end: number; calls: number }[] = [];
+  let before: number | null = null;
+  for (const pr of prompts) {
+    const p = per.get(pr.id);
+    if (!p || p.last == null) continue;
+    points.push({ ...pr, added: p.last - (before ?? p.first ?? 0), end: p.last, calls: p.calls });
+    before = p.last;
+  }
+  const most = Math.max(1, ...points.map((p) => p.calls));
+  // The accent: the charts above already use green (main agent, cache reads), cyan, purple and gray.
+  const color = cssVar("--accent");
+  const rise = Math.max(1, ...points.map((p) => p.added));
+  const floor = Math.min(0, ...points.map((p) => p.added));
+  // Drops deeper than a third of the biggest rise sit at that depth, as rings.
+  const deepest = Math.max(floor, -rise / 3);
+  const shown = (p: { added: number }) => Math.max(p.added, deepest);
+  const excerpt = (text: string | null) => {
+    const one = (text ?? t("prompts.noText")).replace(/\s+/g, " ").trim();
+    return one.length > 90 ? `${one.slice(0, 89)}…` : one;
+  };
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 16, top: 16, bottom: 4, containLabel: true },
+    tooltip: {
+      ...c.tooltip,
+      trigger: "item",
+      formatter: (params: { dataIndex: number }) => {
+        const p = points[params.dataIndex]!;
+        const note = `<div style="max-width:280px;white-space:normal;margin:2px 0 4px;opacity:.85">${escapeHtml(excerpt(p.text))}</div>`;
+        return (
+          tooltipRows(`${t("timeline.promptN", { n: p.n })} · ${t("common.callsN", { n: p.calls })}`, []) +
+          note +
+          tooltipRows("", [
+            { color, name: t("timeline.added"), value: `${p.added >= 0 ? "+" : "−"}${compact(Math.abs(p.added))}` },
+            { color: c.muted, name: t("timeline.ended"), value: compact(p.end) },
+          ]).replace(/^<div[^>]*><\/div>/, "")
+        );
+      },
+    },
+    xAxis: {
+      type: "value",
+      min: 0.5,
+      max: (prompts[prompts.length - 1]?.n ?? 1) + 0.5,
+      minInterval: 1,
+      axisLine: c.axisLine,
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { ...c.axisLabel, formatter: (v: number) => (Number.isInteger(v) ? String(v) : "") },
+    },
+    yAxis: { type: "value", min: deepest < 0 ? deepest : undefined, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
+    series: [
+      {
+        type: "scatter",
+        data: points.map((p) => ({
+          value: [p.n, shown(p)],
+          name: p.id,
+          ...(p.added < deepest ? { itemStyle: { color: "transparent", borderColor: color, borderWidth: 1.5 } } : {}),
+        })),
+        symbolSize: (_: unknown, params: { dataIndex: number }) => 6 + 16 * Math.sqrt((points[params.dataIndex]?.calls ?? 0) / most),
+        itemStyle: { color: withAlpha(color, 0.75), borderColor: color, borderWidth: 1 },
+        emphasis: { scale: 1.3, itemStyle: { color } },
+        cursor: "pointer",
+      },
+    ],
   };
 }
 

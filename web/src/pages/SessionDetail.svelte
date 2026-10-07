@@ -126,7 +126,7 @@
 
       <TagEditor {id} tags={d.data.tags} inherited={d.data.inherited} rule={d.data.rule} note={d.data.note} />
 
-      {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} prompts={d.data.prompts.length > 1 ? promptNo : undefined} />{/if}
+      {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} prompts={d.data.prompts.length > 1 ? d.data.prompts.map((p, i) => ({ id: p.id, n: i + 1, text: p.text })) : undefined} />{/if}
 
       <div class="grid gap-5 xl:grid-cols-3">
         {#if s?.parent && !d.data.prompts.length}

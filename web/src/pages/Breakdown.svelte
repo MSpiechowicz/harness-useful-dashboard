@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import BillingTable, { type BillingSortKey, billingLabel } from "../components/BillingTable.svelte";
   import BreakdownTable, { type BreakdownSortKey } from "../components/BreakdownTable.svelte";
   import Card from "../components/Card.svelte";
@@ -12,12 +13,16 @@
   import PageHeader from "../components/PageHeader.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import RankedList from "../components/RankedList.svelte";
+  import SmallMultiples from "../components/SmallMultiples.svelte";
   import UsageChart from "../components/UsageChart.svelte";
   import { apiUrl, settled, useFetch, type BillingRow, type Breakdown, type TimeSeries } from "../lib/api.svelte.ts";
   import { breakdownItems, treemapChart, trendAverage } from "../lib/charts.ts";
   import { isColored } from "../lib/colors.svelte.ts";
   import { entityLabel, metricValue, percent } from "../lib/format.ts";
   import { t, type MessageKey } from "../lib/i18n.svelte.ts";
+  import { sharedMax, tilesOf } from "../lib/smallMultiples.ts";
+  import { SPLIT_BY, type PairRow } from "../lib/network.ts";
+  import { splitNetwork } from "../lib/splitNetwork.ts";
   import { store, type FilterKey } from "../lib/state.svelte.ts";
 
   let { dim }: { dim: "project" | "model" | "provider" | "user" | "skill" | "agent" } = $props();
@@ -28,13 +33,29 @@
 
   const data = useFetch<Breakdown>(() => apiUrl("/api/breakdown", { dim, limit: 500, sort: store.metric }));
   const series = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: store.bucket, group: dim, metric: store.metric }));
-  // Providers: what the usage was billed through (a plan like Copilot, or the harness's own account).
-  const billing = useFetch<BillingRow[]>(() => (dim === "provider" ? apiUrl("/api/billing", {}) : null));
-
   // Skills: drop turns without an active skill so the chart is about skills only.
   // "(none)" is left out where it isn't wanted: skills always (the page is about skills), projects when switched off.
   const hideNone = $derived(dim === "skill" || (dim === "project" && !store.showNoProject));
+  // Who used what: the page's values split by a second dimension, as a network of points and fibres.
+  const splitBy = $derived(SPLIT_BY[dim]);
+  const pairs = useFetch<PairRow[]>(() => (splitBy ? apiUrl("/api/breakdown/pairs", { dim, by: splitBy, metric: store.metric, ...(hideNone ? { none: 0 } : {}) }) : null));
+  // Projects: the busiest few as small multiples. One more than shown is asked for, as "(none)" may take a slot.
+  const TILES = 12;
+  const tileSeries = useFetch<TimeSeries>(() => (dim === "project" ? apiUrl("/api/timeseries", { bucket: store.bucket, group: dim, metric: store.metric, top: TILES + 1 }) : null));
+  // Providers: what the usage was billed through (a plan like Copilot, or the harness's own account).
+  const billing = useFetch<BillingRow[]>(() => (dim === "provider" ? apiUrl("/api/billing", {}) : null));
+
   const rows = $derived((data.data?.rows ?? []).filter((r) => !hideNone || r.key !== "(none)"));
+
+  // The network settles by a force layout: a refresh with the same pairs keeps the rows it has, so it doesn't start over.
+  let splitWidth = $state(1000);
+  let pairRows = $state.raw<PairRow[]>([]);
+  $effect(() => {
+    const next = pairs.data ?? [];
+    if (JSON.stringify(next) !== JSON.stringify(untrack(() => pairRows))) pairRows = next;
+  });
+  const splitOption = $derived.by(() => (void store.dark, splitBy && pairRows.length ? splitNetwork(pairRows, dim, splitBy, fmt, splitWidth, splitWidth < 700 ? 360 : 460) : null));
+
 
   // The tables: the standard table card's sort choices (names read A to Z, numbers from the top).
   const SORTS: { value: BreakdownSortKey; label: string; asc?: boolean }[] = $derived([
@@ -78,6 +99,8 @@
       ? t("breakdown.topShown", { metric: t(`metric.${store.metric}`), n: distributionShown, total: rows.length, what: t(`breakdown.what.${dim}` as MessageKey) })
       : t(`metric.${store.metric}`),
   );
+  const tiles = $derived(tileSeries.data ? tilesOf(tileSeries.data, dim, TILES, hideNone) : []);
+  const tileMax = $derived(sharedMax(tiles));
   // A moving average of the total as a trend line, as on Trends.
   const average = $derived(trend ? trendAverage(store.bucket, trend.buckets.length) : undefined);
 
@@ -131,6 +154,32 @@
           {#if trend}<UsageChart ts={trend} {dim} bucket={store.bucket} metric={store.metric} {average} height={300} fill={shape !== "treemap"} loading={series.loading} />{/if}
         </Card>
       </div>
+
+      {#if tileSeries.data && tiles.length >= 2}
+        <Card title={t("chart.projectTiles")} subtitle={t("chart.projectTilesHint", { max: fmt(tileMax) })}>
+          <SmallMultiples
+            {tiles}
+            ts={tileSeries.data}
+            {dim}
+            bucket={store.bucket}
+            metric={store.metric}
+            max={tileMax}
+            onselect={(key) => store.setFilter(dim as FilterKey, key)}
+            loading={tileSeries.loading}
+          />
+        </Card>
+      {/if}
+
+      {#if splitOption}
+        <Card title={t(`chart.split.${dim}` as MessageKey)} subtitle={t("chart.splitHint", { metric: t(`metric.${store.metric}`) })}>
+          <!-- Which is which: filled points for this page's values, rings for what they're split by. -->
+          <ul class="mb-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-ink-2">
+            <li class="flex items-center gap-1.5"><span class="h-2 w-2 shrink-0 rounded-full bg-ink-2"></span>{t(`nav.${dim}s` as MessageKey)}</li>
+            <li class="flex items-center gap-1.5"><span class="h-2 w-2 shrink-0 rounded-full border-[1.5px] border-ink-2"></span>{t(`nav.${splitBy}s` as MessageKey)}</li>
+          </ul>
+          <div bind:clientWidth={splitWidth}><Chart option={splitOption} height={splitWidth < 700 ? 360 : 460} dim={pairs.loading} /></div>
+        </Card>
+      {/if}
 
       <TableCard
         title={t(`breakdown.table.${dim}` as MessageKey)}

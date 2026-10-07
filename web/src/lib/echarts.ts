@@ -1,5 +1,5 @@
 // Tree-shaken ECharts build: only the chart types and components the dashboard uses.
-import { BarChart, CustomChart, EffectScatterChart, HeatmapChart, LineChart, PieChart, ScatterChart, TreemapChart } from "echarts/charts";
+import { BarChart, CustomChart, EffectScatterChart, GraphChart, HeatmapChart, LineChart, LinesChart, PieChart, SankeyChart, ScatterChart, TreemapChart } from "echarts/charts";
 import {
   GridComponent,
   LegendComponent,
@@ -15,9 +15,15 @@ echarts.use([
   BarChart,
   CustomChart,
   EffectScatterChart,
+  GraphChart,
+  LinesChart,
   LineChart,
   HeatmapChart,
   PieChart,
+  SankeyChart,
+ 
+ 
+ 
   ScatterChart,
   TreemapChart,
   GridComponent,

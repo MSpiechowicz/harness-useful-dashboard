@@ -275,6 +275,16 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           return json(q.timeseries(f, pick(sp.get("bucket"), BUCKETS, "day"), pick(sp.get("group"), GROUPS, "type"), pick<Metric>(sp.get("metric"), ["tokens", "cost"], "tokens"), Number(sp.get("top") ?? 5)));
         case "/api/breakdown":
           return json(q.breakdown(f, pick(sp.get("dim"), DIMENSIONS, "project"), Math.min(500, Number(sp.get("limit") ?? 50)), pick(sp.get("sort"), ["tokens", "cost"] as const, "cost")));
+        case "/api/flow":
+          return json(q.flow(f));
+        case "/api/breakdown/pairs":
+          return json(
+            q.pairs(f, pick(sp.get("dim"), DIMENSIONS, "project"), pick(sp.get("by"), DIMENSIONS, "model"), pick<Metric>(sp.get("metric"), ["tokens", "cost"], "cost"), {
+              rows: Math.max(1, Math.min(20, Math.trunc(Number(sp.get("rows"))) || 8)),
+              cols: Math.max(1, Math.min(20, Math.trunc(Number(sp.get("cols"))) || 8)),
+              skipNone: sp.get("none") === "0",
+            }),
+          );
         case "/api/drift":
           return json(drift(app.db, f, { model: sp.get("select"), effort: sp.get("effort") }));
         case "/api/billing":

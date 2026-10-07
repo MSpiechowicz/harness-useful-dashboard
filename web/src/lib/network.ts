@@ -1,0 +1,146 @@
+/**
+ * The "who used what" network on the breakdown pages, without colors or text: the pairs it shows and where each point
+ * goes. Kept apart from the chart so it can be tested on its own (splitNetwork.ts draws it).
+ */
+
+/** One pair of a dimension and the second one it is split by, with its measure (/api/breakdown/pairs). */
+export interface PairRow {
+  key: string;
+  label: string;
+  sub: string;
+  subLabel: string;
+  value: number;
+}
+
+/** What each breakdown page is split by: who used what, from the page's side. */
+export const SPLIT_BY: Record<string, string> = { project: "model", model: "project", provider: "model", user: "project", skill: "project", agent: "project" };
+
+/** The key the server sums the rest into. */
+export const OTHER = "__other__";
+
+/**
+ * The pairs to draw: one too small for a fibre of its own (under half a percent of the total) joins its row's "Other"
+ * on the far side, so the amounts all stay and there are fewer, clearer fibres.
+ */
+export function foldPairs(rows: PairRow[], otherLabel: string): PairRow[] {
+  const total = rows.reduce((a, r) => a + r.value, 0);
+  const least = total * 0.005;
+  const pairs = new Map<string, PairRow>();
+  for (const r of rows) {
+    const sub = r.value < least && r.sub !== OTHER ? OTHER : r.sub;
+    const at = `${r.key}\u0000${sub}`;
+    const p = pairs.get(at) ?? { ...r, sub, subLabel: sub === OTHER ? otherLabel : r.subLabel, value: 0 };
+    p.value += r.value;
+    pairs.set(at, p);
+  }
+  return [...pairs.values()];
+}
+
+export interface Point {
+  id: string;
+  x: number;
+  y: number;
+  /** The point's radius, to keep others clear of it. */
+  r: number;
+}
+
+/**
+ * Where each point goes: a small force layout that keeps everything inside the box (with room on the right for the
+ * labels) and comes out the same every time. Points push each other apart and never overlap, fibres pull their ends
+ * together, and a light pull keeps the whole near the middle, weaker sideways so it spreads along the wide card.
+ */
+export function settle(points: Point[], links: { source: string; target: string; strength: number }[], width: number, height: number): void {
+  const pad = 24;
+  const left = pad;
+  const right = Math.max(left + 100, width - 130);
+  const top = pad;
+  const bottom = Math.max(top + 100, height - pad);
+  const cx = (left + right) / 2;
+  const cy = (top + bottom) / 2;
+  // A deterministic start: around an ellipse, in order.
+  points.forEach((p, i) => {
+    const a = (i / points.length) * Math.PI * 2;
+    p.x = cx + Math.cos(a) * (right - left) * 0.35;
+    p.y = cy + Math.sin(a) * (bottom - top) * 0.35;
+  });
+  const at = new Map(points.map((p) => [p.id, p]));
+  const rest = Math.min(right - left, (bottom - top) * 2) / 4;
+  const STEPS = 400;
+  for (let step = 0; step < STEPS; step++) {
+    const cool = 1 - step / STEPS;
+    const move = new Map(points.map((p) => [p.id, [0, 0] as [number, number]]));
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const a = points[i]!;
+        const b = points[j]!;
+        let x = a.x - b.x;
+        let y = a.y - b.y;
+        let d = Math.hypot(x, y);
+        if (d < 0.01) [x, y, d] = [1, 0, 1];
+        const push = (rest * rest) / (d * d) + (d < a.r + b.r + 28 ? 4 : 0);
+        const ma = move.get(a.id)!;
+        const mb = move.get(b.id)!;
+        ma[0] += (x / d) * push;
+        ma[1] += (y / d) * push;
+        mb[0] -= (x / d) * push;
+        mb[1] -= (y / d) * push;
+      }
+    }
+    for (const l of links) {
+      const a = at.get(l.source)!;
+      const b = at.get(l.target)!;
+      const x = b.x - a.x;
+      const y = b.y - a.y;
+      const d = Math.max(0.01, Math.hypot(x, y));
+      const pull = ((d - rest) / d) * 0.05 * (0.4 + l.strength);
+      const ma = move.get(a.id)!;
+      const mb = move.get(b.id)!;
+      ma[0] += x * pull;
+      ma[1] += y * pull;
+      mb[0] -= x * pull;
+      mb[1] -= y * pull;
+    }
+    for (const p of points) {
+      const [dx, dy] = move.get(p.id)!;
+      const mx = dx + (cx - p.x) * 0.01;
+      const my = dy + (cy - p.y) * 0.02;
+      const m = Math.hypot(mx, my);
+      const cap = 12 * cool + 0.5;
+      p.x = Math.min(right, Math.max(left, p.x + (m > cap ? (mx / m) * cap : mx)));
+      p.y = Math.min(bottom, Math.max(top, p.y + (m > cap ? (my / m) * cap : my)));
+    }
+  }
+}
+
+/**
+ * The stretch of a fibre between two bubbles' edges, as points along it: the fibre is the curve ECharts draws between
+ * the centers (a quadratic bend of `curveness`, the same formula as its graph and lines series), cut where it leaves
+ * the first bubble (radius r0) and where it enters the second (r1). A light that runs along it starts and ends at the
+ * edges instead of inside the bubbles. Null when the bubbles touch and nothing is left between them.
+ */
+export function edgeToEdge(p0: [number, number], p1: [number, number], curveness: number, r0: number, r1: number, samples = 24): [number, number][] | null {
+  const c: [number, number] = [(p0[0] + p1[0]) / 2 - (p0[1] - p1[1]) * curveness, (p0[1] + p1[1]) / 2 - (p1[0] - p0[0]) * curveness];
+  const at = (t: number): [number, number] => [
+    (1 - t) * (1 - t) * p0[0] + 2 * (1 - t) * t * c[0] + t * t * p1[0],
+    (1 - t) * (1 - t) * p0[1] + 2 * (1 - t) * t * c[1] + t * t * p1[1],
+  ];
+  // Where the curve crosses a circle around one end: the distance from that end only grows along the curve's first
+  // stretch, so halving the interval finds it.
+  const cross = (end: [number, number], r: number, from: number, to: number) => {
+    let [lo, hi] = [from, to];
+    for (let i = 0; i < 30; i++) {
+      const mid = (lo + hi) / 2;
+      const [x, y] = at(mid);
+      if (Math.hypot(x - end[0], y - end[1]) < r) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) / 2;
+  };
+  // Bubbles so close that the curve's middle is inside one of them leave nothing to run along.
+  const [mx, my] = at(0.5);
+  if (Math.hypot(mx - p0[0], my - p0[1]) <= r0 || Math.hypot(mx - p1[0], my - p1[1]) <= r1) return null;
+  const t0 = cross(p0, r0, 0, 0.5);
+  const t1 = cross(p1, r1, 1, 0.5);
+  if (t1 - t0 <= 0.02) return null;
+  return Array.from({ length: samples + 1 }, (_, i) => at(t0 + ((t1 - t0) * i) / samples));
+}

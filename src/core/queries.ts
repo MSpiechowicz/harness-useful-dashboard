@@ -374,6 +374,56 @@ export class Queries {
     };
   }
 
+  /** Spend by provider, model and project together: the flows of the Overview's Sankey. */
+  flow(f: Filters, limit = 5000) {
+    const w = whereClause(f);
+    return this.all<{ provider: string; model: string; project: string; tokens: number; cost: number }>(
+      `SELECT u.provider AS provider, COALESCE(u.model, '(none)') AS model, COALESCE(u.project, '(none)') AS project,
+              COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost
+       FROM usage u ${w.sql}
+       GROUP BY provider, model, project ORDER BY cost DESC, tokens DESC LIMIT $limit`,
+      { ...w.params, limit },
+    );
+  }
+
+  /**
+   * A dimension split by a second one (projects by model, models by project…), for the matrix on the breakdown pages:
+   * the biggest `rows` values of the one and `cols` of the other keep their own pairs, everything else is summed into
+   * "__other__" on its side, so the totals stay exact however much there is. "(none)" can be left out before ranking.
+   */
+  pairs(f: Filters, dim: Dimension, by: Dimension, metric: Metric = "cost", opts: { rows?: number; cols?: number; skipNone?: boolean } = {}) {
+    const { rows = 8, cols = 8, skipNone = false } = opts;
+    const col = metric === "tokens" ? "total_tokens" : "cost_usd";
+    const w = whereClause(f);
+    const all = this.all<{ key: string | null; sub: string | null; value: number }>(
+      `SELECT ${dimExpr(dim)} AS key, ${dimExpr(by)} AS sub, COALESCE(SUM(u.${col}), 0) AS value
+       FROM usage u ${w.sql} GROUP BY key, sub HAVING value > 0`,
+      w.params,
+    )
+      .map((r) => ({ key: r.key ?? "(none)", sub: r.sub ?? "(none)", value: r.value }))
+      .filter((r) => !skipNone || r.key !== "(none)");
+    const biggest = (side: "key" | "sub", n: number) => {
+      const totals = new Map<string, number>();
+      for (const r of all) totals.set(r[side], (totals.get(r[side]) ?? 0) + r.value);
+      return new Set([...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k]) => k));
+    };
+    const keepRows = biggest("key", rows);
+    const keepCols = biggest("sub", cols);
+    const folded = new Map<string, { key: string; sub: string; value: number }>();
+    for (const r of all) {
+      const key = keepRows.has(r.key) ? r.key : "__other__";
+      const sub = keepCols.has(r.sub) ? r.sub : "__other__";
+      const at = `${key}\u0000${sub}`;
+      const cell = folded.get(at) ?? { key, sub, value: 0 };
+      cell.value += r.value;
+      folded.set(at, cell);
+    }
+    const label = (d: Dimension, k: string) => (k === "__other__" ? "other" : d === "project" && k !== "(none)" ? projectLabel(k) : k);
+    return [...folded.values()]
+      .sort((a, b) => b.value - a.value)
+      .map((r) => ({ key: r.key, label: label(dim, r.key), sub: r.sub, subLabel: label(by, r.sub), value: r.value }));
+  }
+
   /**
    * Usage by what it was billed through: the plan or account the harness reports per call (omp: "openai-codex",
    * "github-copilot", …), else the harness's own account. Cost stays API-equivalent; Copilot counts premium
