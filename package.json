@@ -1,6 +1,6 @@
 {
   "name": "harness-dashboard",
-  "version": "1.20.0",
+  "version": "1.20.1",
   "description": "Local token usage dashboard for AI coding tools (Claude Code, Codex, OpenCode, pi, omp, Cursor)",
   "license": "GPL-3.0-or-later",
   "private": true,

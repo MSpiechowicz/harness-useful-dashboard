@@ -1,3 +1,10 @@
+## [1.20.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.20.0...v1.20.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* Label now is off when its CLI isn't installed, and the update arrow moves ([24be1fb](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/24be1fb0e8a253e9b2adb0a66f39cd1aa5dd82c6))
+
 # [1.20.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.19.2...v1.20.0) (2026-10-07)
 
 
