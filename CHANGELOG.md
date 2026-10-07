@@ -1,3 +1,10 @@
+## [1.11.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.11.0...v1.11.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* the dev UI on localhost:5173 loads again without the sign-in link ([efaaa55](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/efaaa5513cbc183aa936988e74264f844a98ee06))
+
 # [1.11.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.10.0...v1.11.0) (2026-10-07)
 
 
