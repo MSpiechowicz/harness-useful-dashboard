@@ -1,12 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Runs the API server (with --watch) and the Vite dev server side by side. Open the sign-in link it prints.
- * The API listens on 4318, so it never takes the installed app's port (4317) and both can run at once.
+ * Runs the API server (with --watch) and the Vite dev server side by side. Open http://localhost:5173.
+ * The API listens on 4318, so it never takes the installed app's port (4317) and both can run at once. Vite's proxy
+ * signs the dev UI in (see web/vite.config.ts).
  */
-import { loadToken, signInUrl } from "../src/server/auth.ts";
-
-// Through Vite, which passes /api on to the server: the cookie it sets counts for the dev UI too.
-console.log(`\n  Dashboard (dev): ${signInUrl("http://localhost:5173", loadToken())}\n`);
+export {};
 
 const procs = [
   Bun.spawn(["bun", "--watch", "src/cli.ts", "serve", "--no-open", "--port", "4318"], { stdio: ["inherit", "inherit", "inherit"] }),
