@@ -442,9 +442,10 @@
                     <td class="relative">
                       <!-- A tree line from the session's swatch to each of its subagents. -->
                       <span class="absolute top-0 left-[calc(1.25rem+4px)] w-px bg-line {last ? 'h-1/2' : 'bottom-0'}"></span><span class="absolute top-1/2 left-[calc(1.25rem+4px)] h-px w-2.5 bg-line"></span>
+                      <!-- The brief is what tells runs apart, so it gets the title's room. The agent type goes in the Project
+                           column, which a subagent shares with its session anyway. -->
                       <div class="flex items-center gap-2 pl-[18px]">
-                        <Link to="#/sessions/{encodeURIComponent(runTarget(s, r))}" class="max-w-[60%] shrink-0 truncate text-ink">{r.agent ?? t("live.runs.subagent")}</Link>
-                        {#if r.brief && r.brief !== r.agent}<span class="min-w-0 truncate text-muted" title={r.brief}>{r.brief}</span>{/if}
+                        <Link to="#/sessions/{encodeURIComponent(runTarget(s, r))}" class="min-w-0 truncate text-ink" title={r.brief ?? undefined}>{r.brief || r.agent || t("live.runs.subagent")}</Link>
                         {#if r.errors}{@render failed(r.errors, 0)}{/if}
                       </div>
                     </td>
@@ -454,7 +455,7 @@
                         {runStatus(r)}
                       </span>
                     </td>
-                    <td></td>
+                    <td class="truncate text-muted" title={r.agent ?? undefined}>{r.brief ? (r.agent ?? t("live.runs.subagent")) : ""}</td>
                     <td class="truncate text-ink-2" title={r.lastFile ?? r.lastTool ?? ""}>
                       {r.lastTool ?? "–"}{#if r.lastFile}<span class="ml-1 text-muted">· {r.lastFile.split(/[\\/]/).pop()}</span>{/if}
                     </td>
@@ -488,11 +489,12 @@
       exportName="live-feed"
     >
       {#snippet children(view)}
-        <table class="data fixed-cols">
+        <!-- Four columns: it fits a narrow window without scrolling sideways (the shared fixed-cols minimum is for wider tables). -->
+        <table class="data fixed-cols !min-w-[40rem]">
           <colgroup>
             <col class="w-20" />
             <col />
-            <col class="w-72" />
+            <col class="w-60" />
             <col class="w-16" />
           </colgroup>
           <thead>
