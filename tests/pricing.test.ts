@@ -19,6 +19,16 @@ describe("normalizeModel", () => {
     ["openrouter/anthropic/claude-sonnet-4.5", "claude-sonnet-4-5"],
     ["openai-codex/gpt-6-sol", "gpt-6-sol"],
     ["models/gemini-2.5-pro", "gemini-2.5-pro"],
+    // Other makers behind routers: the vendor prefix goes, a trailing "-v3" is a version, not a Bedrock suffix.
+    ["x-ai/grok-4", "grok-4"],
+    ["moonshotai/kimi-k2", "kimi-k2"],
+    ["qwen/qwen3-coder", "qwen3-coder"],
+    ["z-ai/glm-5", "glm-5"],
+    ["deepseek/deepseek-v3", "deepseek-v3"],
+    ["deepseek-v4", "deepseek-v4"],
+    ["mistralai/devstral-2512", "devstral-2512"],
+    ["minimax/MiniMax-M2.5", "minimax-m2.5"],
+    ["claude-3-5-sonnet-v2@20241022", "claude-3-5-sonnet"],
     ["", "unknown"],
     [null, "unknown"],
   ])("%p → %p", (input, expected) => {
@@ -81,7 +91,7 @@ describe("PriceBook", () => {
   });
 
   test("unknown models use a flagged fallback", () => {
-    const c = book.cost("gpt-5.6-sol", { ...zero, input: M });
+    const c = book.cost("gpt-9-nova", { ...zero, input: M });
     expect(c.estimated).toBe(true);
     expect(c.usd).toBeGreaterThan(0);
     expect(book.cost("some-new-model", { ...zero, input: M }).estimated).toBe(true);

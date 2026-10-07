@@ -13,7 +13,8 @@ export function normalizeModel(model: string | null | undefined): string {
   m = m.replace(/^(us|eu|apac|global)\.(?=anthropic\.)/, "");
   m = m.replace(/^anthropic\./, "");
   m = m.slice(m.lastIndexOf("/") + 1); // router and vendor prefixes: "github-copilot/", "openrouter/anthropic/", "models/"
-  m = m.replace(/@\d{8}$/, "").replace(/-v\d+(:\d+)?$/, "");
+  m = m.replace(/@\d{8}$/, "").replace(/-v\d+:\d+$/, ""); // Bedrock's "-v1:0"
+  if (m.startsWith("claude")) m = m.replace(/-v\d+$/, ""); // "claude-3-5-sonnet-v2", but "deepseek-v3" keeps its version
   m = m.replace(/-(\d{8})$/, ""); // date-suffixed snapshot ids
   if (m.startsWith("claude-")) m = m.replaceAll(".", "-"); // "claude-opus-5.5" → "claude-opus-5-5"
   return m || "unknown";
