@@ -1,3 +1,10 @@
+## [1.16.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.16.0...v1.16.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* install.sh puts harness-dashboard on your PATH ([1738259](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/173825968555f2f303c247f8f1f4a818fc719f5e))
+
 # [1.16.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.15.1...v1.16.0) (2026-10-07)
 
 
