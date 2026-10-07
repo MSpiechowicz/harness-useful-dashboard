@@ -1,3 +1,10 @@
+## [1.13.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.1...v1.13.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* Live's activity shows the command again, the error opens with its own button ([56dc89a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/56dc89a3ff2791b23aa887b6247435a9a81114b6))
+
 ## [1.13.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.0...v1.13.1) (2026-10-07)
 
 
