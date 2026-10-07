@@ -439,10 +439,10 @@
         <SettingRow label={t("settings.budgetMonthly")} hint={t("settings.budgetMonthlyHint")}>
           <NumberField bind:value={budgetMonthly} unit="USD" label={t("settings.budgetMonthly")} />
         </SettingRow>
-        <SettingRow label={t("settings.budgetProjects")} hint={t("settings.budgetProjectsHint")} wide>
-          <div class="flex w-full flex-col gap-2">
+        <SettingRow label={t("settings.budgetProjects")} hint={t("settings.budgetProjectsHint")} wide={projectBudgets.length > 0}>
+          <div class="flex w-full flex-col items-end gap-2">
             {#each projectBudgets as row, i (i)}
-              <div class="flex items-center gap-2">
+              <div class="flex w-full items-center gap-2">
                 <div class="min-w-0 flex-1">
                   <Dropdown
                     full
@@ -455,7 +455,7 @@
                 <button class="btn !w-8 shrink-0 justify-center !px-0" aria-label={t("common.remove")} onclick={() => (projectBudgets = projectBudgets.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
               </div>
             {/each}
-            <button class="btn self-start" onclick={() => (projectBudgets = [...projectBudgets, { project: "", cap: 0 }])}><Plus size={14} />{t("settings.budgetAddProject")}</button>
+            <button class="btn" onclick={() => (projectBudgets = [...projectBudgets, { project: "", cap: 0 }])}><Plus size={14} />{t("settings.budgetAddProject")}</button>
           </div>
         </SettingRow>
         <SettingRow label={t("settings.budgetAlerts")} hint={t("settings.budgetAlertsHint")}>
