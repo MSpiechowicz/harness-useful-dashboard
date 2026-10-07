@@ -53,8 +53,75 @@ function toNum(v: string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function hash(s: string): string {
-  return new Bun.CryptoHasher("sha1").update(s).digest("hex").slice(0, 20);
+/** One model call as Cursor reports it, from a CSV row or from cursor.com's usage events (cursorSync.ts). */
+export interface CursorEvent {
+  ts: number;
+  /** The account's email in team exports, null for the user's own usage. */
+  user: string | null;
+  model: string | null;
+  /** How Cursor billed it: "Included", "Usage-based", "Errored, Not Charged", … */
+  kind: string | null;
+  /** Uncached input. */
+  input: number;
+  cacheWrite: number;
+  cacheRead: number;
+  output: number;
+  /** The cost Cursor reports in USD, null when it reports none (an included call). */
+  cost: number | null;
+}
+
+/**
+ * A call's row id, from what both the CSV export and the usage API report about it: its time to the millisecond, the
+ * model and the tokens. A CSV import and a sync of the same call so write the same row.
+ */
+export function cursorUsageId(e: Pick<CursorEvent, "ts" | "model" | "input" | "cacheWrite" | "cacheRead" | "output">): string {
+  return `cursor:${e.ts}:${e.model ?? ""}:${e.input}:${e.cacheWrite}:${e.cacheRead}:${e.output}`;
+}
+
+/**
+ * Gives rows imported before cursorUsageId their key under it (migration 13). They were keyed by a hash of their CSV
+ * line. One that would clash with another keeps its old key.
+ */
+export const CURSOR_REKEY = /* sql */ `
+  UPDATE OR IGNORE usage
+  SET id = 'cursor:' || ts || ':' || COALESCE(model, '') || ':' || input_tokens || ':' || cache_write_tokens || ':' ||
+           cache_read_tokens || ':' || output_tokens
+  WHERE provider = 'cursor' AND id GLOB 'cursor:[0-9a-f]*' AND length(id) = 27;
+`;
+
+/**
+ * Writes one call, under a session per user and UTC day. `seen` holds the sessions already written by this import,
+ * which then only widen their time span. Returns false for a call without tokens (errored, aborted).
+ */
+export function writeCursorEvent(e: CursorEvent, sink: IngestSink, seen: Set<string>): boolean {
+  if (!e.input && !e.output && !e.cacheRead && !e.cacheWrite) return false;
+  const day = new Date(e.ts).toISOString().slice(0, 10);
+  const sessionId = `cursor:${e.user ?? "local"}:${day}`;
+  if (!seen.has(sessionId)) {
+    seen.add(sessionId);
+    sink.session({ id: sessionId, provider: "cursor", nativeId: day, project: "Cursor", title: `Cursor usage ${day}`, client: "cursor", startedAt: e.ts, endedAt: e.ts });
+  } else sink.session({ id: sessionId, provider: "cursor", nativeId: day, startedAt: e.ts, endedAt: e.ts });
+  sink.usage({
+    id: cursorUsageId(e),
+    provider: "cursor",
+    sessionId,
+    promptId: null,
+    ts: e.ts,
+    project: "Cursor",
+    model: e.model,
+    skill: null,
+    agent: e.kind || "main",
+    isSubagent: false,
+    input: e.input,
+    output: e.output,
+    cacheRead: e.cacheRead,
+    cacheWrite: e.cacheWrite,
+    cacheWrite1h: 0,
+    reasoning: 0,
+    costUsd: e.cost,
+    user: e.user,
+  });
+  return true;
 }
 
 export interface CursorImportResult {
@@ -104,39 +171,22 @@ export function importCursorCsv(text: string, sink: IngestSink): CursorImportRes
     const total = col.total >= 0 ? toNum(row[col.total]) : 0;
     let uncached = input;
     if (!input && !output && !cacheRead && !cacheWrite && total) uncached = total; // token-total-only exports
-    if (!uncached && !output && !cacheRead && !cacheWrite) {
+    const costRaw = col.cost >= 0 ? row[col.cost] : undefined;
+    const event: CursorEvent = {
+      ts,
+      user: col.user >= 0 ? row[col.user] || null : null,
+      model: col.model >= 0 ? row[col.model] || null : null,
+      kind: col.kind >= 0 ? row[col.kind] || null : null,
+      input: uncached,
+      cacheWrite,
+      cacheRead,
+      output,
+      cost: costRaw && /\d/.test(costRaw) ? toNum(costRaw) : null,
+    };
+    if (!writeCursorEvent(event, sink, seenSessions)) {
       skipped++;
       continue;
     }
-    const user = col.user >= 0 ? row[col.user] || null : null;
-    const day = new Date(ts).toISOString().slice(0, 10);
-    const sessionId = `cursor:${user ?? "local"}:${day}`;
-    if (!seenSessions.has(sessionId)) {
-      seenSessions.add(sessionId);
-      sink.session({ id: sessionId, provider: "cursor", nativeId: day, project: "Cursor", title: `Cursor usage ${day}`, client: "cursor", startedAt: ts, endedAt: ts });
-    } else sink.session({ id: sessionId, provider: "cursor", nativeId: day, startedAt: ts, endedAt: ts });
-    const costRaw = col.cost >= 0 ? row[col.cost] : undefined;
-    const cost = costRaw && /\d/.test(costRaw) ? toNum(costRaw) : null;
-    sink.usage({
-      id: `cursor:${hash(row.join("\u0001"))}`,
-      provider: "cursor",
-      sessionId,
-      promptId: null,
-      ts,
-      project: "Cursor",
-      model: col.model >= 0 ? row[col.model] || null : null,
-      skill: null,
-      agent: col.kind >= 0 && row[col.kind] ? row[col.kind]! : "main",
-      isSubagent: false,
-      input: uncached,
-      output,
-      cacheRead,
-      cacheWrite,
-      cacheWrite1h: 0,
-      reasoning: 0,
-      costUsd: cost,
-      user,
-    });
     imported++;
   }
   return { rows: rows.length - 1, imported, skipped };

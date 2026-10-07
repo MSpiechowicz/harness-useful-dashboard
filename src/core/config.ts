@@ -55,6 +55,11 @@ export interface AppConfig {
   sources: SourceConfig;
   /** Where the Live view reads how much of each plan limit is left (see limits.ts). */
   limits: { claude: boolean; omp: boolean; codex: boolean; pi: boolean; opencode: boolean };
+  /**
+   * Asks cursor.com for this account's usage with the login Cursor keeps on this machine (see cursorSync.ts). Off until
+   * the user turns it on: it is the one source that is not on disk.
+   */
+  cursorSync: boolean;
   /** What each plan or account costs a month in USD, keyed like the billing breakdown ("claude", "openai-codex", …). */
   planPrices: Record<string, number>;
   /** Spending caps and the desktop alerts that come with them (see budgets.ts). */
@@ -103,6 +108,7 @@ export function defaultConfig(): AppConfig {
       enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true },
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
+    cursorSync: false,
     planPrices: {},
     budgets: { ...DEFAULT_BUDGETS, projects: {} },
     language: "en",
@@ -299,6 +305,10 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
     const limits = booleans(body.limits, LIMIT_SOURCES);
     if (!limits) return invalid("limits");
     patch.limits = limits;
+  }
+  if (has("cursorSync")) {
+    if (typeof body.cursorSync !== "boolean") return invalid("cursorSync");
+    patch.cursorSync = body.cursorSync;
   }
   if (has("budgets")) {
     const b = body.budgets;
