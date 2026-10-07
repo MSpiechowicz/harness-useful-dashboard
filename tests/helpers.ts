@@ -33,7 +33,9 @@ export function testConfig(root: string, patch: Partial<AppConfig> = {}): AppCon
       clineDirs: [join(root, "vscode", "globalStorage"), join(root, "cline")],
       rooDirs: [join(root, "vscode", "globalStorage")],
       kiloDirs: [join(root, "vscode", "globalStorage"), join(root, "kilo")],
-      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true },
+      geminiDirs: [join(root, "gemini")],
+      copilotDirs: [join(root, "copilot")],
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true },
     },
     ...patch,
   };

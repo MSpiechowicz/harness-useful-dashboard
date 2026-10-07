@@ -19,7 +19,7 @@ export interface PriceRule extends Price {
 }
 
 /** Raised whenever BUILTIN_PRICES changes: a database priced with an older table is re-priced once on open. */
-export const BUILTIN_PRICES_VERSION = 3;
+export const BUILTIN_PRICES_VERSION = 4;
 
 /**
  * Built-in list prices (first-party API rates). Claude Code and Codex subscription users don't pay these
@@ -67,10 +67,18 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "o3", input: 2, output: 8, cacheRead: 0.5, cacheWrite5m: 2, cacheWrite1h: 2 },
   { pattern: "codex-mini*", input: 1.5, output: 6, cacheRead: 0.375, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
   // Google — up to 200k tokens of context; cache storage is billed per hour, not per write.
-  { pattern: "gemini-2.5-pro*", input: 1.25, output: 10, cacheRead: 0.31, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
+  { pattern: "gemini-2.5-pro*", input: 1.25, output: 10, cacheRead: 0.125, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
   { pattern: "gemini-3.1-pro*", input: 2, output: 12, cacheRead: 0.2, cacheWrite5m: 2, cacheWrite1h: 2 },
   { pattern: "gemini-2.5-flash-lite*", input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite5m: 0.1, cacheWrite1h: 0.1 },
-  { pattern: "gemini-2.5-flash*", input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
+  { pattern: "gemini-2.5-flash*", input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
+  { pattern: "gemini-3-flash*", input: 0.5, output: 3, cacheRead: 0.05, cacheWrite5m: 0.5, cacheWrite1h: 0.5 },
+  { pattern: "gemini-3.1-flash-lite*", input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite5m: 0.25, cacheWrite1h: 0.25 },
+  { pattern: "gemini-3.5-flash-lite*", input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
+  { pattern: "gemini-3.5-flash*", input: 1.5, output: 9, cacheRead: 0.15, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
+  // Introductory prices until the end of 2026: from 2027 $1.50 in, $7.50 out, $0.15 cache read.
+  { pattern: "gemini-3.6-flash*", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite5m: 0.75, cacheWrite1h: 0.75 },
+  { pattern: "gemini-3.7-flash*", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite5m: 0.75, cacheWrite1h: 0.75 },
+  { pattern: "gemini-3.8-flash*", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite5m: 0.75, cacheWrite1h: 0.75 },
   // Zhipu, as OpenCode, Zed and Cline users often run it.
   { pattern: "glm-4.6*", input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite5m: 0.6, cacheWrite1h: 0.6 },
   { pattern: "glm-4.5-air*", input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite5m: 0.2, cacheWrite1h: 0.2 },

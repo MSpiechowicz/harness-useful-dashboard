@@ -26,7 +26,11 @@ export interface SourceConfig {
   rooDirs: string[];
   /** Kilo Code's folders in VS Code's (and its forks') extension storage, and its own data folder (kilo.db). */
   kiloDirs: string[];
-  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean; zed: boolean; cline: boolean; roo: boolean; kilo: boolean };
+  /** Gemini CLI home directories (contain tmp/<project>/chats/). */
+  geminiDirs: string[];
+  /** GitHub Copilot CLI home directories (contain session-state/). */
+  copilotDirs: string[];
+  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean; zed: boolean; cline: boolean; roo: boolean; kilo: boolean; gemini: boolean; copilot: boolean };
 }
 
 export interface AppConfig {
@@ -68,6 +72,7 @@ export function defaultConfig(): AppConfig {
   const ompAgent = process.env.PI_CODING_AGENT_DIR ?? join(home, ".omp", "agent"); // omp's own override
   // pi reads PI_CODING_AGENT_DIR too: that override already goes to omp, so pi keeps its default folder.
   const piAgent = join(home, ".pi", "agent");
+  // Gemini CLI's GEMINI_CLI_HOME stands in for the home folder, Copilot CLI's COPILOT_HOME for its own folder.
   return {
     dbPath: "",
     journalMode: "auto",
@@ -87,7 +92,9 @@ export function defaultConfig(): AppConfig {
       clineDirs: extensionDirs(home, "saoudrizwan.claude-dev", [clineDataDir(home)], true),
       rooDirs: extensionDirs(home, "rooveterinaryinc.roo-cline", []),
       kiloDirs: extensionDirs(home, "kilocode.kilo-code", [join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "kilo")]),
-      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true },
+      geminiDirs: [join(process.env.GEMINI_CLI_HOME ?? home, ".gemini")],
+      copilotDirs: [process.env.COPILOT_HOME ?? join(home, ".copilot")],
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true },
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true },
     planPrices: {},
@@ -190,8 +197,8 @@ export function scanInterval(sec: unknown): number {
   return Math.min(86_400, Math.max(5, Math.round(n)));
 }
 
-const SOURCE_DIRS = ["claudeDirs", "codexDirs", "ompDirs", "piDirs", "opencodeDirs", "zedDirs", "clineDirs", "rooDirs", "kiloDirs"] as const;
-const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo"] as const;
+const SOURCE_DIRS = ["claudeDirs", "codexDirs", "ompDirs", "piDirs", "opencodeDirs", "zedDirs", "clineDirs", "rooDirs", "kiloDirs", "geminiDirs", "copilotDirs"] as const;
+const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo", "gemini", "copilot"] as const;
 const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode"] as const;
 
 /** A settings change: what `parseSettings` lets through, merged into the config by the server. */

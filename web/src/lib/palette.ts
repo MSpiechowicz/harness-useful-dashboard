@@ -40,6 +40,10 @@ export const FAMILIES = {
   lime: { light: ["#1cd135"], dark: ["#bde9bb"] },
   magenta: { light: ["#f648ca"], dark: ["#ff56d2"] },
   amber: { light: ["#532e01"], dark: ["#6f4005"] },
+  // The CLIs that came last found room only where the lightness changes between themes, as lime's does: a bright
+  // cyan on light that turns slate blue on dark (no cyan is left on dark), and a wine that stays one hue.
+  cyan: { light: ["#2ac4cc"], dark: ["#464979"] },
+  wine: { light: ["#5e014a"], dark: ["#9c0451"] },
   // Token types in TOKEN_TYPES order: cache read in teal (the big part of every column), cache write olive,
   // input lilac, output purple. Each keeps its hue in both themes; the four are as far apart as the rest of the
   // palette allows, for normal vision and red-green deficiencies alike, so even thin slivers read apart.
@@ -64,19 +68,22 @@ export const RESERVED = {
   cline: "lime",
   roo: "magenta",
   kilo: "amber",
+  gemini: "cyan",
+  copilot: "wine",
   tokenType: "tokens",
 } as const satisfies Record<string, FamilyName>;
 
-export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo";
-export const PROVIDERS: readonly Provider[] = ["claude", "codex", "cursor", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo"];
+export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
+export const PROVIDERS: readonly Provider[] = ["claude", "codex", "cursor", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo", "gemini", "copilot"];
 /** How each provider (harness) is named in the UI. */
-export const PROVIDER_NAMES: Record<Provider, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", omp: "omp", pi: "pi", opencode: "OpenCode", zed: "Zed", cline: "Cline", roo: "Roo Code", kilo: "Kilo Code" };
+export const PROVIDER_NAMES: Record<Provider, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", omp: "omp", pi: "pi", opencode: "OpenCode", zed: "Zed", cline: "Cline", roo: "Roo Code", kilo: "Kilo Code", gemini: "Gemini CLI", copilot: "Copilot CLI" };
 
 /**
  * Models wear their maker's color - the family of the provider that makes them - whichever harness or plan
  * they ran under: a Claude model through omp or Copilot is still Claude. Only these providers hand out model
  * shades. Harnesses without models of their own (Cursor, omp, pi, OpenCode, Zed, Cline, Roo Code,
- * Kilo Code) have just their one color.
+ * Kilo Code, Copilot CLI) have just their one color. Gemini CLI has one too: no shades of it are left clear of the
+ * rest, so Gemini models take the general pool's colors like other makers'.
  */
 export const MAKER_FAMILIES: Record<Maker, Provider> = { anthropic: "claude", openai: "codex" };
 /** In the order their model shades are generated: a maker added at the end never repaints the ones before it. */
