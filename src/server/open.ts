@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, posix } from "node:path";
 import type { OpenMode } from "../core/config.ts";
 import { appDataDir } from "../core/paths.ts";
 
@@ -117,7 +117,8 @@ export function appWindowCommand(browser: string, url: string, profile: string, 
   // the instance opens the window. Through LaunchServices the instance can also get a reopen event, which a browser
   // whose only windows are app windows answers with an extra, empty browser window. arch picks the native build even
   // under Rosetta.
-  return ["arch", "-arm64", "-x86_64", join(browser, "Contents", "MacOS", basename(browser, ".app")), ...flags];
+  // A macOS path, built the same way wherever the command is built (tests run on Windows too).
+  return ["arch", "-arm64", "-x86_64", posix.join(browser, "Contents", "MacOS", posix.basename(browser, ".app")), ...flags];
 }
 
 export function openUi(url: string, mode: OpenMode): "app" | "browser" | "none" {
