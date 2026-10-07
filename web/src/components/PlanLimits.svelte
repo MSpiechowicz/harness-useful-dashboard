@@ -37,7 +37,10 @@
   export const planName = (p: string) => PLANS[p.toLowerCase()] ?? p.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   export function windowName(w: LimitWindow): string {
-    const ms = w.windowMs;
+    // Older Codex builds log their windows a minute short (299 and 10079 minutes): a length within a few minutes of
+    // a whole hour is that hour.
+    const hours = w.windowMs != null ? Math.round(w.windowMs / HOUR) : 0;
+    const ms = hours && Math.abs(w.windowMs! - hours * HOUR) <= 5 * 60_000 ? hours * HOUR : w.windowMs;
     const base =
       w.id === "premium" ? t("live.window.premium")
       : ms === 5 * HOUR ? t("live.window.5h")
