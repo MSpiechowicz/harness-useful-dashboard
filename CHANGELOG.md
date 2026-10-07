@@ -1,3 +1,10 @@
+## [1.18.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.1...v1.18.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* prices for 74 more models, so GPT-5.x/6, Grok, DeepSeek, Kimi, Qwen, Mistral and MiniMax aren't estimated ([5c31d67](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/5c31d67da63de191c0bba9a26b2c4bb8f3ba9570))
+
 ## [1.18.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.0...v1.18.1) (2026-10-07)
 
 
