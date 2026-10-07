@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Ban, ChevronDown, ChevronRight, CircleStop, CircleX, Gauge, MessageSquareText } from "@lucide/svelte";
+  import { Ban, ChevronDown, ChevronUp, CircleStop, CircleX, Gauge, MessageSquareText } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
@@ -389,17 +389,17 @@
             {#each view.rows.slice(view.offset, view.limit == null ? undefined : view.offset + view.limit) as e, i (`${e.ts}:${e.kind}:${e.sessionId}:${i}`)}
               {@const Icon = FEED_ICON[e.kind]}
               {@const key = `${e.ts}:${e.kind}:${e.sessionId}:${i}`}
-              {@const expanded = !!e.detail && !!open[key]}
+              {@const expandable = !!(e.input || e.detail)}
+              {@const expanded = expandable && !!open[key]}
               <tr class="cursor-pointer" onclick={() => navigate("sessions", e.sessionId)}>
                 <td class="text-ink-2 tabular">{time(e.ts)}</td>
                 <td>
-                  <!-- One line a row: what happened, why, and the command or file it was about. The error text opens below
-                       with the button in the last column. -->
+                  <!-- One line a row: what happened, and why as a pill. The command and the error text open below with the
+                       button in the last column. -->
                   <span class="flex min-w-0 items-center gap-2.5">
                     <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' ? 'text-bad' : 'text-warn'}" />
                     <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class={e.kind === "prompt" ? "truncate text-ink" : "shrink-0 text-ink-2"} title={feedTitle(e)}>{feedText(e)}</Link>
-                    {#if e.reason}<span class="shrink-0 text-xs text-muted">· {t(`friction.reason.${e.reason}`)}</span>{/if}
-                    {#if e.input}<span class="min-w-0 truncate font-mono text-xs text-muted" title={e.input}>{e.input}</span>{/if}
+                    {#if e.reason}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] {e.kind === 'tool_error' ? 'text-bad' : 'text-muted'}">{t(`friction.reason.${e.reason}`)}</span>{/if}
                   </span>
                 </td>
                 <td>
@@ -409,7 +409,8 @@
                   </span>
                 </td>
                 <td class="text-right">
-                  {#if e.detail}
+                  {#if expandable}
+                    <!-- Down, not right: a right chevron is the pager's "next page". -->
                     <button
                       type="button"
                       class="btn !h-7 !px-2"
@@ -421,7 +422,7 @@
                         open[key] = !expanded;
                       }}
                     >
-                      {#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+                      {#if expanded}<ChevronUp size={14} />{:else}<ChevronDown size={14} />{/if}
                     </button>
                   {/if}
                 </td>
@@ -431,7 +432,7 @@
                   <td></td>
                   <td colspan="3" class="!whitespace-normal">
                     {#if e.input}<pre class="mb-2 font-mono text-xs break-all whitespace-pre-wrap text-muted">{e.input}</pre>{/if}
-                    <pre class="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-ink-2">{e.detail}</pre>
+                    {#if e.detail}<pre class="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-ink-2">{e.detail}</pre>{/if}
                   </td>
                 </tr>
               {/if}

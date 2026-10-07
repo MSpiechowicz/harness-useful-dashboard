@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight } from "@lucide/svelte";
+  import { ChevronDown, ChevronUp } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Empty from "../components/Empty.svelte";
@@ -317,7 +317,7 @@
                             open[f.id] = !expanded;
                           }}
                         >
-                          {#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+                          {#if expanded}<ChevronUp size={14} />{:else}<ChevronDown size={14} />{/if}
                         </button>
                       {/if}
                     </td>
