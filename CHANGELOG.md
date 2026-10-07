@@ -1,3 +1,10 @@
+## [1.19.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.19.0...v1.19.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* plan limits show a shortfall as one warning ([9a1a810](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9a1a81049aeca77397b5602689955e2859446dd7))
+
 # [1.19.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.5...v1.19.0) (2026-10-07)
 
 
