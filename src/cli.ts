@@ -4,6 +4,7 @@ import { configPath, ensureAppDataDir } from "./core/paths.ts";
 import { loadConfig, resolveDbPath, updateConfig } from "./core/config.ts";
 import { openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
+import { fallbackLine, gather, parseInput, render, useColor } from "./core/statusline.ts";
 import { importCursorCsv } from "./core/ingest/cursor.ts";
 import { DbWriter } from "./core/ingest/writer.ts";
 import { localIdentity } from "./core/paths.ts";
@@ -21,6 +22,7 @@ Usage:
   ${BIN_NAME} [serve] [options]      Start the dashboard and open it (default)
   ${BIN_NAME} scan [--full]          Ingest new usage from local logs and exit
   ${BIN_NAME} import-cursor <file>   Import a Cursor usage CSV export
+  ${BIN_NAME} statusline             Print one status line for Claude Code (reads its JSON on stdin)
   ${BIN_NAME} update [--check]       Update to the latest release
   ${BIN_NAME} config [path|get|set <key> <value>]
   ${BIN_NAME} version
@@ -30,6 +32,11 @@ Options:
   --port <n>        Port to listen on (default 4317)
   --no-open         Don't open a window
   --browser         Open in the default browser instead of an app window
+
+Statusline options:
+  --format <tpl>    Line template (default "{model} · {session} · {today} · {limit}")
+                    Placeholders: {model} {session} {today} {limit}
+  --no-color        Plain text (NO_COLOR is honored too)
 `;
 
 interface Args {
@@ -46,7 +53,7 @@ export function parseArgs(argv: string[]): Args {
     if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=", 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (["db", "port"].includes(k) && argv[i + 1] && !argv[i + 1]!.startsWith("--")) flags[k] = argv[++i]!;
+      else if (["db", "port", "format"].includes(k) && argv[i + 1] && !argv[i + 1]!.startsWith("--")) flags[k] = argv[++i]!;
       else flags[k] = true;
     } else if (a === "-h") flags.help = true;
     else if (a === "-v") flags.version = true;
@@ -125,10 +132,43 @@ async function serve(args: Args): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
+/** Reads stdin, or nothing when it is a terminal or does not finish within `ms`. */
+async function readStdin(ms: number): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  return Promise.race([Bun.stdin.text(), Bun.sleep(ms).then(() => "")]).catch(() => "");
+}
+
+/** Claude Code's status line: one line on stdout, always exit 0. Reads the database only, never scans. */
+async function statusline(args: Args, dbFlag: string | undefined): Promise<void> {
+  let model: string | null = null;
+  try {
+    const input = parseInput(await readStdin(1000));
+    model = input.model;
+    const cfg = loadConfig();
+    const now = Date.now();
+    let db: ReturnType<typeof openDb> | null = null;
+    try {
+      db = openDb(resolveDbPath(cfg, dbFlag).path, { readonly: true });
+      db.exec("PRAGMA busy_timeout = 300");
+    } catch {
+      db = null; // no database yet: show what stdin knows
+    }
+    const data = gather(db, input, { user: cfg.userName || localIdentity().user, host: localIdentity().host, now });
+    db?.close();
+    const format = typeof args.flags.format === "string" ? args.flags.format : undefined;
+    console.log(render(data, { format, color: useColor(args.flags["no-color"] === true, process.env), now }));
+  } catch {
+    console.log(fallbackLine(model));
+  }
+  process.exit(0);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.flags.help || args.cmd === "help") return void console.log(HELP);
   if (args.flags.version || args.cmd === "version") return void console.log(VERSION);
+  // Before anything that can fail: the status line always prints a line and exits 0.
+  if (args.cmd === "statusline") return statusline(args, typeof args.flags.db === "string" ? args.flags.db : undefined);
   ensureAppDataDir();
 
   const dbFlag = typeof args.flags.db === "string" ? args.flags.db : undefined;
