@@ -1,7 +1,8 @@
 name: Prices
 
-# Every Monday: compare the built-in model prices with LiteLLM's and OpenRouter's price lists (scripts/update-prices.ts),
-# update what both agree on, add new models, and list disagreements for a human. When something
+# Every Monday: compare the built-in model prices (scripts/update-prices.ts) with each maker's own pricing page first,
+# then, only for models the page has no price for, with LiteLLM's and OpenRouter's price lists. Update what differs,
+# add new models, and list every aggregator that disagrees with an official price for a human. When something
 # differs, check + test, then open or update ONE pull request on chore/update-prices for a human to review.
 # Merging it releases a patch (fix:) and the app re-prices history once. Nothing is ever merged automatically.
 on:
@@ -33,7 +34,8 @@ jobs:
       - name: Check prices
         id: prices
         run: bun scripts/update-prices.ts --report "$REPORT"
-      # The report also explains a refusal (a price moving 10x or more), so show it whatever happened.
+      # The report also explains a refusal (a price moving 10x or more) and any official page that could not be read,
+      # so show it whatever happened.
       - name: Show the report
         if: always()
         run: '[ -f "$REPORT" ] && cat "$REPORT" >> "$GITHUB_STEP_SUMMARY" || true'

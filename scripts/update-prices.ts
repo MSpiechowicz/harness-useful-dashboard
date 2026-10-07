@@ -1,35 +1,36 @@
 /**
- * Weekly price check: compares the built-in prices in src/core/pricing.ts with two public price lists, LiteLLM's
- * community-maintained one and OpenRouter's model list, then updates the numbers that changed and adds the models
+ * Weekly price check: compares the built-in prices in src/core/pricing.ts with the makers' own pricing pages, LiteLLM's
+ * community-maintained list and OpenRouter's model list, then updates the numbers that changed and adds the models
  * that are missing. The app never fetches prices itself. This script runs in .github/workflows/prices.yml, which
  * opens a pull request for a human to review.
  *
- * Per rate (input, output, cache read, each cache write) the two sources are compared:
- *   - they agree within 1%: LiteLLM's value is used
- *   - they disagree: the HIGHER value is used (overestimating is safer than underestimating for a cost dashboard)
- *     and the disagreement is listed in the report with both values and the maker's official pricing page
- *   - only one source has the model: an existing price is never changed. A new model is added only when the single
- *     source is LiteLLM's entry from the maker's own provider. Reseller-only and OpenRouter-only prices are never added.
+ * The order is always: 1st the maker's official pricing page (scripts/official-prices.ts), 2nd the rest.
+ *   - the official page lists the model: its price wins outright, even when an aggregator says less. Every rate where
+ *     LiteLLM or OpenRouter differs by more than 1% is listed in the report for review.
+ *   - the official page has no price for the model, or could not be read (that maker then falls back for this run):
+ *     per rate (input, output, cache read, each cache write) LiteLLM and OpenRouter are compared:
+ *       - they agree within 1%: LiteLLM's value is used
+ *       - they disagree: the HIGHER value is used (overestimating is safer than underestimating for a cost dashboard)
+ *         and the disagreement is listed in the report with both values and the maker's official pricing page
+ *       - only one source has the model: an existing price is never changed. A new model is added only when the single
+ *         source is LiteLLM's entry from the maker's own provider. Reseller-only and OpenRouter-only prices are never added.
+ *   - a model on an official page that no rule prices is added with its exact id.
  *
- *   bun scripts/update-prices.ts [--dry-run] [--report report.md] [--source litellm.json] [--openrouter models.json] [--pricing path]
+ *   bun scripts/update-prices.ts [--dry-run] [--report report.md] [--source litellm.json] [--openrouter models.json]
+ *                                [--official-dir dir | --no-official] [--pricing path]
  *
  * Exit 0: nothing to do, or changes written (`changed=true` goes to $GITHUB_OUTPUT). Exit 1: error or a change
  * that needs a human (a price moving more than 10x, dropping to 0, or more than half of the existing rules at once).
  */
 import { appendFileSync } from "node:fs";
 import { normalizeModel } from "../src/core/models.ts";
+import { FIELD_ORDER, fetchOfficial, loadOfficial, round6, type FieldName, type OfficialEntry, type OfficialOutcome, type Rates } from "./official-prices.ts";
+
+export { round6 };
+export type { Rates };
 
 export const LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 export const OPENROUTER_URL = "https://openrouter.ai/api/v1/models";
-
-/** Every rate in USD per 1M tokens. */
-export interface Rates {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite5m: number;
-  cacheWrite1h: number;
-}
 
 export interface SourceEntry {
   key: string;
@@ -52,8 +53,6 @@ export interface Rule {
   fields: Partial<Record<FieldName, number>>;
 }
 
-type FieldName = "input" | "output" | "cacheRead" | "cacheWrite5m" | "cacheWrite1h";
-const FIELD_ORDER: FieldName[] = ["input", "output", "cacheRead", "cacheWrite5m", "cacheWrite1h"];
 const FIELD_LABEL: Record<FieldName, string> = {
   input: "input",
   output: "output",
@@ -63,10 +62,15 @@ const FIELD_LABEL: Record<FieldName, string> = {
 };
 type Fields = Partial<Record<FieldName, number>>;
 
+/** Where a final price came from. */
+export type SourceKind = "official" | "aggregators agree" | "higher of aggregators" | "single source";
+
 export interface Change {
   rule: Rule;
+  kind: SourceKind;
   source: string; // LiteLLM key
   orSource: string; // OpenRouter id
+  official: string; // the model's name on the official page
   before: Rates;
   after: Rates;
   /** The fields to write on the rule line. */
@@ -82,13 +86,42 @@ export interface Disagreement {
   fields: { field: FieldName; litellm: number; openrouter: number; used: number }[];
 }
 
+/** An aggregator that says something other than the official page, which wins. */
+export interface OfficialDiff {
+  target: string;
+  kind: "update" | "new";
+  maker: string;
+  official: string;
+  litellm: string;
+  openrouter: string;
+  fields: { field: FieldName; official: number; litellm?: number; openrouter?: number }[];
+}
+
 export interface Addition {
   id: string;
   makerIndex: number;
-  litellm: string;
-  openrouter?: string; // missing = single source
+  kind: SourceKind;
+  official: string; // the model's name on the official page, or ""
+  litellm: string; // "" when there is no first-party LiteLLM entry
+  openrouter?: string;
   rates: Rates;
   write: Fields;
+}
+
+export interface OfficialStatus {
+  maker: string;
+  state: "read" | "failed" | "unavailable";
+  models: number;
+  /** The failure, or why the maker has no machine-readable official price. */
+  detail: string;
+  notes: string[];
+  warnings: string[];
+}
+
+export interface ScheduledChange {
+  target: string;
+  from: string;
+  changes: { field: FieldName; now: number; then: number }[];
 }
 
 export interface Plan {
@@ -96,6 +129,11 @@ export interface Plan {
   changes: Change[];
   additions: Addition[];
   disagreements: Disagreement[];
+  officialDiffs: OfficialDiff[];
+  official: OfficialStatus[];
+  scheduled: ScheduledChange[];
+  /** The source of every existing rule's final price. */
+  sources: { pattern: string; kind: SourceKind }[];
   /** Existing rules with one source only, or a rate only one source has, whose value differs from ours: left alone. */
   keptSingle: { pattern: string; field: FieldName; current: number; value: number; from: string }[];
   unchanged: number;
@@ -106,11 +144,6 @@ export interface Plan {
 }
 
 const PER_MILLION = 1e6;
-
-/** Six significant digits: enough for every list price, and it removes float noise like 0.30000000000000004. */
-export function round6(n: number): number {
-  return Number(n.toPrecision(6));
-}
 
 /** A per-token price → USD per 1M tokens. */
 export function perMillion(perToken: number): number {
@@ -141,7 +174,7 @@ const MAKERS: Maker[] = [
   { name: "Z.ai (GLM)", test: /^glm-/, providers: ["zai"], vendors: ["z-ai"], heading: "", page: "https://docs.z.ai/guides/overview/pricing" },
   { name: "xAI", test: /^grok-/, providers: ["xai"], vendors: ["x-ai"], heading: "xAI — cached input is discounted, no cache-write charge.", page: "https://docs.x.ai/docs/models" },
   { name: "DeepSeek", test: /^deepseek-/, providers: ["deepseek"], vendors: ["deepseek"], heading: "DeepSeek — cache hits are discounted, no cache-write charge.", page: "https://api-docs.deepseek.com/quick_start/pricing" },
-  { name: "Moonshot (Kimi)", test: /^kimi-/, providers: ["moonshot"], vendors: ["moonshotai"], heading: "Moonshot (Kimi) — cache hits are discounted, no cache-write charge.", page: "https://platform.moonshot.ai/docs/pricing/chat" },
+  { name: "Moonshot (Kimi)", test: /^kimi-/, providers: ["moonshot"], vendors: ["moonshotai"], heading: "Moonshot (Kimi) — cache hits are discounted, no cache-write charge.", page: "https://platform.kimi.ai/docs/pricing/chat" },
   { name: "Alibaba Qwen", test: /^qwen/, providers: ["dashscope", "qwencloud", "qwen_ai_platform"], vendors: ["qwen"], heading: "Alibaba Qwen — base tier prices, cache write as listed.", page: "https://www.alibabacloud.com/help/en/model-studio/models" },
   { name: "Mistral", test: /^(mistral-|devstral-|codestral-)/, providers: ["mistral"], vendors: ["mistralai"], heading: "Mistral — cached input is discounted, no cache-write charge.", page: "https://mistral.ai/pricing#api-pricing" },
   { name: "MiniMax", test: /^minimax-/, providers: ["minimax"], vendors: ["minimax"], heading: "MiniMax — cache read and write as listed.", page: "https://platform.minimax.io/docs/guides/pricing-paygo" },
@@ -327,8 +360,8 @@ function belongsToRule(rule: Rule, id: string): boolean {
 }
 
 /** The entry that gives a rule its price: the stem itself, else the shortest id that continues it. */
-function pickCanonical(stem: string, pool: SourceEntry[]): SourceEntry | undefined {
-  const rank = (e: SourceEntry) => [e.id === stem ? 0 : 1, RESELLERS.indexOf(e.provider), e.id.length, e.key.length, e.key] as const;
+function pickCanonical<T extends SourceEntry>(stem: string, pool: T[]): T | undefined {
+  const rank = (e: T) => [e.id === stem ? 0 : 1, RESELLERS.indexOf(e.provider), e.id.length, e.key.length, e.key] as const;
   return [...pool].sort((a, b) => {
     const [x, y] = [rank(a), rank(b)];
     for (let i = 0; i < x.length; i++) if (x[i]! < y[i]!) return -1; else if (x[i]! > y[i]!) return 1;
@@ -401,9 +434,53 @@ function sameRates(a: Rates, b: Rates): boolean {
 
 // --- planning -----------------------------------------------------------------------------------------------
 
-export function planUpdates(pricingSource: string, litellm: SourceEntry[], openrouter: SourceEntry[], today = new Date().toISOString().slice(0, 10)): Plan {
+/** Rates where LiteLLM or OpenRouter says something other than the official page (more than 1% off). */
+function diffOfficial(off: OfficialEntry, ll: SourceEntry | undefined, or: SourceEntry | undefined, derived: boolean): OfficialDiff["fields"] {
+  const a = ll ? sourceRates(ll, derived) : {};
+  const b = or ? sourceRates(or, derived) : {};
+  const out: OfficialDiff["fields"] = [];
+  for (const f of FIELD_ORDER) {
+    if (off.unlisted?.includes(f)) continue;
+    const [x, y] = [a[f], b[f]];
+    if ((x !== undefined && !agree(x, off[f])) || (y !== undefined && !agree(y, off[f]))) out.push({ field: f, official: off[f], litellm: x, openrouter: y });
+  }
+  return out;
+}
+
+const ratesOf = (e: Rates): Rates => ({ input: e.input, output: e.output, cacheRead: e.cacheRead, cacheWrite5m: e.cacheWrite5m, cacheWrite1h: e.cacheWrite1h });
+
+const kindOf = (osrc: SourceEntry | undefined, disagreements: number): SourceKind => (!osrc ? "single source" : disagreements ? "higher of aggregators" : "aggregators agree");
+
+export function planUpdates(
+  pricingSource: string,
+  litellm: SourceEntry[],
+  openrouter: SourceEntry[],
+  today = new Date().toISOString().slice(0, 10),
+  official: OfficialOutcome[] = [],
+): Plan {
   const rules = parseRules(pricingSource);
-  const plan: Plan = { rules, changes: [], additions: [], disagreements: [], keptSingle: [], unchanged: 0, unmatched: [], fallbackSources: [], skipped: [], problems: [] };
+  const plan: Plan = { rules, changes: [], additions: [], disagreements: [], officialDiffs: [], official: [], scheduled: [], sources: [], keptSingle: [], unchanged: 0, unmatched: [], fallbackSources: [], skipped: [], problems: [] };
+
+  // Official pages: a page that could not be read is ignored whole, so that maker falls back to the aggregators.
+  const officialEntries: OfficialEntry[] = [];
+  for (const o of official) {
+    const status: OfficialStatus = { maker: o.maker, state: "read", models: 0, detail: "", notes: o.notes ?? [], warnings: o.warnings ?? [] };
+    if (o.error !== undefined) Object.assign(status, { state: "failed", detail: o.error });
+    else if (o.unavailable !== undefined) Object.assign(status, { state: "unavailable", detail: o.unavailable });
+    else {
+      const mi = MAKERS.findIndex((m) => m.name === o.maker);
+      const mine = (o.entries ?? []).filter((e) => mi >= 0 && makerIndex(e.id) === mi);
+      status.models = mine.length;
+      officialEntries.push(...mine);
+    }
+    plan.official.push(status);
+  }
+  const noteScheduled = (target: string, e: OfficialEntry) => {
+    for (const s of e.scheduled ?? []) {
+      const changes = FIELD_ORDER.filter((f) => s.to[f] !== undefined && round6(s.to[f]!) !== round6(e[f])).map((field) => ({ field, now: e[field], then: s.to[field]! }));
+      if (changes.length) plan.scheduled.push({ target, from: s.from, changes });
+    }
+  };
 
   // Only the makers' own models, text only, and for OpenRouter only the maker's own vendor prefix.
   // A model that is retired, or retires within 90 days, is not a model to start pricing now.
@@ -420,7 +497,8 @@ export function planUpdates(pricingSource: string, litellm: SourceEntry[], openr
   // --- existing rules
   const llCovered = new Map<Rule, SourceEntry[]>();
   const orCovered = new Map<Rule, SourceEntry[]>();
-  const sort = (e: SourceEntry, map: Map<Rule, SourceEntry[]>, accept: (e: SourceEntry) => boolean) => {
+  const offCovered = new Map<Rule, OfficialEntry[]>();
+  const sort = <T extends SourceEntry>(e: T, map: Map<Rule, T[]>, accept: (e: T) => boolean) => {
     const rule = winningRule(rules, e.id);
     if (!rule || !belongsToRule(rule, e.id) || !accept(e)) return;
     const list = map.get(rule) ?? [];
@@ -429,48 +507,68 @@ export function planUpdates(pricingSource: string, litellm: SourceEntry[], openr
   };
   for (const e of ll) sort(e, llCovered, (x) => x.provider === "openai" || MAKERS[makerIndex(x.id)]!.providers.includes(x.provider) || RESELLERS.includes(x.provider));
   for (const e of orAll) sort(e, orCovered, () => true);
+  for (const e of officialEntries) sort(e, offCovered, () => true);
 
+  const finalRates = new Map<Rule, Rates>();
+  const priced = new Set<OfficialEntry>();
   for (const rule of rules) {
     const mk = MAKERS[makerIndex(rule.pattern)];
+    const derived = !!mk?.derivedCache;
     const stem = rule.pattern.endsWith("*") ? rule.pattern.slice(0, -1) : rule.pattern;
     const pool = llCovered.get(rule) ?? [];
     const own = pool.filter((e) => mk?.providers.includes(e.provider));
     const src = pickCanonical(stem, own.length ? own : pool);
     const osrc = pickCanonical(stem, orCovered.get(rule) ?? []);
-    if (!src) {
+    const off = pickCanonical(stem, offCovered.get(rule) ?? []);
+    if (!src && !off) {
       plan.unmatched.push(rule.pattern);
       continue;
     }
-    if (!mk?.providers.includes(src.provider)) plan.fallbackSources.push({ pattern: rule.pattern, key: src.key });
     const before = effective(rule.fields);
-    const r = resolve(src, osrc, !!mk?.derivedCache);
-    if (r.disagree.length) {
-      plan.disagreements.push({ target: rule.pattern, kind: "update", maker: mk?.name ?? "", litellm: src.key, openrouter: osrc!.key, fields: r.disagree });
-    }
-    // A rate both sources list may change. A rate only one lists never does.
-    const after: Rates = { ...before };
-    for (const f of FIELD_ORDER) {
-      const v = r.both[f];
-      if (v !== undefined) after[f] = v;
-      else if (r.llOnly[f] !== undefined && round6(r.llOnly[f]!) !== round6(before[f])) {
-        plan.keptSingle.push({ pattern: rule.pattern, field: f, current: before[f], value: r.llOnly[f]!, from: osrc ? "LiteLLM" : "LiteLLM, not on OpenRouter" });
+    const explicit = rule.fields.cacheWrite5m !== undefined || rule.fields.cacheWrite1h !== undefined;
+    let after: Rates;
+    let kind: SourceKind;
+    if (off) {
+      // The maker's own page wins outright. Aggregators that say something else are listed, never used.
+      priced.add(off);
+      after = ratesOf(off);
+      for (const f of off.unlisted ?? []) after[f] = before[f]; // not on the page: the rule keeps its own
+      kind = "official";
+      const fields = diffOfficial(off, src, osrc, derived);
+      if (fields.length) plan.officialDiffs.push({ target: rule.pattern, kind: "update", maker: mk?.name ?? "", official: off.key, litellm: src?.key ?? "", openrouter: osrc?.key ?? "", fields });
+      noteScheduled(rule.pattern, off);
+    } else {
+      if (!mk?.providers.includes(src!.provider)) plan.fallbackSources.push({ pattern: rule.pattern, key: src!.key });
+      const r = resolve(src!, osrc, derived);
+      if (r.disagree.length) {
+        plan.disagreements.push({ target: rule.pattern, kind: "update", maker: mk?.name ?? "", litellm: src!.key, openrouter: osrc!.key, fields: r.disagree });
       }
-    }
-    // Cache prices without a source follow a changed input price when they were tied to it.
-    if (after.input !== before.input) {
-      const explicit = rule.fields.cacheWrite5m !== undefined || rule.fields.cacheWrite1h !== undefined;
-      const tied: [FieldName, number][] = explicit ? [["cacheRead", 0.1], ["cacheWrite5m", 1]] : [];
-      for (const [f, k] of tied) {
-        if (r.both[f] === undefined && round6(before[f]) === round6(before.input * k)) after[f] = round6(after.input * k);
+      // A rate both sources list may change. A rate only one lists never does.
+      after = { ...before };
+      for (const f of FIELD_ORDER) {
+        const v = r.both[f];
+        if (v !== undefined) after[f] = v;
+        else if (r.llOnly[f] !== undefined && round6(r.llOnly[f]!) !== round6(before[f])) {
+          plan.keptSingle.push({ pattern: rule.pattern, field: f, current: before[f], value: r.llOnly[f]!, from: osrc ? "LiteLLM" : "LiteLLM, not on OpenRouter" });
+        }
       }
-      if (explicit && r.both.cacheWrite1h === undefined && before.cacheWrite1h === before.cacheWrite5m) after.cacheWrite1h = after.cacheWrite5m;
+      // Cache prices without a source follow a changed input price when they were tied to it.
+      if (after.input !== before.input) {
+        const tied: [FieldName, number][] = explicit ? [["cacheRead", 0.1], ["cacheWrite5m", 1]] : [];
+        for (const [f, k] of tied) {
+          if (r.both[f] === undefined && round6(before[f]) === round6(before.input * k)) after[f] = round6(after.input * k);
+        }
+        if (explicit && r.both.cacheWrite1h === undefined && before.cacheWrite1h === before.cacheWrite5m) after.cacheWrite1h = after.cacheWrite5m;
+      }
+      kind = kindOf(osrc, r.disagree.length);
     }
+    plan.sources.push({ pattern: rule.pattern, kind });
+    finalRates.set(rule, after);
     if (sameRates(before, after)) {
       plan.unchanged++;
       continue;
     }
-    const explicit = rule.fields.cacheWrite5m !== undefined || rule.fields.cacheWrite1h !== undefined;
-    plan.changes.push({ rule, source: src.key, orSource: osrc?.key ?? "", before, after, write: writeFields(after, explicit) });
+    plan.changes.push({ rule, kind, source: src?.key ?? "", orSource: osrc?.key ?? "", official: off?.key ?? "", before, after, write: writeFields(after, explicit) });
   }
 
   // --- new models
@@ -479,11 +577,50 @@ export function planUpdates(pricingSource: string, litellm: SourceEntry[], openr
     if (s) s.ids.push(id);
     else plan.skipped.push({ reason, ids: [id] });
   };
-  const allIds = new Set([...ll, ...orAll].map((e) => e.id));
+  const allIds = new Set([...ll, ...orAll, ...officialEntries].map((e) => e.id));
   const orById = new Map<string, SourceEntry[]>();
   for (const e of orLive) orById.set(e.id, [...(orById.get(e.id) ?? []), e]);
   const done = new Set<string>();
   const firstParty = (e: SourceEntry) => MAKERS[makerIndex(e.id)]!.providers.includes(e.provider);
+
+  // Official pages first: a model the page lists that no rule prices gets its exact id, and so does a model a prefix rule
+  // catches but the page prices differently ("glm-4.5-x" under "glm-4.5*").
+  for (const e of [...officialEntries].sort((a, b) => a.id.localeCompare(b.id, "en", { numeric: true }))) {
+    const id = e.id;
+    if (done.has(id) || priced.has(e)) continue;
+    done.add(id);
+    const mi = makerIndex(id);
+    const mk = MAKERS[mi]!;
+    const rule = winningRule(rules, id);
+    const covered = !!rule && belongsToRule(rule, id);
+    const rates = ratesOf(e);
+    if (covered && sameRates(finalRates.get(rule!) ?? effective(rule!.fields), rates)) continue; // a variant at the same price as its rule
+    if (NON_TEXT_ID.test(id) || LEGACY_ID.test(id)) continue;
+    if (ALIAS_ID.test(id)) {
+      skip("aliases and beta variants", id);
+      continue;
+    }
+    const base = id.replace(DATE_SEGMENT, "");
+    if (base !== id && allIds.has(base)) {
+      skip("dated snapshots of a model with an undated id", id);
+      continue;
+    }
+    if (rates.input === 0 || rates.output === 0) {
+      skip("free or zero priced", id);
+      continue;
+    }
+    if (!covered && rule && sameRates(effective(rule.fields), rates)) {
+      skip("already priced identically by a rule", id);
+      continue;
+    }
+    const llEntry = pickCanonical(id, llLive.filter((x) => x.id === id && firstParty(x)));
+    const orEntry = pickCanonical(id, orById.get(id) ?? []);
+    const fields = diffOfficial(e, llEntry, orEntry, !!mk.derivedCache);
+    if (fields.length) plan.officialDiffs.push({ target: id, kind: "new", maker: mk.name, official: e.key, litellm: llEntry?.key ?? "", openrouter: orEntry?.key ?? "", fields });
+    noteScheduled(id, e);
+    plan.additions.push({ id, makerIndex: mi, kind: "official", official: e.key, litellm: llEntry?.key ?? "", openrouter: orEntry?.key, rates, write: writeFields(rates, !mk.derivedCache) });
+  }
+
   const candidates = [...new Set([...llLive.filter(firstParty).map((e) => e.id), ...orLive.map((e) => e.id)])].sort();
   for (const id of candidates) {
     if (done.has(id)) continue;
@@ -529,18 +666,19 @@ export function planUpdates(pricingSource: string, litellm: SourceEntry[], openr
     if (r.disagree.length) {
       plan.disagreements.push({ target: id, kind: "new", maker: mk.name, litellm: llEntry.key, openrouter: orEntry!.key, fields: r.disagree });
     }
-    plan.additions.push({ id, makerIndex: mi, litellm: llEntry.key, openrouter: orEntry?.key, rates, write: writeFields(rates, !mk.derivedCache) });
+    plan.additions.push({ id, makerIndex: mi, kind: kindOf(orEntry, r.disagree.length), official: "", litellm: llEntry.key, openrouter: orEntry?.key, rates, write: writeFields(rates, !mk.derivedCache) });
   }
   plan.additions.sort((a, b) => a.makerIndex - b.makerIndex || a.id.localeCompare(b.id, "en", { numeric: true }));
   for (const s of plan.skipped) s.ids.sort();
 
-  // Sanity guard: these changes are too big to trust a community-maintained file. Additions don't count.
+  // Sanity guard: these changes are too big to trust a single page or a community-maintained file. Additions don't count.
   for (const c of plan.changes) {
+    const from = c.official ? `the official page, \`${c.official}\`` : `\`${c.source}\``;
     for (const f of FIELD_ORDER) {
       const [a, b] = [c.before[f], c.after[f]];
       if (a === b) continue;
-      if (b === 0 && a > 0) plan.problems.push(`\`${c.rule.pattern}\` ${FIELD_LABEL[f]} drops to 0 (was ${a}, from \`${c.source}\`)`);
-      else if (a > 0 && (b / a > 10 || a / b > 10)) plan.problems.push(`\`${c.rule.pattern}\` ${FIELD_LABEL[f]} moves more than 10x (${a} to ${b}, from \`${c.source}\`)`);
+      if (b === 0 && a > 0) plan.problems.push(`\`${c.rule.pattern}\` ${FIELD_LABEL[f]} drops to 0 (was ${a}, from ${from})`);
+      else if (a > 0 && (b / a > 10 || a / b > 10)) plan.problems.push(`\`${c.rule.pattern}\` ${FIELD_LABEL[f]} moves more than 10x (${a} to ${b}, from ${from})`);
     }
   }
   if (plan.changes.length * 2 > rules.length) {
@@ -624,39 +762,75 @@ export function applyChanges(source: string, changes: Change[], additions: Addit
 const MAX_LIST = 80;
 
 const rateLine = (r: Rates) => `${r.input} | ${r.output} | ${r.cacheRead} | ${r.cacheWrite5m}`;
+const cell = (v: number | undefined) => (v === undefined ? "none" : String(v));
 
 export function renderReport(plan: Plan): string {
   const out: string[] = [];
   if (plan.problems.length) {
     out.push("## Needs a human", "", "The price check stopped without changing anything:", "", ...plan.problems.map((p) => `- ${p}`), "");
   }
+
+  out.push("## Official pages", "", "The maker's own pricing page is checked first. Only a model it has no price for goes to LiteLLM and OpenRouter.", "");
+  for (const o of plan.official) {
+    if (o.state === "read") out.push(`- ${o.maker}: read, ${o.models} models.`);
+    else if (o.state === "failed") out.push(`- ${o.maker}: official page could not be read: ${o.detail}. LiteLLM and OpenRouter were used for this maker.`);
+    else out.push(`- ${o.maker}: no official machine-readable price (${o.detail}). LiteLLM and OpenRouter were used for this maker.`);
+  }
+  for (const o of plan.official) for (const n of o.notes) out.push(`- ${o.maker}: ${n}`);
+  for (const o of plan.official) for (const w of o.warnings) out.push(`- **${o.maker}: ${w}**`);
+  out.push("");
+
   out.push("## Price changes", "");
-  if (plan.changes.length === 0) out.push("No built-in price differs from the two sources.", "");
+  if (plan.changes.length === 0) out.push("No built-in price differs from the official pages or the two aggregators.", "");
   else {
-    out.push("Per 1M tokens in USD. Cache rates the rule doesn't set are derived from input.", "", "| Rule | Rate | Before | After | LiteLLM entry | OpenRouter entry |", "|---|---|---|---|---|---|");
+    out.push("Per 1M tokens in USD. Cache rates the rule doesn't set are derived from input.", "", "| Rule | Rate | Before | After | Source | Entry |", "|---|---|---|---|---|---|");
     for (const c of plan.changes) {
+      const entry = c.official ? `\`${c.official}\`` : `LiteLLM \`${c.source}\`, OpenRouter \`${c.orSource}\``;
       for (const f of FIELD_ORDER) {
         if (round6(c.before[f]) === round6(c.after[f])) continue;
-        out.push(`| \`${c.rule.pattern}\` | ${FIELD_LABEL[f]} | ${c.before[f]} | ${c.after[f]} | \`${c.source}\` | \`${c.orSource}\` |`);
+        out.push(`| \`${c.rule.pattern}\` | ${FIELD_LABEL[f]} | ${c.before[f]} | ${c.after[f]} | ${c.kind} | ${entry} |`);
       }
     }
     out.push("");
   }
 
-  const both = plan.additions.filter((a) => a.openrouter);
-  const single = plan.additions.filter((a) => !a.openrouter);
+  const fromOfficial = plan.additions.filter((a) => a.kind === "official");
+  const both = plan.additions.filter((a) => a.kind !== "official" && a.openrouter);
+  const single = plan.additions.filter((a) => a.kind !== "official" && !a.openrouter);
+  out.push("## New models from official pages", "");
+  if (fromOfficial.length === 0) out.push("None.", "");
+  else {
+    out.push("The maker's own page lists them. Per 1M tokens in USD.", "", "| Rule | Input | Output | Cache read | Cache write | Official entry |", "|---|---|---|---|---|---|");
+    for (const a of fromOfficial) out.push(`| \`${a.id}\` | ${rateLine(a.rates)} | \`${a.official}\` |`);
+    out.push("");
+  }
   out.push("## New models added", "");
   if (both.length === 0) out.push("None.", "");
   else {
-    out.push("Both sources list them. Per 1M tokens in USD.", "", "| Rule | Input | Output | Cache read | Cache write | LiteLLM entry | OpenRouter entry |", "|---|---|---|---|---|---|---|");
-    for (const a of both) out.push(`| \`${a.id}\` | ${rateLine(a.rates)} | \`${a.litellm}\` | \`${a.openrouter}\` |`);
+    out.push("No official price. Both aggregators list them. Per 1M tokens in USD.", "", "| Rule | Input | Output | Cache read | Cache write | Source | LiteLLM entry | OpenRouter entry |", "|---|---|---|---|---|---|---|---|");
+    for (const a of both) out.push(`| \`${a.id}\` | ${rateLine(a.rates)} | ${a.kind} | \`${a.litellm}\` | \`${a.openrouter}\` |`);
     out.push("");
   }
   out.push("## Single source additions", "");
   if (single.length === 0) out.push("None.", "");
   else {
-    out.push("Only the maker's own LiteLLM entry lists them, OpenRouter has no model with this id. Check them against the maker.", "", "| Rule | Input | Output | Cache read | Cache write | LiteLLM entry |", "|---|---|---|---|---|---|");
+    out.push("No official price. Only the maker's own LiteLLM entry lists them, OpenRouter has no model with this id. Check them against the maker.", "", "| Rule | Input | Output | Cache read | Cache write | LiteLLM entry |", "|---|---|---|---|---|---|");
     for (const a of single) out.push(`| \`${a.id}\` | ${rateLine(a.rates)} | \`${a.litellm}\` |`);
+    out.push("");
+  }
+
+  out.push("## Aggregators differ from the official price", "");
+  if (plan.officialDiffs.length === 0) out.push("None.", "");
+  else {
+    out.push(
+      "The official price is used. LiteLLM or OpenRouter differs by more than 1%, which is listed here so a human sees it. OpenRouter often shows the cheapest routed provider.",
+      "",
+      "| Model | Rate | Official (used) | LiteLLM | OpenRouter |",
+      "|---|---|---|---|---|",
+    );
+    for (const d of plan.officialDiffs) {
+      for (const f of d.fields) out.push(`| \`${d.target}\`${d.kind === "new" ? " (new)" : ""} | ${FIELD_LABEL[f.field]} | ${f.official} | ${cell(f.litellm)} | ${cell(f.openrouter)} |`);
+    }
     out.push("");
   }
 
@@ -664,7 +838,7 @@ export function renderReport(plan: Plan): string {
   if (plan.disagreements.length === 0) out.push("None.", "");
   else {
     out.push(
-      "LiteLLM and OpenRouter differ by more than 1%, so the higher price per rate is used. OpenRouter often shows the cheapest routed provider for third-party makers. Check these against the maker's pricing page.",
+      "No official price for these. LiteLLM and OpenRouter differ by more than 1%, so the higher price per rate is used. OpenRouter often shows the cheapest routed provider for third-party makers. Check these against the maker's pricing page.",
       "",
       "| Model | Rate | LiteLLM | OpenRouter | Used | Official pricing |",
       "|---|---|---|---|---|---|",
@@ -678,9 +852,30 @@ export function renderReport(plan: Plan): string {
     out.push("");
   }
 
+  out.push("## Scheduled price changes", "");
+  if (plan.scheduled.length === 0) out.push("None announced on the official pages.", "");
+  else {
+    out.push("The price used today is the one valid today. The official page announces these changes, and a weekly run after the date picks them up.", "", "| Model | From | Rate | Now | Then |", "|---|---|---|---|---|");
+    for (const s of plan.scheduled) for (const c of s.changes) out.push(`| \`${s.target}\` | ${s.from} | ${FIELD_LABEL[c.field]} | ${c.now} | ${c.then} |`);
+    out.push("");
+  }
+
+  out.push("## Price sources", "");
+  const kinds: SourceKind[] = ["official", "aggregators agree", "higher of aggregators", "single source"];
+  out.push(`Existing rules by the source of their price: ${kinds.map((k) => `${plan.sources.filter((s) => s.kind === k).length} ${k}`).join(", ")}, ${plan.unmatched.length} unchecked.`, "");
+  const unofficial = plan.sources.filter((s) => s.kind !== "official");
+  if (unofficial.length) {
+    out.push("Not on an official page, so priced from the aggregators:", "");
+    for (const k of kinds.slice(1)) {
+      const list = unofficial.filter((s) => s.kind === k);
+      if (list.length) out.push(`- ${k} (${list.length}): ${list.slice(0, MAX_LIST).map((s) => `\`${s.pattern}\``).join(", ")}${list.length > MAX_LIST ? `, and ${list.length - MAX_LIST} more` : ""}`);
+    }
+    out.push("");
+  }
+
   out.push("## Skipped", "");
-  out.push(`${plan.changes.length} changed, ${plan.additions.length} added, ${plan.unchanged} unchanged, ${plan.unmatched.length} without a LiteLLM entry.`, "");
-  if (plan.unmatched.length) out.push(`No LiteLLM entry for: ${plan.unmatched.map((p) => `\`${p}\``).join(", ")}. Their prices were not checked.`, "");
+  out.push(`${plan.changes.length} changed, ${plan.additions.length} added, ${plan.unchanged} unchanged, ${plan.unmatched.length} without any source entry.`, "");
+  if (plan.unmatched.length) out.push(`No official, LiteLLM or OpenRouter entry for: ${plan.unmatched.map((p) => `\`${p}\``).join(", ")}. Their prices were not checked.`, "");
   if (plan.fallbackSources.length) {
     out.push(
       "Priced from a cloud reseller because there is no first-party entry: " +
@@ -690,7 +885,7 @@ export function renderReport(plan: Plan): string {
     );
   }
   if (plan.keptSingle.length) {
-    out.push("A rate only one source lists is never changed automatically:", "");
+    out.push("A rate only one aggregator lists is never changed automatically:", "");
     for (const k of plan.keptSingle.slice(0, MAX_LIST)) out.push(`- \`${k.pattern}\` ${FIELD_LABEL[k.field]} is ${k.current}, ${k.from} says ${k.value}`);
     out.push("");
   }
@@ -703,7 +898,7 @@ export function renderReport(plan: Plan): string {
   out.push(
     "## Review",
     "",
-    "Both lists are community or aggregator data, so spot-check the changed and added rules against the official pages:",
+    "Prices from an aggregator are community or reseller data, so spot-check them and the changed and added rules against the official pages:",
     "",
     ...MAKERS.map((m) => `- ${m.name}: ${m.page}`),
     "",
@@ -744,13 +939,19 @@ export async function main(argv: string[]): Promise<number> {
   const pricingPath = arg("--pricing") ?? new URL("../src/core/pricing.ts", import.meta.url).pathname;
   const sourcePath = arg("--source");
   const orPath = arg("--openrouter");
+  const officialDir = arg("--official-dir");
+  const today = new Date().toISOString().slice(0, 10);
   try {
     const [llData, orData] = await Promise.all([
       sourcePath ? Bun.file(sourcePath).text().then((t) => JSON.parse(t)) : fetchJson(LITELLM_URL, "LiteLLM"),
       orPath ? Bun.file(orPath).text().then((t) => JSON.parse(t)) : fetchJson(OPENROUTER_URL, "OpenRouter"),
     ]);
+    // --official-dir reads <key>.md from a folder (tests, offline runs), --no-official skips the official pages.
+    const official = argv.includes("--no-official")
+      ? []
+      : await loadOfficial(today, officialDir ? (s) => Bun.file(`${officialDir}/${s.key}.md`).text() : fetchOfficial);
     const pricing = await Bun.file(pricingPath).text();
-    const plan = planUpdates(pricing, parseLiteLLM(llData), parseOpenRouter(orData));
+    const plan = planUpdates(pricing, parseLiteLLM(llData), parseOpenRouter(orData), today, official);
     const report = renderReport(plan);
     if (reportPath) await Bun.write(reportPath, report);
     if (dryRun) console.log(report);

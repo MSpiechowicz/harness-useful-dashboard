@@ -543,11 +543,12 @@ databases, and older ones after one Compact, give the space that trimming frees 
   under **Providers → Billed via**.
   Models without a known list price get a fallback rate and are marked **estimated**. Add their prices under
   **Settings → Pricing**, which re-prices your whole history.
-- **Prices.** The built-in prices ship with the app, which never fetches prices itself. A weekly GitHub Action compares
-  them with LiteLLM's and OpenRouter's public price lists and opens a pull request when something changed, which is
-  reviewed before it is merged. A price changes or a model is added only when both lists agree. Where they disagree the
-  higher price is used and listed in the pull request for a human to check against the maker's pricing page. A model
-  only one list knows is added only from the maker's own LiteLLM entry. Rules you set under **Settings → Pricing** always win over the built-in ones.
+- **Prices.** The built-in prices ship with the app, which never fetches prices itself. A weekly GitHub Action checks
+  them in this order and opens a pull request when something changed, which is reviewed before it is merged. First the
+  maker's own pricing page, which wins outright when it lists the model. Then, only for models the official page has no
+  price for or that have no readable page, LiteLLM and OpenRouter, where the higher price is used when they differ. Every case where LiteLLM or OpenRouter differs from an official price is listed in
+  the pull request for review, and so are price changes an official page announces for later. A model only one
+  aggregator knows is added only from the maker's own LiteLLM entry. Rules you set under **Settings → Pricing** always win over the built-in ones.
 - **Projects.** A session counts toward the git repository it ran in, even when it started in a subfolder. Linked
   worktrees count toward their main repository, and folders outside git are their own project. Temp folders, Codex app
   chats (`~/Documents/Codex/<date>/…`) and Claude desktop scratch workspaces are grouped as **No project**.

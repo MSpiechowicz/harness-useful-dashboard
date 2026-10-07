@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { OfficialEntry, OfficialOutcome } from "../scripts/official-prices.ts";
 import { applyChanges, effective, main, parseLiteLLM, parseOpenRouter, parseRules, perMillion, planUpdates, renderReport, round6 } from "../scripts/update-prices.ts";
 import { normalizeModel } from "../src/core/models.ts";
 
@@ -486,7 +487,7 @@ describe("bad data", () => {
     for (const bad of ["ll", "or"]) {
       const dir = await tmp();
       await Bun.write(`${dir}/${bad}.json`, "{nope");
-      const code = await quiet(() => main(["--source", `${dir}/ll.json`, "--openrouter", `${dir}/or.json`, "--pricing", `${dir}/pricing.ts`, "--report", `${dir}/r.md`]));
+      const code = await quiet(() => main(["--source", `${dir}/ll.json`, "--openrouter", `${dir}/or.json`, "--pricing", `${dir}/pricing.ts`, "--no-official", "--report", `${dir}/r.md`]));
       expect(code).toBe(1);
       expect(await Bun.file(`${dir}/pricing.ts`).text()).toBe(PRICING);
       expect(await Bun.file(`${dir}/r.md`).exists()).toBe(false);
@@ -495,7 +496,7 @@ describe("bad data", () => {
 
   test("main edits a copy of pricing.ts, and --dry-run does not", async () => {
     const dir = await tmp();
-    const args = ["--source", `${dir}/ll.json`, "--openrouter", `${dir}/or.json`, "--pricing", `${dir}/pricing.ts`];
+    const args = ["--source", `${dir}/ll.json`, "--openrouter", `${dir}/or.json`, "--pricing", `${dir}/pricing.ts`, "--no-official"];
     expect(await quiet(() => main([...args, "--dry-run"]))).toBe(0);
     expect(await Bun.file(`${dir}/pricing.ts`).text()).toBe(PRICING);
     expect(await quiet(() => main([...args, "--report", `${dir}/r.md`]))).toBe(0);
@@ -508,10 +509,135 @@ describe("bad data", () => {
   test("main keeps CRLF line endings", async () => {
     const dir = await tmp();
     await Bun.write(`${dir}/pricing.ts`, PRICING.replaceAll("\n", "\r\n"));
-    const code = await quiet(() => main(["--source", `${dir}/ll.json`, "--openrouter", `${dir}/or.json`, "--pricing", `${dir}/pricing.ts`]));
+    const code = await quiet(() => main(["--source", `${dir}/ll.json`, "--openrouter", `${dir}/or.json`, "--pricing", `${dir}/pricing.ts`, "--no-official"]));
     expect(code).toBe(0);
     const written = await Bun.file(`${dir}/pricing.ts`).text();
     expect(written).toContain("\r\n");
     expect(written.replaceAll("\r\n", "")).not.toContain("\n");
+  });
+});
+
+// --- official pages first ---------------------------------------------------------------------------------------
+
+const offEntry = (id: string, input: number, output: number, extra: Partial<OfficialEntry> = {}): OfficialEntry => ({
+  key: id,
+  id,
+  provider: "official",
+  input,
+  output,
+  cacheRead: round6(input * 0.1),
+  cacheWrite5m: input,
+  cacheWrite1h: input,
+  ...extra,
+});
+const offClaude = (id: string, input: number, output: number, cacheRead = round6(input * 0.1)): OfficialEntry =>
+  offEntry(id, input, output, { cacheRead, cacheWrite5m: round6(input * 1.25), cacheWrite1h: round6(input * 2) });
+const read = (maker: string, ...entries: OfficialEntry[]): OfficialOutcome => ({ maker, entries });
+const planO = (official: OfficialOutcome[], data: unknown = fixture(), orData: unknown = orFixture()) => planUpdates(PRICING, parseLiteLLM(data), parseOpenRouter(orData), "2026-10-07", official);
+
+describe("official pages first", () => {
+  test("an official price wins outright, even when it is lower than both aggregators, and the aggregators are listed", () => {
+    const p = planO([read("OpenAI", offEntry("gpt-5", 1, 8, { cacheRead: 0.1 }))]);
+    const c = p.changes.find((x) => x.rule.pattern === "gpt-5")!;
+    expect(c.kind).toBe("official");
+    expect(c.after).toMatchObject({ input: 1, output: 8, cacheRead: 0.1 });
+    expect(p.disagreements).toEqual([]);
+    expect(p.officialDiffs).toEqual([
+      expect.objectContaining({
+        target: "gpt-5",
+        official: "gpt-5",
+        fields: [
+          { field: "input", official: 1, litellm: 1.25, openrouter: 1.25 },
+          { field: "output", official: 8, litellm: 10, openrouter: 10 },
+          { field: "cacheRead", official: 0.1, litellm: 0.125, openrouter: 0.125 },
+        ],
+      }),
+    ]);
+    expect(p.sources.find((s) => s.pattern === "gpt-5")!.kind).toBe("official");
+    const text = renderReport(p);
+    expect(text).toContain("## Aggregators differ from the official price");
+    expect(text).toContain("| `gpt-5` | input | 1 | 1.25 | 1.25 |");
+    expect(text).toContain("| `gpt-5` | input | 1.25 | 1 | official | `gpt-5` |");
+  });
+
+  test("an official price equal to the aggregators changes nothing and lists nothing", () => {
+    const p = planO([read("OpenAI", offEntry("gpt-5", 1.25, 10, { cacheRead: 0.125 })), read("Anthropic", offClaude("claude-opus-5-5", 4, 20, 0.2))]);
+    expect(p.changes).toEqual([]);
+    expect(p.officialDiffs).toEqual([]);
+    expect(p.sources.filter((s) => s.kind === "official").map((s) => s.pattern)).toEqual(["claude-opus-5-5*", "gpt-5"]);
+  });
+
+  test("a rule the official page doesn't list falls back to the aggregators with the higher price winning", () => {
+    // The OpenAI page lists gpt-5 only. gpt-4o goes to LiteLLM 3 and OpenRouter 2.5: 3 wins. The same page does not touch gpt-5.
+    const p = planO([read("OpenAI", offEntry("gpt-5", 1.25, 10, { cacheRead: 0.125 }))], fixture({ "gpt-4o": other("openai", 3, 10, { cache_read_input_token_cost: 1.25e-6 }) }));
+    const c = p.changes.find((x) => x.rule.pattern === "gpt-4o*")!;
+    expect(c.kind).toBe("higher of aggregators");
+    expect(c.after.input).toBe(3);
+    expect(p.disagreements.map((d) => d.target)).toEqual(["gpt-4o*"]);
+    expect(p.officialDiffs).toEqual([]);
+  });
+
+  test("a page that could not be read sends that maker alone back to the aggregators", () => {
+    const failed: OfficialOutcome = { maker: "OpenAI", error: "HTTP 503 from https://developers.openai.com/api/docs/pricing.md" };
+    const p = planO([failed, read("Anthropic", offClaude("claude-opus-5", 4, 20))], fixture({ "gpt-5": other("openai", 1.25, 12, { cache_read_input_token_cost: 1.25e-7 }) }), orFixture([or("openai/gpt-5", 1.25, 12, { input_cache_read: 0.125 })], ["openai/gpt-5"]));
+    expect(p.changes.find((c) => c.rule.pattern === "gpt-5")).toMatchObject({ kind: "aggregators agree", official: "" });
+    expect(p.changes.find((c) => c.rule.pattern === "claude-opus-5*")).toMatchObject({ kind: "official" });
+    expect(p.official.map((o) => [o.maker, o.state])).toEqual([["OpenAI", "failed"], ["Anthropic", "read"]]);
+    const text = renderReport(p);
+    expect(text).toContain("- OpenAI: official page could not be read: HTTP 503");
+    expect(text).toContain("- Anthropic: read, 1 models.");
+  });
+
+  test("a maker with no machine-readable page is said so in the report", () => {
+    const p = planO([{ maker: "DeepSeek", unavailable: "the page is HTML only" }]);
+    expect(renderReport(p)).toContain("- DeepSeek: no official machine-readable price (the page is HTML only)");
+  });
+
+  test("a model on the official page that no rule prices is added with its exact id", () => {
+    const p = planO([read("OpenAI", offEntry("gpt-5.7", 3, 18, { cacheRead: 0.3 }), offEntry("gpt-4o-search-preview", 9, 9), offEntry("gpt-4-0613", 30, 60))]);
+    const a = p.additions.find((x) => x.id === "gpt-5.7")!;
+    expect(a).toMatchObject({ kind: "official", official: "gpt-5.7", rates: { input: 3, output: 18, cacheRead: 0.3, cacheWrite5m: 3, cacheWrite1h: 3 } });
+    expect(p.additions.some((x) => x.id.startsWith("gpt-4o-search") || x.id === "gpt-4-0613")).toBe(false);
+    const text = renderReport(p);
+    expect(text).toContain("## New models from official pages");
+    expect(text).toContain("| `gpt-5.7` | 3 | 18 | 0.3 | 3 | `gpt-5.7` |");
+    expect(applyChanges(PRICING, p.changes, p.additions)).toContain('{ pattern: "gpt-5.7", input: 3, output: 18, cacheRead: 0.3, cacheWrite5m: 3, cacheWrite1h: 3 }');
+  });
+
+  test("a variant a prefix rule catches gets its own rule when the page prices it differently, not when the price is the same", () => {
+    const p = planO([read("OpenAI", offEntry("gpt-4o", 2.5, 10, { cacheRead: 1.25 }), offEntry("gpt-4o-xl", 5, 20, { cacheRead: 2.5 }), offEntry("gpt-4o-same", 2.5, 10, { cacheRead: 1.25 }))]);
+    expect(p.additions.filter((a) => a.kind === "official").map((a) => a.id)).toEqual(["gpt-4o-xl"]);
+  });
+
+  test("a cached-input price the page doesn't list leaves the rule's own value", () => {
+    const p = planO([read("OpenAI", offEntry("gpt-5", 2, 10, { cacheRead: 2, unlisted: ["cacheRead"] }))]);
+    const c = p.changes.find((x) => x.rule.pattern === "gpt-5")!;
+    expect(c.after.input).toBe(2);
+    expect(c.after.cacheRead).toBe(0.125);
+    expect(p.officialDiffs[0]!.fields.map((f) => f.field)).not.toContain("cacheRead");
+  });
+
+  test("explicit Claude cache prices from the page are written only when they differ from the derived ones", () => {
+    const p = planO([read("Anthropic", offClaude("claude-opus-5-5", 4, 20, 0.2), offClaude("claude-opus-5", 5, 25, 0.25))]);
+    expect(p.changes).toHaveLength(1);
+    expect(p.changes[0]!.write).toEqual({ input: 5, output: 25, cacheRead: 0.25 });
+  });
+
+  test("an intro price is announced in the report with its date", () => {
+    const p = planO([read("Google Gemini", offEntry("gemini-3-flash-preview", 0.5, 3, { cacheRead: 0.05, scheduled: [{ from: "2027-01-01", to: { input: 1, output: 6, cacheRead: 0.1 } }] }))]);
+    expect(p.scheduled).toEqual([{ target: "gemini-3-flash*", from: "2027-01-01", changes: [{ field: "input", now: 0.5, then: 1 }, { field: "output", now: 3, then: 6 }, { field: "cacheRead", now: 0.05, then: 0.1 }] }]);
+    expect(renderReport(p)).toContain("| `gemini-3-flash*` | 2027-01-01 | input | 0.5 | 1 |");
+  });
+
+  test("the sanity guard also covers official prices", () => {
+    const p = planO([read("OpenAI", offEntry("gpt-5", 20, 10, { cacheRead: 0.125 }))]);
+    expect(p.problems.join("\n")).toContain("`gpt-5` input moves more than 10x (1.25 to 20, from the official page");
+  });
+
+  test("the report has the new sections even when there is nothing to say", () => {
+    const text = renderReport(planO([]));
+    for (const h of ["## Official pages", "## Price changes", "## New models from official pages", "## Aggregators differ from the official price", "## Sources disagree, higher used", "## Scheduled price changes", "## Price sources", "## Skipped", "## Review"]) {
+      expect(text).toContain(h);
+    }
   });
 });
