@@ -1,3 +1,17 @@
+# [1.14.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.5...v1.14.0) (2026-10-07)
+
+
+### Features
+
+* an MCP server, so agents can ask about cost, limits, budgets and failures ([17d465f](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/17d465fbdccd2221251e432c50a1bd42e4ded63c))
+* API errors in Friction and Live, and subagents in rows of their own ([0c62827](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/0c62827557ce8c5d01c92cb0a94fc445530b3349))
+* Gemini CLI and GitHub Copilot CLI as sources ([c3da161](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/c3da1610a2316d0d3e6bfa819b996d5d00901917))
+
+
+### Performance Improvements
+
+* a 7x smaller first load, and nothing polls while the window is hidden ([9ff0d0a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9ff0d0a61aa8eacaec98c2b5b952e2e8d343e49c))
+
 ## [1.13.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.4...v1.13.5) (2026-10-07)
 
 
