@@ -96,9 +96,9 @@
     {:else}
       {@const tot = overview.data.totals}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <Kpi label={t("files.touched")} value={compact(tot.files)} hint={t("files.touchesN", { n: compact(tot.calls) })} />
-        <Kpi label={t("files.edits")} value={compact(tot.edits)} hint={t("files.shareOfTouches", { share: percent(tot.edits / Math.max(1, tot.calls)) })} />
-        <Kpi label={t("files.projects")} value={compact(overview.data.projects.length)} hint={overview.data.projects[0] ? t("files.busiest", { project: entityLabel("project", overview.data.projects[0].key, overview.data.projects[0].label) }) : undefined} />
+        <Kpi label={t("files.touched")} amount={tot.files} format={compact} hint={t("files.touchesN", { n: compact(tot.calls) })} />
+        <Kpi label={t("files.edits")} amount={tot.edits} format={compact} hint={t("files.shareOfTouches", { share: percent(tot.edits / Math.max(1, tot.calls)) })} />
+        <Kpi label={t("files.projects")} amount={overview.data.projects.length} format={compact} hint={overview.data.projects[0] ? t("files.busiest", { project: entityLabel("project", overview.data.projects[0].key, overview.data.projects[0].label) }) : undefined} />
       </div>
 
       <Card title={t("files.hotspots")} subtitle={t("files.hotspotsHint")}>

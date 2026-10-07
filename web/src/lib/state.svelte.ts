@@ -1,4 +1,4 @@
-import { tick } from "svelte";
+import { flushSync, tick } from "svelte";
 
 export type RangePreset = "today" | "7d" | "30d" | "90d" | "month" | "all" | "custom";
 export type Metric = "tokens" | "cost";
@@ -91,6 +91,8 @@ class Store {
   /** The sidebar shows only icons (on wide screens, where it stays open). */
   navCollapsed = $state<boolean>(load("hd.navCollapsed", ["true", "false"] as const, "false") === "true");
   systemDark = $state(typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
+  /** While the page prints: light colors whatever the theme, charts drawn without motion. */
+  printing = $state(false);
   /** Bumped whenever new data was ingested; data hooks refetch on change. */
   refreshTick = $state(0);
   route = $state<Route>(parseHash());
@@ -113,6 +115,17 @@ class Store {
         window.scrollTo({ top: 0 });
       });
       matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => (this.systemDark = e.matches));
+      // A print is dark ink on white paper. The charts take their colors from the theme, so they are redrawn light
+      // before the browser lays out the print, and redrawn in the chosen theme afterwards.
+      window.addEventListener("beforeprint", () => {
+        this.printing = true;
+        document.documentElement.dataset.theme = "light";
+        flushSync();
+      });
+      window.addEventListener("afterprint", () => {
+        this.printing = false;
+        this.setTheme(this.theme);
+      });
       // The range and filters live in the address too, so a view can be bookmarked, shared or reloaded as it is.
       // replaceState: changing a filter adds no history entry of its own.
       $effect.root(() => {
@@ -161,6 +174,7 @@ class Store {
   }
 
   get dark(): boolean {
+    if (this.printing) return false;
     return this.theme === "dark" || (this.theme === "system" && this.systemDark);
   }
 
@@ -252,6 +266,12 @@ class Store {
 }
 
 export const store = new Store();
+
+/** Whether the range and filters apply to a view. Live, Settings and the detail views show what they show whatever is chosen. */
+export function filtersApply(route: Route): boolean {
+  const { page, id } = route;
+  return page !== "settings" && page !== "live" && !(id && (page === "sessions" || page === "prompts" || page === "branches"));
+}
 
 /** Goes to a view, keeping the range and filters. */
 export function navigate(page: string, id?: string | null): void {

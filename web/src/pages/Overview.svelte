@@ -84,7 +84,9 @@
         <div class="col-span-2 md:col-span-1 xl:col-span-2">
           <Kpi
             label={store.metric === "cost" ? t("kpi.cost") : t("kpi.tokens")}
-            value={s ? (store.metric === "cost" ? usd(s.cost) : compact(s.tokens)) : "…"}
+            value="…"
+            amount={s ? (store.metric === "cost" ? s.cost : s.tokens) : null}
+            format={store.metric === "cost" ? usd : compact}
             current={s ? (store.metric === "cost" ? s.cost : s.tokens) : undefined}
             previous={s?.previous ? (store.metric === "cost" ? s.previous.cost : s.previous.tokens) : null}
             trend={sparkValues}
@@ -95,15 +97,17 @@
         </div>
         <Kpi
           label={store.metric === "cost" ? t("kpi.tokens") : t("kpi.cost")}
-          value={s ? (store.metric === "cost" ? compact(s.tokens) : usd(s.cost)) : "…"}
+          value="…"
+          amount={s ? (store.metric === "cost" ? s.tokens : s.cost) : null}
+          format={store.metric === "cost" ? compact : usd}
           current={s ? (store.metric === "cost" ? s.tokens : s.cost) : undefined}
           previous={s?.previous ? (store.metric === "cost" ? s.previous.tokens : s.previous.cost) : null}
           hint={s ? t("kpi.perActiveDay", { v: store.metric === "cost" ? compact(s.tokens / days) : usd(s.cost / days) }) : undefined}
         />
         <!-- With no earlier period to compare (All time), each tile shows an average instead of a change. -->
-        <Kpi label={t("kpi.sessions")} value={s ? compact(s.sessions) : "…"} current={s?.sessions} previous={s?.previous?.sessions} hint={s ? t("kpi.perActiveDay", { v: trimmed(s.sessions / days) }) : undefined} />
-        <Kpi label={t("kpi.prompts")} value={s ? compact(s.prompts) : "…"} current={s?.prompts} previous={s?.previous?.prompts} hint={s ? t("kpi.perSession", { v: trimmed(s.prompts / Math.max(s.sessions, 1)) }) : undefined} />
-        <Kpi label={t("kpi.cacheHit")} value={s ? percent(s.cacheHitRate, 1) : "…"} hint={s ? `${t("kpi.costPerPrompt")}: ${usd(s.costPerPrompt)}` : undefined} />
+        <Kpi label={t("kpi.sessions")} value="…" amount={s?.sessions} format={compact} current={s?.sessions} previous={s?.previous?.sessions} hint={s ? t("kpi.perActiveDay", { v: trimmed(s.sessions / days) }) : undefined} />
+        <Kpi label={t("kpi.prompts")} value="…" amount={s?.prompts} format={compact} current={s?.prompts} previous={s?.previous?.prompts} hint={s ? t("kpi.perSession", { v: trimmed(s.prompts / Math.max(s.sessions, 1)) }) : undefined} />
+        <Kpi label={t("kpi.cacheHit")} value="…" amount={s?.cacheHitRate} format={(v) => percent(v, 1)} hint={s ? `${t("kpi.costPerPrompt")}: ${usd(s.costPerPrompt)}` : undefined} />
       </div>
 
       <BudgetBar />

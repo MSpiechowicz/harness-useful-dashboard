@@ -72,13 +72,15 @@
         <Kpi
           label={summary.data && !summary.data.previous ? t("trends.total") : t("trends.change")}
           hint={summary.data?.firstTs ? t("trends.since", { date: dayWithYear(summary.data.firstTs) }) : undefined}
-          value={summary.data ? metricValue(store.metric === "cost" ? summary.data.cost : summary.data.tokens, store.metric) : "…"}
+          value="…"
+          amount={summary.data ? (store.metric === "cost" ? summary.data.cost : summary.data.tokens) : null}
+          format={(v) => metricValue(v, store.metric)}
           current={summary.data ? (store.metric === "cost" ? summary.data.cost : summary.data.tokens) : undefined}
           previous={summary.data?.previous ? (store.metric === "cost" ? summary.data.previous.cost : summary.data.previous.tokens) : null}
         />
-        <Kpi label={t("trends.peakDay")} value={stats ? metricValue(stats.peakValue, store.metric) : "…"} hint={stats ? bucketLabel(stats.peakDay, "day") : undefined} />
-        <Kpi label={t("trends.avgPerDay")} value={stats ? metricValue(stats.avg, store.metric) : "…"} hint={summary.data ? days(summary.data.activeDays) : undefined} />
-        <Kpi label={t("trends.projection")} value={stats ? metricValue(stats.projection, store.metric) : "…"} hint={t("trends.projectionHint")} />
+        <Kpi label={t("trends.peakDay")} value="…" amount={stats?.peakValue} format={(v) => metricValue(v, store.metric)} hint={stats ? bucketLabel(stats.peakDay, "day") : undefined} />
+        <Kpi label={t("trends.avgPerDay")} value="…" amount={stats?.avg} format={(v) => metricValue(v, store.metric)} hint={summary.data ? days(summary.data.activeDays) : undefined} />
+        <Kpi label={t("trends.projection")} value="…" amount={stats?.projection} format={(v) => metricValue(v, store.metric)} hint={t("trends.projectionHint")} />
       </div>
 
       <Card title={t("chart.usageOverTime")} subtitle={t(`metric.${valueKind}`)} exportName="usage-over-time" exportRows={() => (series.data ? seriesRows(series.data, true) : [])}>

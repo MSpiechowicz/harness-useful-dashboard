@@ -12,7 +12,7 @@
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
   import { agentTimeChart } from "../lib/charts.ts";
   import { rankKeys } from "../lib/colors.svelte.ts";
-  import { compact, dateTime, decimal, duration, entityLabel, percent, usd } from "../lib/format.ts";
+  import { compact, dateTime, decimal, duration, entityLabel, integer, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
 
@@ -97,10 +97,10 @@
       <div class="card"><Empty title={t("time.empty")} body={t("time.emptyBody")} /></div>
     {:else}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("time.active")} value={duration(tot.activeMs)} hint={t("time.activeHint")} />
-        <Kpi label={t("time.inParallel")} value={percent(tot.activeMs ? tot.parallelMs / tot.activeMs : 0)} hint={t("time.inParallelHint", { time: duration(tot.parallelMs) })} />
-        <Kpi label={t("time.mostAtOnce")} value={String(tot.peakSessions)} hint={tot.peakAt ? t("time.mostAtOnceHint", { when: dateTime(tot.peakAt) }) : undefined} />
-        <Kpi label={t("time.costPerHour")} value={usd(tot.costPerHour)} hint={t("time.costPerHourHint")} />
+        <Kpi label={t("time.active")} amount={tot.activeMs} format={duration} hint={t("time.activeHint")} />
+        <Kpi label={t("time.inParallel")} amount={tot.activeMs ? tot.parallelMs / tot.activeMs : 0} format={(v) => percent(v)} hint={t("time.inParallelHint", { time: duration(tot.parallelMs) })} />
+        <Kpi label={t("time.mostAtOnce")} amount={tot.peakSessions} format={integer} hint={tot.peakAt ? t("time.mostAtOnceHint", { when: dateTime(tot.peakAt) }) : undefined} />
+        <Kpi label={t("time.costPerHour")} amount={tot.costPerHour} format={usd} hint={t("time.costPerHourHint")} />
       </div>
 
       <div class="grid gap-5 xl:grid-cols-3">

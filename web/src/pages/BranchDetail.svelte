@@ -11,7 +11,7 @@
   import { qs, settled, useFetch } from "../lib/api.svelte.ts";
   import { timeSeriesChart } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
-  import { compact, dayWithYear, days, relative, usd } from "../lib/format.ts";
+  import { compact, dayWithYear, days, integer, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
 
@@ -65,10 +65,10 @@
       </div>
 
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("col.cost")} value={usd(tot?.cost)} hint={tot?.sessions ? t("branches.perSession", { cost: usd((tot.cost ?? 0) / tot.sessions) }) : undefined} />
-        <Kpi label={t("col.tokens")} value={compact(tot?.tokens)} hint={t("prompts.calls", { n: compact(tot?.messages) })} />
-        <Kpi label={t("col.sessions")} value={compact(tot?.sessions)} hint={`${compact(tot?.prompts)} ${t("col.prompts")}`} />
-        <Kpi label={t("branches.days")} value={String(activeDays)} hint={t("branches.over", { span: days(spanDays) })} />
+        <Kpi label={t("col.cost")} amount={tot?.cost} format={usd} hint={tot?.sessions ? t("branches.perSession", { cost: usd((tot.cost ?? 0) / tot.sessions) }) : undefined} />
+        <Kpi label={t("col.tokens")} amount={tot?.tokens} format={compact} hint={t("prompts.calls", { n: compact(tot?.messages) })} />
+        <Kpi label={t("col.sessions")} amount={tot?.sessions} format={compact} hint={`${compact(tot?.prompts)} ${t("col.prompts")}`} />
+        <Kpi label={t("branches.days")} amount={activeDays} format={integer} hint={t("branches.over", { span: days(spanDays) })} />
       </div>
 
       <Card title={t("branches.costByDay")} subtitle={t("branches.costByDayHint")}>

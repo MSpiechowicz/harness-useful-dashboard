@@ -51,10 +51,10 @@
       </Card>
 
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("col.cost")} value={usd(tot?.cost)} hint={subCost > 0 ? t("prompts.subagentCost", { cost: usd(subCost) }) : tot?.messages ? t("detail.costPerCall", { cost: usd((tot.cost ?? 0) / tot.messages) }) : undefined} />
-        <Kpi label={t("col.tokens")} value={compact(tot?.tokens)} hint={`${t("tok.output")}: ${compact(tot?.output)}`} />
-        <Kpi label={t("kpi.messages")} value={compact(tot?.messages)} hint={`${compact(toolCalls)} ${t("col.tools")}`} />
-        <Kpi label={t("kpi.cacheHit")} value={percent(hit, 1)} hint={t("kpi.cacheHitHint", { n: compact(tot?.cacheRead) })} />
+        <Kpi label={t("col.cost")} amount={tot?.cost} format={usd} hint={subCost > 0 ? t("prompts.subagentCost", { cost: usd(subCost) }) : tot?.messages ? t("detail.costPerCall", { cost: usd((tot.cost ?? 0) / tot.messages) }) : undefined} />
+        <Kpi label={t("col.tokens")} amount={tot?.tokens} format={compact} hint={`${t("tok.output")}: ${compact(tot?.output)}`} />
+        <Kpi label={t("kpi.messages")} amount={tot?.messages} format={compact} hint={`${compact(toolCalls)} ${t("col.tools")}`} />
+        <Kpi label={t("kpi.cacheHit")} amount={hit} format={(v) => percent(v, 1)} hint={t("kpi.cacheHitHint", { n: compact(tot?.cacheRead) })} />
       </div>
 
       {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} />{/if}

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { ArrowDownRight, ArrowUpRight } from "@lucide/svelte";
+  import { cubicOut } from "svelte/easing";
+  import { Tween } from "svelte/motion";
   import { percent } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import Chart from "./Chart.svelte";
@@ -8,7 +10,11 @@
 
   interface Props {
     label: string;
-    value: string;
+    /** The value as shown, for tiles that aren't a single number. Ignored while `amount` is set. */
+    value?: string;
+    /** The value as a number, with `format` to show it: it counts up to it, and from the old value to a new one. */
+    amount?: number | null;
+    format?: (v: number) => string;
     current?: number;
     previous?: number | null;
     /** Whether an increase is good (green) or bad (red). Usage growth is neutral → null. */
@@ -19,7 +25,18 @@
     trendLabels?: string[];
     trendFormat?: (v: number) => string;
   }
-  let { label, value, current, previous, upIsGood = null, hint, trend, trendLabels = [], trendFormat = String }: Props = $props();
+  let { label, value, amount, format = String, current, previous, upIsGood = null, hint, trend, trendLabels = [], trendFormat = String }: Props = $props();
+
+  // From 0 when the tile first shows, then from the old value to the new one when the range or the data changes.
+  // At once for those who asked for less motion: the CSS rule for that doesn't reach a tween.
+  const shown = new Tween(0, { duration: 600, easing: cubicOut });
+  const numeric = $derived(amount != null && Number.isFinite(amount));
+  $effect(() => {
+    if (amount == null || !Number.isFinite(amount)) return;
+    shown.set(amount, { duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 600 });
+  });
+  /** The final value, for the tooltip, so it doesn't show a number on its way there. */
+  const text = $derived(numeric ? format(amount!) : (value ?? "–"));
 
   const delta = $derived(current != null && previous ? (current - previous) / previous : null);
   const tone = $derived(
@@ -37,8 +54,9 @@
        a mini chart, delta or hint, is the same height and the numbers share a baseline across pages. -->
   <div class="flex h-14 items-end justify-between gap-3">
     <div class="min-w-0">
-      <div class="truncate text-2xl leading-tight font-semibold tracking-tight text-ink" title={value}>
-        {value}
+      <!-- Tabular figures: a counting number keeps its width. -->
+      <div class="tabular truncate text-2xl leading-tight font-semibold tracking-tight text-ink" title={text}>
+        {numeric ? format(shown.current) : text}
       </div>
       {#if delta != null}
         <div

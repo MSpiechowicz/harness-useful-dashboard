@@ -140,10 +140,10 @@
       <div class="card"><Empty title={t("branches.empty")} body={scope === "work" ? t("branches.emptyWork") : undefined} /></div>
     {:else}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("branches.count")} value={compact(rows.length)} hint={t("branches.inProjects", { n: projects.length })} />
-        <Kpi label={t("branches.cost")} value={usd(shownCost)} hint={t("branches.ofTotal", { share: percent(d.data.total.cost ? shownCost / d.data.total.cost : 0) })} />
-        <Kpi label={t("branches.median")} value={usd(median)} hint={t("branches.medianHint")} />
-        <Kpi label={t("branches.costliest")} value={usd(top[0]?.cost)} hint={top[0] ? branchName(top[0]) : undefined} />
+        <Kpi label={t("branches.count")} amount={rows.length} format={compact} hint={t("branches.inProjects", { n: projects.length })} />
+        <Kpi label={t("branches.cost")} amount={shownCost} format={usd} hint={t("branches.ofTotal", { share: percent(d.data.total.cost ? shownCost / d.data.total.cost : 0) })} />
+        <Kpi label={t("branches.median")} amount={median} format={usd} hint={t("branches.medianHint")} />
+        <Kpi label={t("branches.costliest")} amount={top[0]?.cost} format={usd} hint={top[0] ? branchName(top[0]) : undefined} />
       </div>
 
       <div class="grid gap-5 xl:grid-cols-3">

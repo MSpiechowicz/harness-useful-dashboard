@@ -81,10 +81,10 @@
       <div class="card"><Empty /></div>
     {:else if d.data}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("cache.hitRate")} value={percent(d.data.totals.hitRate, 1)} hint={t("cache.hitRateKpiHint")} />
-        <Kpi label={t("cache.savings")} value={usd(d.data.totals.savings)} hint={t("cache.savingsHint")} />
-        <Kpi label={t("cache.writeCost")} value={usd(d.data.totals.writeCost)} hint={`${compact(d.data.totals.cacheWrite + d.data.totals.cacheWrite1h)} ${t("metric.tokens")}`} />
-        <Kpi label={t("cache.readCost")} value={usd(d.data.totals.readCost)} hint={`${compact(d.data.totals.cacheRead)} ${t("metric.tokens")}`} />
+        <Kpi label={t("cache.hitRate")} amount={d.data.totals.hitRate} format={(v) => percent(v, 1)} hint={t("cache.hitRateKpiHint")} />
+        <Kpi label={t("cache.savings")} amount={d.data.totals.savings} format={usd} hint={t("cache.savingsHint")} />
+        <Kpi label={t("cache.writeCost")} amount={d.data.totals.writeCost} format={usd} hint={`${compact(d.data.totals.cacheWrite + d.data.totals.cacheWrite1h)} ${t("metric.tokens")}`} />
+        <Kpi label={t("cache.readCost")} amount={d.data.totals.readCost} format={usd} hint={`${compact(d.data.totals.cacheRead)} ${t("metric.tokens")}`} />
       </div>
 
       <div class="grid gap-5 xl:grid-cols-2">

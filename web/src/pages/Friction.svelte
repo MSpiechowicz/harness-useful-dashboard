@@ -195,12 +195,13 @@
       <div class="card"><Empty /></div>
     {:else}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("friction.errorRate")} value={rate(tot.errorRate)} hint={t("friction.errorRateHint")} />
-        <Kpi label={t("friction.errors")} value={compact(tot.errors)} hint={t("friction.ofCalls", { n: compact(tot.ok + tot.errors) })} />
-        <Kpi label={t("friction.rejected")} value={compact(tot.rejected)} hint={t("friction.rejectedHint", { rate: rate(tot.rejectRate) })} />
+        <Kpi label={t("friction.errorRate")} amount={tot.errorRate} format={rate} hint={t("friction.errorRateHint")} />
+        <Kpi label={t("friction.errors")} amount={tot.errors} format={compact} hint={t("friction.ofCalls", { n: compact(tot.ok + tot.errors) })} />
+        <Kpi label={t("friction.rejected")} amount={tot.rejected} format={compact} hint={t("friction.rejectedHint", { rate: rate(tot.rejectRate) })} />
         <Kpi
           label={t("friction.interrupts")}
-          value={compact(tot.interrupts)}
+          amount={tot.interrupts}
+          format={compact}
           hint={tot.interruptsPer100 != null ? t("friction.per100", { n: decimal(tot.interruptsPer100) }) : undefined}
         />
       </div>

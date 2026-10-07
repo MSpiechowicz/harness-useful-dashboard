@@ -97,10 +97,10 @@
       </div>
 
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("col.cost")} value={usd(tot?.cost)} hint={costHint} />
-        <Kpi label={t("col.tokens")} value={compact(tot?.tokens)} hint={`${t("tok.output")}: ${compact(tot?.output)}`} />
-        <Kpi label={t("kpi.messages")} value={compact(tot?.messages)} hint={s?.parent ? t("detail.subagentOf", { name: s.parent.title ?? t("sessions.parent") }) : count(d.data.prompts.length, "common.prompt", "common.prompts")} />
-        <Kpi label={t("kpi.cacheHit")} value={percent(hit, 1)} hint={t("kpi.cacheHitHint", { n: compact(tot?.cacheRead) })} />
+        <Kpi label={t("col.cost")} amount={tot?.cost} format={usd} hint={costHint} />
+        <Kpi label={t("col.tokens")} amount={tot?.tokens} format={compact} hint={`${t("tok.output")}: ${compact(tot?.output)}`} />
+        <Kpi label={t("kpi.messages")} amount={tot?.messages} format={compact} hint={s?.parent ? t("detail.subagentOf", { name: s.parent.title ?? t("sessions.parent") }) : count(d.data.prompts.length, "common.prompt", "common.prompts")} />
+        <Kpi label={t("kpi.cacheHit")} amount={hit} format={(v) => percent(v, 1)} hint={t("kpi.cacheHitHint", { n: compact(tot?.cacheRead) })} />
       </div>
 
       {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} prompts={d.data.prompts.length > 1 ? promptNo : undefined} />{/if}

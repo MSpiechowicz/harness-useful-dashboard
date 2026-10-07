@@ -10,7 +10,7 @@
   import { apiUrl, getJson, send, settled, useFetch } from "../lib/api.svelte.ts";
   import { limitHistoryChart, timeSeriesChart } from "../lib/charts.ts";
   import { colorFor, rankKeys } from "../lib/colors.svelte.ts";
-  import { compact, dayWithYear, decimal, percent, usd } from "../lib/format.ts";
+  import { compact, dayWithYear, decimal, integer, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { PROVIDER_NAMES } from "../lib/palette.ts";
   import { store } from "../lib/state.svelte.ts";
@@ -159,10 +159,10 @@
       <div class="card"><Empty /></div>
     {:else}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label={t("plans.apiCost")} value={usd(totalCost)} hint={t("plans.apiCostHint")} />
-        <Kpi label={t("plans.paid")} value={priced.length ? usd(paid) : "–"} hint={priced.length ? t("plans.paidHint", { n: priced.length }) : t("plans.noPrices")} />
+        <Kpi label={t("plans.apiCost")} amount={totalCost} format={usd} hint={t("plans.apiCostHint")} />
+        <Kpi label={t("plans.paid")} amount={priced.length ? paid : null} format={usd} hint={priced.length ? t("plans.paidHint", { n: priced.length }) : t("plans.noPrices")} />
         <Kpi label={t("plans.value")} value={value(pricedCost, paid)} hint={t("plans.valueHint")} />
-        <Kpi label={t("plans.runOuts")} value={history.length ? String(hits) : "–"} hint={history.length ? t("plans.runOutsHint", { n: cycles }) : t("plans.noHistoryShort")} />
+        <Kpi label={t("plans.runOuts")} amount={history.length ? hits : null} format={integer} hint={history.length ? t("plans.runOutsHint", { n: cycles }) : t("plans.noHistoryShort")} />
       </div>
 
       <Card title={t("plans.perPlan")} subtitle={t("plans.perPlanHint")} pad={false}>

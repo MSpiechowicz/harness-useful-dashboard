@@ -133,15 +133,17 @@
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Kpi
           label={t("tools.calls")}
-          value={compact(total)}
+          amount={total}
+          format={compact}
           hint={d.data.totals.prompts ? t("tools.perPrompt", { n: decimal(total / d.data.totals.prompts) }) : undefined}
         />
         <Kpi
           label={t("tools.distinct")}
-          value={compact(d.data.totals.tools)}
+          amount={d.data.totals.tools}
+          format={compact}
           hint={t("tools.bySource", { builtin: compact(d.data.totals.tools - d.data.totals.mcpTools), mcp: compact(d.data.totals.mcpTools) })}
         />
-        <Kpi label={t("tools.viaMcp")} value={percent(d.data.totals.mcpCalls / total, 1)} hint={t("common.callsN", { n: compact(d.data.totals.mcpCalls) })} />
+        <Kpi label={t("tools.viaMcp")} amount={d.data.totals.mcpCalls / total} format={(v) => percent(v, 1)} hint={t("common.callsN", { n: compact(d.data.totals.mcpCalls) })} />
       </div>
 
       <div class="grid gap-5 xl:grid-cols-3">

@@ -551,3 +551,102 @@ table.data th.num {
   border-radius: 10px;
   border: 2px solid var(--page);
 }
+
+/* Shown only on paper (the page's range and filters under its title). */
+.print-only {
+  display: none;
+}
+
+/* Printing: the page as a report. Only the content, the full width of the paper, dark ink on white whatever the theme,
+   without the controls that only work on screen. The store also redraws the charts light before printing. */
+@media print {
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+    --page: #fff;
+    --surface: #fff;
+    --surface-2: #f3f3f0;
+    --surface-3: #e9e8e3;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #696863;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.14);
+    --accent-ink: #1c5cab;
+    --accent-wash: rgba(42, 120, 214, 0.1);
+    --good-ink: #006300;
+    --bad-ink: #b42323;
+    --warn-ink: #9a5800;
+    --shadow: none;
+  }
+  @page {
+    margin: 12mm;
+  }
+  html,
+  body {
+    background: #fff;
+    /* Backgrounds that carry meaning (bars, heat cells, swatches) print as they show. */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  html {
+    scrollbar-gutter: auto;
+  }
+  .print-only {
+    display: block;
+  }
+
+  /* The sidebar (with the update notice), the filter bar above the content, the skip link, the drawer's backdrop. */
+  aside,
+  header:has(+ main),
+  .skip-link,
+  body button.fixed {
+    display: none !important;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* On-screen controls: card actions (exports, view toggles, sort), menus, search fields, pagers, row disclosures. */
+  .card > header > :last-child,
+  .popover,
+  button[aria-haspopup],
+  button[aria-expanded],
+  label:has(> input[type="search"]),
+  .table-footer nav,
+  .pager {
+    display: none !important;
+  }
+
+  .card {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+  h1,
+  h2 {
+    break-after: avoid;
+  }
+
+  /* Tables in full: no scrolling boxes, no sticky or hovered rows, columns fit the paper. */
+  .card .overflow-auto,
+  .card .overflow-x-auto {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  table.data.fixed-cols {
+    min-width: 0;
+  }
+  table.data th {
+    position: static;
+  }
+  table.data tbody tr:hover {
+    background: transparent;
+  }
+
+  /* Chart canvases are resized to the paper (Chart.svelte). Until then they never run past the card. */
+  canvas {
+    max-width: 100% !important;
+  }
+}
