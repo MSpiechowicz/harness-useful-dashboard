@@ -943,7 +943,7 @@ export const de: Record<MessageKey, string> = {
   "settings.limits.pi": "pi-Anmeldungen",
   "settings.limits.piHint": "Fragt Anthropic, ChatGPT und GitHub nach den Limits der Konten, bei denen pi angemeldet ist. Jede Anmeldung wird nur an ihren eigenen Anbieter gesendet.",
   "settings.appHint": "Version, Updates und der Hintergrundserver. Die Update-Prüfung sendet keine Verbrauchsdaten.",
-  "settings.checkUpdatesHint": "Sucht beim Öffnen des Dashboards nach einer neuen Version und zeigt einen Hinweis in der Seitenleiste",
+  "settings.checkUpdatesHint": "Sucht alle 5 Minuten nach einer neuen Version und zeigt einen Hinweis in der Seitenleiste",
   "settings.version": "Version {v}",
   "settings.checkNow": "Jetzt prüfen",
   "settings.upToDate": "Du bist auf dem neuesten Stand.",

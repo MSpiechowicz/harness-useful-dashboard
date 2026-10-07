@@ -3,11 +3,11 @@ import { t } from "./i18n.svelte.ts";
 import { RESTART_POLL_MS, restartDone, type RestartProbe } from "./restart.ts";
 import { everyWhileVisible, waitOrVisible } from "./visibility.ts";
 
-/** How often the app asks whether a newer release is out (the server answers from its cache within the hour). */
-const RECHECK_MS = 3600_000;
+/** How often the app asks whether a newer release is out (the server asks GitHub at most every 5 minutes too). */
+const RECHECK_MS = 5 * 60_000;
 
 /**
- * Update state shared by the sidebar banner and Settings, so a check from either one (and the hourly one) shows
+ * Update state shared by the sidebar banner and Settings, so a check from either one (and the regular one) shows
  * in both, and both offer the install.
  */
 export const updater = $state<{ status: UpdateStatus | null; installing: boolean; message: string | null }>({
@@ -18,7 +18,7 @@ export const updater = $state<{ status: UpdateStatus | null; installing: boolean
 
 let watching = false;
 
-/** Checks now and then every hour, once per page. A hidden tab checks once it is shown again. */
+/** Checks now and then every 5 minutes, once per page. A hidden tab checks once it is shown again. */
 export function watchUpdates(): void {
   if (watching) return;
   watching = true;

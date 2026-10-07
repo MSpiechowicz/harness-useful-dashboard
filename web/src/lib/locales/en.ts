@@ -941,7 +941,7 @@ export const en = {
   "settings.limits.pi": "pi logins",
   "settings.limits.piHint": "Asks Anthropic, ChatGPT and GitHub for the limits of the accounts pi is logged in to. Each login is only ever sent to its own provider.",
   "settings.appHint": "Version, updates and the background server. Update checks send no usage data.",
-  "settings.checkUpdatesHint": "Looks for a new version when the dashboard opens and shows a notice in the sidebar",
+  "settings.checkUpdatesHint": "Looks for a new version every 5 minutes and shows a notice in the sidebar",
   "settings.version": "Version {v}",
   "settings.checkNow": "Check now",
   "settings.upToDate": "You're up to date.",

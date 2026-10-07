@@ -943,7 +943,7 @@ export const pl: Record<MessageKey, string> = {
   "settings.limits.pi": "Logowania pi",
   "settings.limits.piHint": "Pobiera od Anthropic, ChatGPT i GitHub limity kont zalogowanych w pi. Dane logowania trafiają wyłącznie do właściwego dostawcy.",
   "settings.appHint": "Wersja, aktualizacje i serwer w tle. Sprawdzanie aktualizacji nie wysyła danych o zużyciu.",
-  "settings.checkUpdatesHint": "Przy otwarciu dashboardu szuka nowej wersji i pokazuje powiadomienie na pasku bocznym",
+  "settings.checkUpdatesHint": "Co 5 minut szuka nowej wersji i pokazuje powiadomienie na pasku bocznym",
   "settings.version": "Wersja {v}",
   "settings.checkNow": "Sprawdź teraz",
   "settings.upToDate": "Masz najnowszą wersję.",

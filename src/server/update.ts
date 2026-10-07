@@ -92,11 +92,15 @@ export async function fetchLatestRelease(fetchImpl: typeof fetch = fetch): Promi
   };
 }
 
+/** How long an answer from GitHub is reused before asking again. */
+export const UPDATE_CHECK_MS = 5 * 60_000;
+
 let cached: UpdateStatus | null = null;
 
 export async function checkForUpdate(force = false): Promise<UpdateStatus> {
-  // An hour, so a release shows within the hour the app checks again, well inside GitHub's 60 requests an hour.
-  if (!force && cached && Date.now() - cached.checkedAt < 3600_000) return cached;
+  // 5 minutes, so a release shows within minutes: at most 12 requests an hour however many windows are open, well inside
+  // the 60 an hour GitHub allows without a token.
+  if (!force && cached && Date.now() - cached.checkedAt < UPDATE_CHECK_MS) return cached;
   try {
     const rel = await fetchLatestRelease();
     cached = {

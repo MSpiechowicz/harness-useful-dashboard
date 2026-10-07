@@ -105,7 +105,7 @@ and `HARNESS_DASHBOARD_NO_MODIFY_PATH=1` leaves your shell profile untouched (ma
 
 ### Updating
 
-The app checks GitHub releases. When a new version is out, a banner in the sidebar offers **Install & restart**:
+The app checks GitHub releases every 5 minutes while a window is open. When a new version is out, a banner in the sidebar offers **Install & restart**:
 it downloads the new binary for your platform, verifies its SHA-256 against `checksums.txt`, swaps it in
 place and restarts. Open windows reload on their own. From a terminal:
 
