@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Ban, CircleStop, CircleX, Gauge, MessageSquareText } from "@lucide/svelte";
+  import { Ban, ChevronDown, ChevronRight, CircleStop, CircleX, Gauge, MessageSquareText } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
@@ -174,6 +174,8 @@
   // The activity table: newest first, or grouped by what happened (failures first).
   type FeedSort = "recent" | "kind";
   let feedSort = $state<FeedSort>("recent");
+  /** Feed rows showing their command and error text. */
+  let open = $state<Record<string, boolean>>({});
   const FEED_SORTS = $derived<{ value: FeedSort; label: string }[]>([
     { value: "recent", label: t("sort.recent") },
     { value: "kind", label: t("live.feed.byKind") },
@@ -362,7 +364,7 @@
       title={t("live.feed")}
       subtitle={t("live.feedHint")}
       rows={feedRows}
-      searchText={(e) => `${feedText(e)} ${feedWhy(e) ?? ""} ${e.title ?? ""} ${e.tool ?? ""}`}
+      searchText={(e) => `${feedText(e)} ${feedWhy(e) ?? ""} ${e.input ?? ""} ${e.title ?? ""} ${e.tool ?? ""}`}
       sorts={FEED_SORTS}
       bind:sortKey={feedSort}
       exportName="live-feed"
@@ -384,16 +386,33 @@
           <tbody>
             {#each view.rows.slice(view.offset, view.limit == null ? undefined : view.offset + view.limit) as e, i (`${e.ts}:${e.kind}:${e.sessionId}:${i}`)}
               {@const Icon = FEED_ICON[e.kind]}
-              {@const why = feedWhy(e)}
+              {@const key = `${e.ts}:${e.kind}:${e.sessionId}:${i}`}
+              {@const expandable = !!(e.input || e.detail)}
+              {@const expanded = expandable && !!open[key]}
               <tr class="cursor-pointer" onclick={() => navigate("sessions", e.sessionId)}>
                 <td class="text-ink-2 tabular">{time(e.ts)}</td>
                 <td>
+                  <!-- One line a row: what happened and why. The command and the error text open below on demand. -->
                   <span class="flex min-w-0 items-center gap-2.5">
                     <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' ? 'text-bad' : 'text-warn'}" />
-                    <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class="truncate {e.kind === 'prompt' ? 'text-ink' : 'text-ink-2'}" title={feedTitle(e)}>{feedText(e)}</Link>
-                    {#if e.input}<span class="min-w-0 truncate font-mono text-xs text-muted" title={e.input}>{e.input}</span>{/if}
+                    <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class={e.kind === "prompt" ? "truncate text-ink" : "shrink-0 text-ink-2"} title={feedTitle(e)}>{feedText(e)}</Link>
+                    {#if e.reason}<span class="min-w-0 truncate text-xs text-muted">· {t(`friction.reason.${e.reason}`)}</span>{/if}
+                    {#if expandable}
+                      <button
+                        type="button"
+                        class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded text-muted hover:bg-surface-2 hover:text-ink"
+                        aria-expanded={expanded}
+                        aria-label={t(expanded ? "friction.hideError" : "friction.showError")}
+                        title={t(expanded ? "friction.hideError" : "friction.showError")}
+                        onclick={(ev) => {
+                          ev.stopPropagation();
+                          open[key] = !expanded;
+                        }}
+                      >
+                        {#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+                      </button>
+                    {/if}
                   </span>
-                  {#if why}<span class="mt-0.5 block truncate pl-6 text-xs text-muted" title={feedTitle(e)}>{why}</span>{/if}
                 </td>
                 <td>
                   <span class="flex min-w-0 items-center gap-2 text-ink-2">
@@ -402,6 +421,15 @@
                   </span>
                 </td>
               </tr>
+              {#if expanded}
+                <tr class="bg-surface-2">
+                  <td></td>
+                  <td colspan="2" class="!whitespace-normal">
+                    {#if e.input}<pre class="mb-2 font-mono text-xs break-all whitespace-pre-wrap text-muted">{e.input}</pre>{/if}
+                    {#if e.detail}<pre class="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-ink-2">{e.detail}</pre>{/if}
+                  </td>
+                </tr>
+              {/if}
             {/each}
           </tbody>
         </table>

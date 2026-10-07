@@ -291,7 +291,7 @@
                       </span>
                     </td>
                     <td title={errorTitle(f)}>
-                      {#if f.input}<div class="truncate font-mono text-xs text-muted">{f.input}</div>{/if}
+                      <!-- One line: the error. Its command or file and the full text open below. -->
                       {#if f.detail}
                         <div class="truncate text-ink-2">{f.detail.replace(/\s+/g, " ")}</div>
                       {:else}
