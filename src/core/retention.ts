@@ -129,6 +129,7 @@ export async function trimDetail(db: Database, host: string, months: number, opt
       select: `SELECT t.rowid AS rid, t.ts, (t.file_path IS NOT NULL OR t.brief IS NOT NULL) AS dirty
                FROM tool_calls t JOIN sessions s ON s.id = t.session_id
                WHERE s.host = $host AND (t.ts, t.rowid) > ($ts, $rid) AND t.ts < $cutoff ORDER BY t.ts, t.rowid LIMIT $n`,
+      // An edit's line counts and model stay: they are numbers, not detail.
       update: "UPDATE tool_calls SET file_path = NULL, brief = NULL WHERE rowid = $rid",
       from,
     },

@@ -1,4 +1,5 @@
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
+import { countLines, diffLines, type LineCount, patchLines, unifiedDiffLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
 /**
@@ -40,6 +41,24 @@ const SESSION_RE = /session-state[\\/]([^\\/]+)[\\/]events\.jsonl$/;
 const FILE_TOOLS = new Set(["view", "create", "edit", "str_replace", "str_replace_editor", "insert", "write", "read"]);
 /** Failed calls the user turned down or stopped rather than ones that went wrong. */
 const STOPPED_RE = /^(?:rejected|denied|cancell?ed|aborted)$|\b(?:user )?(?:rejected|denied|declined)\b|\bcancell?ed by the user\b/i;
+
+/** The lines an edit changes, from its arguments: the old and new text, a new file's text, or a patch. */
+export function copilotEditLines(tool: string, args: Record<string, any>): LineCount | null {
+  const command = tool === "str_replace_editor" ? args.command : tool;
+  switch (command) {
+    case "edit":
+    case "str_replace":
+      return diffLines(args.old_str, args.new_str);
+    case "create":
+      return { added: countLines(args.file_text), removed: 0 };
+    case "insert":
+      return { added: countLines(args.new_str), removed: 0 };
+    case "apply_patch":
+      return patchLines(typeof args.input === "string" ? args.input : JSON.stringify(args)) ?? { added: 0, removed: 0 };
+    default:
+      return null;
+  }
+}
 
 const KEYS = ["input", "output", "cacheRead", "cacheWrite", "reasoning", "premium"] as const;
 
@@ -115,7 +134,12 @@ export const copilotParser: LineParser<CopilotState> = {
             const id = `${sessionId}:${r.toolCallId}`;
             rememberCall((state.calls ??= {}), id, r.name, inputSummary(args, ctx.promptTextLimit));
             const path = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
-            sink.tool({ id, usageId: null, sessionId, promptId: state.promptId, provider: "copilot", ts, project: state.cwd, tool: r.name, filePath: FILE_TOOLS.has(r.name) ? path : null, skill: null, agent });
+            const lines = copilotEditLines(r.name, args);
+            sink.tool({
+              id, usageId: null, sessionId, promptId: state.promptId, provider: "copilot", ts, project: state.cwd, tool: r.name,
+              filePath: FILE_TOOLS.has(r.name) ? path : null, skill: null, agent, model: state.answeredBy ?? state.model,
+              linesAdded: lines?.added ?? null, linesRemoved: lines?.removed ?? null,
+            });
           }
           break;
         }
@@ -136,6 +160,10 @@ export const copilotParser: LineParser<CopilotState> = {
             kind,
             ...failureOf(kind, call.tool, error, call.input, ctx.promptTextLimit),
           });
+          // An edit's result shows its diff: exact where the arguments were not.
+          const diff = d.result?.detailedContent;
+          const exact = kind === "tool_ok" && typeof diff === "string" && diff.includes("@@") ? unifiedDiffLines(diff) : null;
+          if (exact) sink.editLines?.({ toolId: id, ...exact });
           break;
         }
         case "abort":

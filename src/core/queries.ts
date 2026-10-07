@@ -384,6 +384,22 @@ export class Queries {
     );
   }
 
+  /** Totals per day, week (from Monday) or month in local time, oldest first. Idle days in the range come as zeros. */
+  periods(f: Filters, bucket: Exclude<Bucket, "hour">) {
+    const w = whereClause(f);
+    type Row = Totals & { period: string; sessions: number; prompts: number; firstTs: number | null; lastTs: number | null };
+    const rows = this.all<Row>(
+      `SELECT ${bucketExpr(bucket)} AS period, ${TOKEN_SUMS},
+              COUNT(DISTINCT u.session_id) AS sessions, COUNT(DISTINCT u.prompt_id) AS prompts,
+              MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
+       FROM usage u ${w.sql} GROUP BY period ORDER BY period`,
+      w.params,
+    );
+    const idx = new Map(rows.map((r) => [r.period, r]));
+    const zero = { tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0, messages: 0, sessions: 0, prompts: 0, firstTs: null, lastTs: null };
+    return fillBuckets(rows.map((r) => r.period), bucket, f).map((p): Row => idx.get(p) ?? { period: p, ...zero });
+  }
+
   /**
    * A Live session's subagent runs with activity since `from`, newest first: the first LIVE_RUNS of them, and how many
    * there were. A run is a child session (omp, pi, Codex, OpenCode) or, in Claude Code, the responses of one subagent in

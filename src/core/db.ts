@@ -2,8 +2,9 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
+import { CURSOR_REKEY } from "./ingest/cursor.ts";
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 14;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -235,6 +236,18 @@ const MIGRATIONS: Record<number, string> = {
   12: /* sql */ `
     ALTER TABLE tool_calls ADD COLUMN brief TEXT;
     DELETE FROM ingest_files WHERE path LIKE '%.jsonl';
+  `,
+  // Cursor rows are keyed by the call's time, model and tokens, so a CSV import and a sync never count a call twice.
+  13: CURSOR_REKEY,
+  // Lines an edit tool call added and removed (ingest/lines.ts), and the model that made the call, so cost per changed
+  // line can be split by model. Numbers only, kept when retention trims the detail. A failed edit has none. Read the
+  // logs and databases the counts come from once more (Zed logs no edit text, so it is left out).
+  14: /* sql */ `
+    ALTER TABLE tool_calls ADD COLUMN lines_added INTEGER;
+    ALTER TABLE tool_calls ADD COLUMN lines_removed INTEGER;
+    ALTER TABLE tool_calls ADD COLUMN model TEXT;
+    CREATE INDEX IF NOT EXISTS idx_tools_lines ON tool_calls(ts) WHERE lines_added IS NOT NULL;
+    DELETE FROM ingest_files WHERE path LIKE '%.jsonl' OR path LIKE '%.json' OR (path LIKE '%.db' AND path NOT LIKE '%threads.db');
   `,
 };
 

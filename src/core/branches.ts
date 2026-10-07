@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { memo } from "./cache.ts";
+import { per100 } from "./changes.ts";
 import { bucketExpr, EDIT_TOOLS, fillBuckets, type Filters, projectLabel, sessionTitle, whereClause } from "./queries.ts";
 
 type Params = Record<string, string | number | null>;
@@ -8,6 +9,10 @@ type Params = Record<string, string | number | null>;
 const JOIN = "LEFT JOIN sessions s ON s.id = u.session_id LEFT JOIN sessions ps ON ps.id = s.parent_session_id";
 const BRANCH = "COALESCE(s.git_branch, ps.git_branch)";
 const ROOT = "COALESCE(s.parent_session_id, u.session_id)";
+/** The same for tool calls: an edit's lines count toward the branch of its session. */
+const TJOIN = "LEFT JOIN sessions s ON s.id = t.session_id LEFT JOIN sessions ps ON ps.id = s.parent_session_id";
+const TROOT = "COALESCE(s.parent_session_id, t.session_id)";
+const LINES = "COALESCE(SUM(t.lines_added), 0) AS added, COALESCE(SUM(t.lines_removed), 0) AS removed";
 
 /** Branches most repositories keep for good: work on them isn't one piece of work. */
 export const LONG_LIVED = new Set(["main", "master", "trunk", "develop", "development", "dev", "HEAD"]);
@@ -42,6 +47,10 @@ export interface BranchRow {
   firstTs: number;
   lastTs: number;
   days: number;
+  /** Lines the branch's edits added and removed, and the branch's cost per 100 of them (null: none changed). */
+  added: number;
+  removed: number;
+  costPer100: number | null;
 }
 
 /** Usage by git branch, per project: what each piece of work cost. */
@@ -60,14 +69,26 @@ function computeBranches(db: Database, f: Filters) {
     )
     .all(w.params);
   const total = db.query<{ cost: number; tokens: number }, Params>(`SELECT COALESCE(SUM(u.cost_usd), 0) AS cost, COALESCE(SUM(u.total_tokens), 0) AS tokens FROM usage u ${w.sql}`).get(w.params)!;
+  const wt = whereClause(f, "t");
+  const lines = new Map(
+    db
+      .query<{ branch: string; project: string | null; added: number; removed: number }, Params>(
+        `SELECT COALESCE(${BRANCH}, '${NO_BRANCH}') AS branch, t.project AS project, ${LINES}
+         FROM tool_calls t ${TJOIN} ${wt.sql ? `${wt.sql} AND` : "WHERE"} t.lines_added IS NOT NULL
+         GROUP BY branch, t.project`,
+      )
+      .all(wt.params)
+      .map((r) => [branchId(r.branch, r.project), r]),
+  );
   return {
     total,
-    rows: rows.map((r): BranchRow => ({
-      ...r,
-      id: branchId(r.branch, r.project),
-      projectLabel: projectLabel(r.project),
-      longLived: LONG_LIVED.has(r.branch),
-    })),
+    rows: rows.map((r): BranchRow => {
+      const id = branchId(r.branch, r.project);
+      const l = lines.get(id);
+      const added = l?.added ?? 0;
+      const removed = l?.removed ?? 0;
+      return { ...r, id, projectLabel: projectLabel(r.project), longLived: LONG_LIVED.has(r.branch), added, removed, costPer100: per100(r.cost, added + removed) };
+    }),
   };
 }
 
@@ -79,6 +100,7 @@ export function branchDetail(db: Database, id: string) {
   if (branch !== NO_BRANCH) params.branch = branch;
   if (project != null) params.project = project;
   const where = `WHERE ${cond}`;
+  const twhere = `WHERE ${cond.replace("u.project", "t.project")} AND t.lines_added IS NOT NULL`;
   const totals = db.query<{ tokens: number; cost: number; messages: number; sessions: number; prompts: number; firstTs: number | null; lastTs: number | null }, Params>(
     `SELECT ${SUMS} FROM usage u ${JOIN} ${where}`,
   ).get(params)!;
@@ -108,6 +130,19 @@ export function branchDetail(db: Database, id: string) {
        FROM usage u ${JOIN} ${where} GROUP BY u.model ORDER BY cost DESC`,
     )
     .all(params);
+  const lines = db.query<{ added: number; removed: number; files: number }, Params>(
+    `SELECT ${LINES}, COUNT(DISTINCT t.file_path) AS files FROM tool_calls t ${TJOIN} ${twhere}`,
+  ).get(params)!;
+  const sessionLines = new Map(
+    db.query<{ id: string; added: number; removed: number }, Params>(`SELECT ${TROOT} AS id, ${LINES} FROM tool_calls t ${TJOIN} ${twhere} GROUP BY ${TROOT}`)
+      .all(params)
+      .map((r) => [r.id, r]),
+  );
+  const modelLines = new Map(
+    db.query<{ key: string | null; added: number; removed: number }, Params>(`SELECT t.model AS key, ${LINES} FROM tool_calls t ${TJOIN} ${twhere} GROUP BY t.model`)
+      .all(params)
+      .map((r) => [r.key ?? "(none)", r]),
+  );
   // The files the branch's sessions changed: tool calls carry the session, not the branch.
   const files = db
     .query<{ key: string; edits: number }, Params>(
@@ -123,9 +158,14 @@ export function branchDetail(db: Database, id: string) {
     projectLabel: projectLabel(project),
     longLived: LONG_LIVED.has(branch),
     totals,
+    lines: { ...lines, costPer100: per100(totals.cost, lines.added + lines.removed) },
     days: { buckets, cost: buckets.map((b) => at.get(b)?.cost ?? 0), tokens: buckets.map((b) => at.get(b)?.tokens ?? 0) },
-    sessions,
-    models: models.map((m) => ({ ...m, key: m.key ?? "(none)" })),
+    sessions: sessions.map((x) => ({ ...x, added: sessionLines.get(x.id)?.added ?? 0, removed: sessionLines.get(x.id)?.removed ?? 0 })),
+    models: models.map((m) => {
+      const key = m.key ?? "(none)";
+      const l = modelLines.get(key);
+      return { ...m, key, added: l?.added ?? 0, removed: l?.removed ?? 0, costPer100: per100(m.cost, (l?.added ?? 0) + (l?.removed ?? 0)) };
+    }),
     files,
   };
 }

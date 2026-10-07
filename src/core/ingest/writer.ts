@@ -2,7 +2,7 @@ import type { Database, Statement } from "bun:sqlite";
 import type { PriceBook } from "../pricing.ts";
 import { readingParams, readingStatement } from "../plans.ts";
 import { projectResolver } from "../project.ts";
-import type { IngestSink, LimitRecord, OutcomeRecord, PromptRecord, ResponseMetaRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
+import type { EditLinesRecord, IngestSink, LimitRecord, OutcomeRecord, PromptRecord, ResponseMetaRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
 
 export interface WriterStats {
   usage: number;
@@ -23,6 +23,8 @@ export class DbWriter implements IngestSink {
   private sMeta: Statement;
   private sOutcome: Statement;
   private sOutcomeTool: Statement;
+  private sLines: Statement;
+  private sFailedLines: Statement;
   private sReading: Statement;
 
   constructor(
@@ -90,12 +92,28 @@ export class DbWriter implements IngestSink {
         resets_at = excluded.resets_at, plan = excluded.plan, observed_at = excluded.observed_at
       WHERE excluded.observed_at >= plan_limits.observed_at
     `);
+    // An edit's lines: none once it is known to have failed, and the exact count from its result (sLines) is kept when
+    // the call is read again. A further file's row ("<call>:f1") goes by its call's outcome. The model is the one
+    // named, else its usage row's.
+    const failed = "EXISTS (SELECT 1 FROM outcomes o WHERE o.id IN ($id, $callId) AND o.kind IN ('tool_error', 'tool_rejected'))";
     this.sTool = db.prepare(`
       INSERT INTO tool_calls (id, usage_id, session_id, prompt_id, provider, ts, project, user, tool,
-                              file_path, skill, agent, spawn_ref, brief)
+                              file_path, skill, agent, spawn_ref, brief, model, lines_added, lines_removed)
       VALUES ($id, $usageId, $sessionId, $promptId, $provider, $ts, $project, $user, $tool, $filePath, $skill,
-              $agent, $spawnRef, $brief)
-      ON CONFLICT(id) DO UPDATE SET brief = COALESCE(tool_calls.brief, excluded.brief) WHERE excluded.brief IS NOT NULL
+              $agent, $spawnRef, $brief, COALESCE($model, (SELECT u.model FROM usage u WHERE u.id = $usageId)),
+              CASE WHEN ${failed} THEN NULL ELSE $linesAdded END, CASE WHEN ${failed} THEN NULL ELSE $linesRemoved END)
+      ON CONFLICT(id) DO UPDATE SET
+        brief         = COALESCE(tool_calls.brief, excluded.brief),
+        model         = COALESCE(tool_calls.model, excluded.model),
+        lines_added   = CASE WHEN ${failed} THEN NULL ELSE COALESCE(tool_calls.lines_added, excluded.lines_added) END,
+        lines_removed = CASE WHEN ${failed} THEN NULL ELSE COALESCE(tool_calls.lines_removed, excluded.lines_removed) END
+      WHERE excluded.brief IS NOT NULL OR excluded.model IS NOT NULL OR excluded.lines_added IS NOT NULL
+    `);
+    // Only an edit's count is replaced (it has one from its input): a result's diff never makes another call an edit.
+    this.sLines = db.prepare(`UPDATE tool_calls SET lines_added = $added, lines_removed = $removed WHERE id = $id AND lines_added IS NOT NULL`);
+    this.sFailedLines = db.prepare(`
+      UPDATE tool_calls SET lines_added = NULL, lines_removed = NULL
+      WHERE (id = $id OR (id > $id || ':f' AND id < $id || ':g')) AND lines_added IS NOT NULL
     `);
     this.sMeta = db.prepare(`
       INSERT INTO response_meta (usage_id, start_ts, end_ts, ttft_ms, effort, stop_reason)
@@ -210,6 +228,11 @@ export class DbWriter implements IngestSink {
       agent: t.agent,
       spawnRef: t.spawnRef ?? null,
       brief: this.isOld(t.ts) ? null : (t.brief ?? null),
+      callId: t.id.replace(/:f\d+$/, ""),
+      model: t.model ?? null,
+      // Counts, not detail: kept however old the call is.
+      linesAdded: t.linesAdded ?? null,
+      linesRemoved: t.linesAdded != null ? (t.linesRemoved ?? 0) : null,
     });
     this.sOutcomeTool.run({ id: t.id, tool: t.tool });
     this.stats.tools++;
@@ -246,6 +269,13 @@ export class DbWriter implements IngestSink {
       input: this.isOld(o.ts) ? null : (o.input ?? null),
       status: o.status ?? null,
     });
+    // A failed edit changed nothing.
+    if (o.kind === "tool_error" || o.kind === "tool_rejected") this.sFailedLines.run({ id: o.id });
+  }
+
+  editLines(e: EditLinesRecord): void {
+    if (e.added == null) this.sFailedLines.run({ id: e.toolId });
+    else this.sLines.run({ id: e.toolId, added: e.added, removed: e.removed ?? 0 });
   }
 
   /** Whether a record is older than the detail kept. */

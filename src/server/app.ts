@@ -8,14 +8,17 @@ import { budgetAlerts, budgetStatus, limitAlerts, takeNew } from "../core/budget
 import { activePlans, type LimitReport, LimitsCache } from "../core/limits.ts";
 import { localIdentity } from "../core/paths.ts";
 import { BUILTIN_PRICES_VERSION, PriceBook } from "../core/pricing.ts";
-import { recomputeCosts } from "../core/ingest/writer.ts";
+import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
 import { redactStored } from "../core/redact.ts";
 import { Queries } from "../core/queries.ts";
 import { compact, type DbSize, dbSize, trimDetail, trimDue } from "../core/retention.ts";
 import { notify } from "./notify.ts";
+import { type CursorSyncState, syncCursor, syncState } from "../core/cursorSync.ts";
 
 /** How often plan limits are read in the background, for the history on the plans view. */
 const LIMIT_POLL_MS = 5 * 60_000;
+/** How often the Cursor sync looks whether it's due (every 6 hours, or after a backoff, see cursorSync.ts). */
+const CURSOR_CHECK_MS = 10 * 60_000;
 /** Only the plans used this recently are asked about: a quiet machine asks nobody. */
 const LIMIT_ACTIVE_MS = 30 * 60_000;
 
@@ -36,6 +39,9 @@ export class App {
   private listeners = new Set<(e: AppEvent) => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private limitTimer: ReturnType<typeof setInterval> | null = null;
+  private cursorTimer: ReturnType<typeof setInterval> | null = null;
+  /** The Cursor sync in flight, shared by the timer and Sync now. */
+  private cursorSyncing: Promise<CursorSyncState> | null = null;
   /** Plan-limit readings, shared by the API and the background poll so providers are asked sparingly. */
   readonly limits = new LimitsCache();
   /** The database file's identity on disk when it was opened, to notice a sync client replacing it. */
@@ -173,13 +179,39 @@ export class App {
     this.limitTimer = setInterval(() => {
       this.pollLimits().catch((err) => console.error("[limits]", err));
     }, LIMIT_POLL_MS);
+    // Only with the user's opt-in: the sync itself checks the setting, and asks cursor.com only when due.
+    const cursor = () => void this.syncCursor().catch((err) => console.error("[cursor]", err));
+    this.cursorTimer = setInterval(cursor, CURSOR_CHECK_MS);
+    if (this.cfg.cursorSync) cursor();
   }
 
   stopBackgroundScan(): void {
     if (this.timer) clearInterval(this.timer);
     if (this.limitTimer) clearInterval(this.limitTimer);
+    if (this.cursorTimer) clearInterval(this.cursorTimer);
+    this.cursorTimer = null;
     this.timer = null;
     this.limitTimer = null;
+  }
+
+  /**
+   * Syncs Cursor usage from cursor.com when it's due, or right away with `force` (Settings → Sync now). Does nothing
+   * while the sync is off. Open windows hear about new rows like after a scan.
+   */
+  syncCursor(force = false): Promise<CursorSyncState> {
+    if (this.cursorSyncing) return this.cursorSyncing;
+    const { host } = this.identity;
+    const last = syncState(this.db, host).syncedAt;
+    this.cursorSyncing = syncCursor(this.db, host, () => new DbWriter(this.db, this.prices, this.identity), { enabled: this.cfg.cursorSync, force })
+      .then((state) => {
+        if (state.syncedAt !== last && state.added > 0)
+          this.emit({ type: "scan", result: { filesSeen: 0, filesParsed: 1, usageRows: state.added, prompts: 0, tools: 0, errors: [], durationMs: 0 } });
+        return state;
+      })
+      .finally(() => {
+        this.cursorSyncing = null;
+      });
+    return this.cursorSyncing;
   }
 
   /** Reads the limits of the plans in use, which keeps them in the history. */

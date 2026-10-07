@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { importCursorCsv } from "../core/ingest/cursor.ts";
+import { type CursorSyncState, syncState } from "../core/cursorSync.ts";
 import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
 import { branchDetail, branches } from "../core/branches.ts";
+import { LINES_DIMS, lines, linesSeries, sessionLines } from "../core/changes.ts";
 import { drift } from "../core/drift.ts";
 import { friction } from "../core/friction.ts";
 import { parseSettings } from "../core/config.ts";
@@ -44,6 +46,11 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   });
+}
+
+/** What Settings shows about the Cursor sync: times, rows and a fixed code, nothing about the login. */
+function cursorSyncStatus(app: App, s: CursorSyncState) {
+  return { enabled: app.cfg.cursorSync, syncedAt: s.syncedAt, added: s.added, triedAt: s.triedAt, code: s.code, nextAt: s.nextAt };
 }
 
 function error(message: string, status = 400): Response {
@@ -255,8 +262,15 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           return json(q.calendar(f));
         case "/api/sessions":
           return json(q.sessions(f, { sort: sp.get("sort") ?? undefined, limit: pageLimit(sp), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
-        case "/api/session":
-          return json(q.sessionDetail(sp.get("id") ?? ""));
+        case "/api/session": {
+          const id = sp.get("id") ?? "";
+          const detail = q.sessionDetail(id);
+          return json({ ...detail, lines: sessionLines(app.db, id, detail.totals?.cost ?? 0) });
+        }
+        case "/api/lines":
+          return json(lines(app.db, f, sp.has("dim") ? pick(sp.get("dim"), LINES_DIMS, "model") : undefined));
+        case "/api/lines/series":
+          return json(linesSeries(app.db, f, pick(sp.get("bucket"), BUCKETS, "day")));
         case "/api/prompts":
           return json(q.prompts(f, { sort: sp.get("sort") ?? undefined, limit: pageLimit(sp), offset: Number(sp.get("offset") ?? 0), q: sp.get("q") ?? undefined }));
         case "/api/prompts/stats":
@@ -301,6 +315,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           app.sendAlerts(result.reports).catch((err) => console.error("[alerts]", err));
           return json({ ...result, active: active ?? null });
         }
+        case "/api/cursor/sync":
+          return json(cursorSyncStatus(app, syncState(app.db, app.identity.host)));
         case "/api/budgets": {
           const b = app.cfg.budgets;
           return json({ config: b, items: budgetStatus(app.db, b, app.identity.user) });
@@ -328,6 +344,9 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           const result = await app.scanNow(sp.get("full") === "1");
           return json(result);
         }
+        case "/api/cursor/sync":
+          // Sync now: asks cursor.com right away, unless it asked to wait or the sync is off.
+          return json(cursorSyncStatus(app, await app.syncCursor(true)));
         case "/api/import/cursor": {
           const text = await req.text();
           const writer = new DbWriter(app.db, app.priceBook(), app.identity);

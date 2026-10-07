@@ -1,5 +1,6 @@
 import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
+import { countLines, diffLines, type LineCount, numberedDiffLines, sumLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
 /**
@@ -61,6 +62,31 @@ function filePaths(raw: string): string[] {
     .filter((p) => p && !URI_RE.test(p))
     .map((p) => p.replace(/:\d+(-\d*)?$/, ""))
     .filter((p) => p !== "." && p !== ".." && !p.endsWith("/"));
+}
+
+/**
+ * The lines an edit or write changes, from its arguments. omp's edit takes a patch whose new lines start with "+" (what
+ * it replaces is only in the result), pi's the old and new text. A write counts its content as added.
+ */
+export function piEditLines(tool: string, args: Record<string, any>): LineCount | null {
+  if (tool === "write") return { added: countLines(args.content), removed: 0 };
+  if (tool !== "edit") return null;
+  if (typeof args.input === "string") {
+    let added = 0;
+    for (const line of args.input.split("\n")) if (line.startsWith("+")) added++;
+    return { added, removed: 0 };
+  }
+  if (Array.isArray(args.edits)) return sumLines(args.edits.map((e: any) => diffLines(e?.oldText, e?.newText))) ?? { added: 0, removed: 0 };
+  return diffLines(args.oldText, args.newText);
+}
+
+/** The exact lines from an edit's result: the diff of each file it changed, or a deleted file's old text. */
+function resultLines(details: unknown): LineCount | null {
+  if (!details || typeof details !== "object") return null;
+  const d = details as Record<string, any>;
+  const one = (f: Record<string, any>): LineCount | null =>
+    f?.op === "delete" && !f.diff ? { added: 0, removed: countLines(f.oldText) } : numberedDiffLines(f?.diff);
+  return Array.isArray(d.perFileResults) ? sumLines(d.perFileResults.map(one)) : one(d);
 }
 
 function textOf(content: unknown): string | null {
@@ -224,6 +250,8 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
             kind,
             ...failureOf(kind, tool, error, call.input, ctx.promptTextLimit),
           });
+          const lines = kind === "tool_ok" && tool === "edit" ? resultLines(m.details) : null;
+          if (lines) sink.editLines?.({ toolId: id, ...lines });
           continue;
         }
         if (m.role !== "assistant") continue;
@@ -241,6 +269,8 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
           // One row per call; a patch over several files adds a row for each further file.
           const callId = harness === "pi" && c.id ? `pi:${c.id}` : `${sessionId}:${c.id ?? `${entry}:${i}`}`;
           if (c.id) rememberCall((state.calls ??= {}), callId, c.name, inputSummary(c.arguments, ctx.promptTextLimit) ?? (ctx.promptTextLimit > 0 ? (files[0] ?? null) : null));
+          // Only a call on a file: omp's write also sends to its own devices (xd://lsp, …).
+          const lines = files.length ? piEditLines(c.name, c.arguments ?? {}) : null;
           (files.length ? files : [null]).forEach((filePath, n) =>
             sink.tool({
               id: n === 0 ? callId : `${callId}:f${n}`,
@@ -254,6 +284,10 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
               filePath,
               skill: state.skill,
               agent,
+              model: typeof m.model === "string" ? m.model : state.model,
+              // A further file's row counts as an edit of its own, its lines on the first.
+              linesAdded: lines ? (n === 0 ? lines.added : 0) : null,
+              linesRemoved: lines ? (n === 0 ? lines.removed : 0) : null,
             }),
           );
         }

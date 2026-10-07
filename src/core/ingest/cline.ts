@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
+import { countLines, type LineCount, searchReplaceLines, unifiedDiffLines } from "./lines.ts";
 import type { OpencodeFlavor } from "./opencode.ts";
 import { type IngestSink, num, type Provider, truncate } from "./types.ts";
 
@@ -257,16 +258,21 @@ export function ingestClineTask(task: ClineTask, sink: IngestSink, opts: { promp
       if (m.partial) continue;
       let tool = m.ask === "command" ? "execute_command" : m.ask === "use_mcp_server" ? "use_mcp_tool" : "tool";
       let filePath: string | null = null;
+      let lines: LineCount | null = null;
       if (m.ask === "tool" || m.say === "tool") {
         try {
           const t = JSON.parse(m.text ?? "{}");
           if (typeof t.tool === "string") tool = t.tool;
           if (typeof t.path === "string") filePath = t.path;
+          lines = clineEditLines(tool, t);
         } catch {
           /* not JSON: keep the generic name */
         }
       }
-      sink.tool({ id: `${sessionId}:${ts}:${m.type}`, usageId: null, sessionId, promptId, provider, ts, project, tool, filePath, skill: null, agent });
+      sink.tool({
+        id: `${sessionId}:${ts}:${m.type}`, usageId: null, sessionId, promptId, provider, ts, project, tool, filePath, skill: null, agent,
+        linesAdded: lines?.added ?? null, linesRemoved: lines?.removed ?? null,
+      });
     }
   }
 
@@ -341,6 +347,25 @@ export function clineSessionFiles(root: string): { sessionId: string; agentId: s
     }
   }
   return out;
+}
+
+/**
+ * The lines an edit changes: a written file's content, or the SEARCH/REPLACE blocks (or unified diff) it applies. Cline
+ * 4 names the tool it called (write_to_file, replace_in_file), the task folders the approval they asked for
+ * (newFileCreated, editedExistingFile, appliedDiff).
+ */
+export function clineEditLines(tool: string, input: Record<string, any>): LineCount | null {
+  switch (tool) {
+    case "write_to_file":
+    case "newFileCreated":
+      return { added: countLines(input.content), removed: 0 };
+    case "replace_in_file":
+    case "editedExistingFile":
+    case "appliedDiff":
+      return searchReplaceLines(input.diff) ?? unifiedDiffLines(input.diff) ?? { added: 0, removed: 0 };
+    default:
+      return null;
+  }
 }
 
 const USER_INPUT_RE = /^\s*<user_input[^>]*>([\s\S]*?)<\/user_input>\s*$/;
@@ -429,7 +454,11 @@ export function ingestClineSession(
       const input = c.input ?? {};
       calls.set(String(c.id), { name: String(c.name), input });
       const path = typeof input.path === "string" ? input.path : typeof input.file_path === "string" ? input.file_path : null;
-      sink.tool({ id: cl(String(c.id)), usageId, sessionId, promptId, provider: "cline", ts, project, tool: String(c.name), filePath: path, skill: null, agent });
+      const lines = clineEditLines(String(c.name), input);
+      sink.tool({
+        id: cl(String(c.id)), usageId, sessionId, promptId, provider: "cline", ts, project, tool: String(c.name), filePath: path, skill: null, agent, model,
+        linesAdded: lines?.added ?? null, linesRemoved: lines?.removed ?? null,
+      });
     }
     const x = m.metrics;
     if (!x || ts <= opts.legacyUntil) continue;

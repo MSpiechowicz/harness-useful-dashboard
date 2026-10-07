@@ -30,6 +30,7 @@
     tools: { key: string; calls: number }[];
     files: { key: string; calls: number }[];
     children: { id: string; agent: string | null; title: string | null; tokens: number; cost: number }[];
+    lines: { added: number; removed: number; changed: number; files: number; costPer100: number | null };
   }
 
   const d = useFetch<Detail>(() => `/api/session${qs({ id })}`);
@@ -96,11 +97,20 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <!-- Five tiles: the last one two columns wide on small screens, so both rows are full. -->
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Kpi label={t("col.cost")} amount={tot?.cost} format={usd} hint={costHint} />
         <Kpi label={t("col.tokens")} amount={tot?.tokens} format={compact} hint={`${t("tok.output")}: ${compact(tot?.output)}`} />
         <Kpi label={t("kpi.messages")} amount={tot?.messages} format={compact} hint={s?.parent ? t("detail.subagentOf", { name: s.parent.title ?? t("sessions.parent") }) : count(d.data.prompts.length, "common.prompt", "common.prompts")} />
         <Kpi label={t("kpi.cacheHit")} amount={hit} format={(v) => percent(v, 1)} hint={t("kpi.cacheHitHint", { n: compact(tot?.cacheRead) })} />
+        <div class="col-span-2 lg:col-span-1">
+          <Kpi
+            label={t("lines.kpi")}
+            amount={d.data.lines.changed}
+            format={compact}
+            hint={d.data.lines.changed ? t("lines.addedRemoved", { added: compact(d.data.lines.added), removed: compact(d.data.lines.removed) }) : t("lines.none")}
+          />
+        </div>
       </div>
 
       {#if d.data.timeline.length}<CallCharts rows={d.data.timeline} prompts={d.data.prompts.length > 1 ? promptNo : undefined} />{/if}

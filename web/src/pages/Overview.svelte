@@ -17,7 +17,7 @@
   import BreakdownTable from "../components/BreakdownTable.svelte";
   import BudgetBar from "../components/BudgetBar.svelte";
   import { type ActivityDay, activityStats, daySpan, spanMonths } from "../lib/activity.ts";
-  import { apiUrl, settled, useFetch, type Breakdown, type Summary, type Tip, type TimeSeries } from "../lib/api.svelte.ts";
+  import { apiUrl, settled, useFetch, type Breakdown, type Lines, type Summary, type Tip, type TimeSeries } from "../lib/api.svelte.ts";
   import { breakdownItems, heatMax, seriesLabel, weekHeatmap } from "../lib/charts.ts";
   import { bucketLabel, compact, integer, metricValue, percent, trimmed, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
@@ -29,6 +29,7 @@
   let group = $state<Group>("type");
 
   const summary = useFetch<Summary>(() => apiUrl("/api/summary"));
+  const lines = useFetch<Lines>(() => apiUrl("/api/lines"));
   // Token-type split always counts tokens; other groupings follow the global metric.
   const series = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: store.bucket, group, metric: group === "type" ? "tokens" : store.metric }));
   const spark = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: store.bucket, group: "none", metric: store.metric }));
@@ -74,14 +75,16 @@
 
 <div class="flex flex-col gap-5">
   <PageHeader title={t("nav.overview")} subtitle={t("app.tagline")} />
-  <ViewGate ready={settled(summary, series, spark, projects, models, providers, heat, calendar, tips)}>
+  <ViewGate ready={settled(summary, lines, series, spark, projects, models, providers, heat, calendar, tips)}>
 
     {#if empty}
       <div class="card"><Empty /></div>
     {:else}
       <!-- KPI row -->
-      <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <div class="col-span-2 md:col-span-1 xl:col-span-2">
+      <!-- Six tiles: two rows of three, one row on very wide screens with the first tile twice as wide. On phones the
+           first and last span both columns, so every row is full at each width and no hint is cut short. -->
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-7">
+        <div class="col-span-2 md:col-span-1 2xl:col-span-2">
           <Kpi
             label={store.metric === "cost" ? t("kpi.cost") : t("kpi.tokens")}
             value="…"
@@ -108,6 +111,16 @@
         <Kpi label={t("kpi.sessions")} value="…" amount={s?.sessions} format={compact} current={s?.sessions} previous={s?.previous?.sessions} hint={s ? t("kpi.perActiveDay", { v: trimmed(s.sessions / days) }) : undefined} />
         <Kpi label={t("kpi.prompts")} value="…" amount={s?.prompts} format={compact} current={s?.prompts} previous={s?.previous?.prompts} hint={s ? t("kpi.perSession", { v: trimmed(s.prompts / Math.max(s.sessions, 1)) }) : undefined} />
         <Kpi label={t("kpi.cacheHit")} value="…" amount={s?.cacheHitRate} format={(v) => percent(v, 1)} hint={s ? `${t("kpi.costPerPrompt")}: ${usd(s.costPerPrompt)}` : undefined} />
+        <!-- What the spend bought: lines changed, with the cost per 100 of them rather than a change on the period before. -->
+        <div class="col-span-2 md:col-span-1">
+          <Kpi
+            label={t("lines.kpi")}
+            value="…"
+            amount={lines.data?.total.changed}
+            format={compact}
+            hint={lines.data ? (lines.data.total.costPer100 != null ? t("lines.per100", { v: usd(lines.data.total.costPer100) }) : t("lines.none")) : undefined}
+          />
+        </div>
       </div>
 
       <BudgetBar />

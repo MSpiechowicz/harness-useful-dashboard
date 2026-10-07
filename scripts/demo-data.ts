@@ -89,6 +89,17 @@ const TOOLS = [
 ];
 
 /**
+ * The lines an Edit or Write changed. Worked out from the response's output and the call's place rather than drawn, so
+ * the rest of the demo stays as it was: longer answers make bigger edits, and a Write adds a whole file. Zed logs no
+ * edit text, so its edits count none.
+ */
+function demoLines(tool: string, output: number, k: number): { linesAdded: number; linesRemoved: number } | null {
+  if (tool === "Edit") return { linesAdded: 1 + ((output * (k + 3)) % 37), linesRemoved: (output * (k + 7)) % 19 };
+  if (tool === "Write") return { linesAdded: 20 + (output % 160), linesRemoved: 0 };
+  return null;
+}
+
+/**
  * What a failed call said, per tool, and what it was given. Drawn from a generator of its own, so the rest of the
  * picture stays the same as before failures had reasons.
  */
@@ -274,7 +285,7 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
       for (let k = 0; k < tools; k++) {
         const tool = pick(TOOLS, TOOLS.map((x) => x.w));
         const filePath = tool.file ? `${project.path}/${pick(project.files)}` : null;
-        w.tool({ id: `${usageId}:t${k}`, usageId, sessionId, promptId, provider, ts, project: project.path, tool: tool.name, filePath, skill, agent: "main" });
+        w.tool({ id: `${usageId}:t${k}`, usageId, sessionId, promptId, provider, ts, project: project.path, tool: tool.name, filePath, skill, agent: "main", ...(provider !== "zed" ? demoLines(tool.name, output, k) : null) });
         const roll = rand();
         const kind = roll < (drifting ? 0.11 : 0.04) ? "tool_error" : roll < (drifting ? 0.12 : 0.05) ? "tool_rejected" : "tool_ok";
         w.outcome({ id: `${usageId}:t${k}`, provider, sessionId, ts, project: project.path, model, agent: "main", effort, kind, ...demoFailure(kind, tool.name, filePath) });

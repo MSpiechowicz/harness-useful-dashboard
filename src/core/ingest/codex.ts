@@ -1,5 +1,6 @@
 import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
+import { patchLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
 interface CodexState {
@@ -266,6 +267,8 @@ export const codexParser: LineParser<CodexState> = {
           const failed = p.type === "exec_command_end" ? num(p.exit_code) !== 0 : p.type === "patch_apply_end" ? p.success === false : !!p.result?.Err;
           const kind = failed ? "tool_error" : "tool_ok";
           const call = codexCall(p, p.type);
+          // A patch that didn't apply changed nothing: its call's lines are dropped.
+          if (failed && p.type === "patch_apply_end" && p.call_id) sink.editLines?.({ toolId: `codex:${state.threadId}:${p.call_id}:0`, added: null, removed: null });
           sink.outcome?.({
             ...outcome,
             id: `codex:${state.threadId}:${p.call_id ?? `o${offset}`}:end`,
@@ -349,6 +352,9 @@ export const codexParser: LineParser<CodexState> = {
         const inner = p.name === "exec" ? [...args.matchAll(TOOL_CALL_RE)].map((m) => m[1]!) : [];
         const toolNames = inner.length ? inner : [p.name ?? p.type];
         const files = [...args.matchAll(PATCH_FILE_RE)].map((m) => m[1]!.trim());
+        // The lines of every patch in the call go on its first apply_patch row (the command that ran one, else).
+        const lines = patchLines(args);
+        const linesAt = Math.max(0, toolNames.indexOf("apply_patch"));
         toolNames.forEach((tool, i) => {
           sink.tool({
             id: `codex:${state.threadId}:${callId}:${i}`,
@@ -362,6 +368,9 @@ export const codexParser: LineParser<CodexState> = {
             filePath: tool === "apply_patch" && files.length ? files[0]! : null,
             skill: state.skill,
             agent,
+            model: state.model,
+            linesAdded: i === linesAt ? (lines?.added ?? null) : null,
+            linesRemoved: i === linesAt ? (lines?.removed ?? null) : null,
           });
         });
         files.slice(1).forEach((f, i) =>
@@ -377,6 +386,10 @@ export const codexParser: LineParser<CodexState> = {
             filePath: f,
             skill: state.skill,
             agent,
+            model: state.model,
+            // An edit of its own, its lines counted on the call's first row.
+            linesAdded: lines ? 0 : null,
+            linesRemoved: lines ? 0 : null,
           }),
         );
       }

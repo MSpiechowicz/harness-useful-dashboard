@@ -10,7 +10,7 @@
   import Switch from "../components/Switch.svelte";
   import ThemeToggle from "../components/ThemeToggle.svelte";
   import { getJson, send } from "../lib/api.svelte.ts";
-  import { decimal } from "../lib/format.ts";
+  import { decimal, relative } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
   import { checkUpdate, installUpdate, updater } from "../lib/update.svelte.ts";
@@ -30,6 +30,7 @@
     sources: Record<DirsKey, string[]> & { enabled: Record<SourceKey, boolean> };
     limits: Record<LimitKey, boolean>;
     budgets?: { daily: number | null; monthly: number | null; projects: Record<string, number>; notify: boolean; limitAlerts: boolean };
+    cursorSync?: boolean;
   }
   interface Settings {
     config: Config;
@@ -81,6 +82,32 @@
   let builtinRules = $state<Rule[]>([]);
   let showBuiltin = $state(false);
   let importMsg = $state<string | null>(null);
+  // The Cursor sync's last outcome, as the server keeps it. Codes only, never cursor.com's own words.
+  type CursorCode = "not-signed-in" | "expired" | "unauthorized" | "rate-limited" | "unreachable" | "failed";
+  interface CursorSync {
+    enabled: boolean;
+    syncedAt: number | null;
+    added: number;
+    code: CursorCode | null;
+    nextAt: number | null;
+  }
+  let cursorSync = $state<CursorSync | null>(null);
+  let cursorSyncing = $state(false);
+  const CURSOR_CODE: Record<CursorCode, string> = {
+    "not-signed-in": "settings.cursorSync.notSignedIn",
+    expired: "settings.cursorSync.expired",
+    unauthorized: "settings.cursorSync.unauthorized",
+    "rate-limited": "settings.cursorSync.rateLimited",
+    unreachable: "settings.cursorSync.unreachable",
+    failed: "settings.cursorSync.failed",
+  };
+  const cursorStatus = $derived.by(() => {
+    const s = cursorSync;
+    if (!s?.enabled) return null;
+    if (s.code) return { bad: true, text: t(CURSOR_CODE[s.code] as "settings.cursorSync.failed", { when: relative(s.nextAt) }) };
+    if (s.syncedAt) return { bad: false, text: t("settings.cursorSync.ok", { when: relative(s.syncedAt), n: s.added }) };
+    return { bad: false, text: t("settings.cursorSync.never") };
+  });
   // Budgets: 0 in a field means no cap. Project rows are edited here and saved together.
   let budgetDaily = $state(0);
   let budgetMonthly = $state(0);
@@ -169,6 +196,9 @@
     getJson<{ project: { value: string; label: string }[] }>("/api/filters")
       .then((f) => (projectOptions = f.project.map((o) => ({ value: o.value, label: o.label }))))
       .catch(() => {});
+    getJson<CursorSync>("/api/cursor/sync")
+      .then((s) => (cursorSync = s))
+      .catch(() => {});
     const rules = await getJson<Rule[]>("/api/pricing");
     userRules = rules.filter((r) => r.source === "user");
     builtinRules = rules.filter((r) => r.source === "builtin");
@@ -198,6 +228,7 @@
         detailRetentionMonths: Number(retention),
         sources: { ...Object.fromEntries(SOURCES.filter((src) => knownDirs.has(src.dirs)).map((src) => [src.dirs, clean(dirs[src.key])])), enabled: cfg.sources.enabled },
         limits: cfg.limits,
+        cursorSync: !!cfg.cursorSync,
         ...extra,
       });
       apply(r);
@@ -260,6 +291,24 @@
     } finally {
       busy = false;
     }
+  }
+
+  /** Syncs right away. Turning the sync on runs one too, so the status shows whether Cursor's login works. */
+  async function syncCursor() {
+    cursorSyncing = true;
+    try {
+      cursorSync = await send<CursorSync>("/api/cursor/sync");
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      cursorSyncing = false;
+    }
+  }
+
+  async function toggleCursorSync() {
+    await save();
+    if (cfg?.cursorSync) await syncCursor();
+    else cursorSync = await getJson<CursorSync>("/api/cursor/sync").catch(() => cursorSync);
   }
 
   async function importCursor(e: Event) {
@@ -454,6 +503,15 @@
           <PathList bind:paths={dirs[src.key]} disabled={!cfg!.sources.enabled[src.key]} />
         </SettingRow>
       {/each}
+      <SettingRow label={t("settings.cursorSync")} hint={t("settings.cursorSyncHint")} wide>
+        {#snippet lead()}<Switch bind:checked={cfg!.cursorSync} label={t("settings.cursorSync")} onchange={toggleCursorSync} />{/snippet}
+        <div class="flex w-full flex-wrap items-center gap-3">
+          <button class="btn w-fit" onclick={syncCursor} disabled={!cfg.cursorSync || cursorSyncing || busy}>
+            {#if cursorSyncing}<Loader size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}{t("settings.cursorSyncNow")}
+          </button>
+          {#if cursorStatus}<span class="text-xs" class:text-bad={cursorStatus.bad} class:text-ink-2={!cursorStatus.bad}>{cursorStatus.text}</span>{/if}
+        </div>
+      </SettingRow>
       <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} wide>
         {#snippet lead()}<span class="block w-7"></span>{/snippet}
         <div class="flex w-full flex-wrap items-center gap-3">

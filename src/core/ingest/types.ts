@@ -73,6 +73,24 @@ export interface ToolRecord {
   spawnRef?: string | null;
   /** A call that starts a subagent: what it asked of it (its short description, else the start of its prompt). */
   brief?: string | null;
+  /** The model that made the call, when the harness says (else the model of its usage row). */
+  model?: string | null;
+  /**
+   * An edit's lines added and removed, worked out from its input (ingest/lines.ts). A call over several files carries
+   * them all on its first row. Null for calls that change no file.
+   */
+  linesAdded?: number | null;
+  linesRemoved?: number | null;
+}
+
+/**
+ * An edit's exact line counts, from the diff its result carries: they replace the count taken from its input. Null
+ * for an edit that failed and so changed nothing, when its outcome is not keyed like the call (Codex).
+ */
+export interface EditLinesRecord {
+  toolId: string;
+  added: number | null;
+  removed: number | null;
 }
 
 /** A plan-limit reading a harness logged: how much of a limit window was used and when it resets. */
@@ -138,6 +156,7 @@ export interface IngestSink {
   limit?(l: LimitRecord): void;
   responseMeta?(m: ResponseMetaRecord): void;
   outcome?(o: OutcomeRecord): void;
+  editLines?(e: EditLinesRecord): void;
 }
 
 export interface FileContext {

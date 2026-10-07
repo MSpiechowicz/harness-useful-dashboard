@@ -2,7 +2,7 @@
 
 **Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the sessions that
 Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, pi, omp (oh-my-pi), Zed and the Cline, Roo Code and Kilo
-Code extensions already write to disk, plus Cursor usage exports. It stores
+Code extensions already write to disk, plus Cursor usage from cursor.com or its CSV export. It stores
 everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
@@ -14,6 +14,7 @@ everything in a local SQLite database and shows clear, interactive charts of whe
 - **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
 - **Cache analytics**: hit rate over time, money saved by caching, and what cache writes cost
 - **Branches**: what each piece of work cost, per git branch, with its sessions and the files it changed
+- **Lines changed**: the lines the agents' edits added and removed, per project, branch, model, provider, session and day, and what 100 changed lines cost
 - **Time**: how long the agents worked, how many sessions ran at once, and the cost per active hour
 - **Friction**: failed and declined tool calls and interrupted prompts, by tool, model and session
 - **Plans**: what each subscription is worth at API prices against what you pay, and how full its limits got over time
@@ -144,6 +145,9 @@ harness-dashboard scan [--full]  # ingest once and exit (cron-friendly)
 harness-dashboard import-cursor usage.csv
 harness-dashboard config get | path | set <key> <value>
 harness-dashboard mcp            # MCP server over stdio, started by an agent
+harness-dashboard today          # today's cost and usage against yesterday
+harness-dashboard report --range 7d --by model --csv
+harness-dashboard limits --check # exit code 10 near a plan limit or budget, 11 at it
 ```
 
 The dashboard runs a small local server on `127.0.0.1` and opens it in a chrome-less **app window** when a
@@ -167,7 +171,7 @@ through it sees the page but none of your data.
 | Kilo Code | its folder in VS Code's extension storage (`…/globalStorage/kilocode.kilo-code`, also the forks) and `~/.local/share/kilo` | task folders of Kilo Code up to 5.x and Kilo Code 7's database: a row per model call with the cost Kilo worked out |
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/` (or `$GEMINI_CLI_HOME/.gemini`) | per-response usage with cached and thinking tokens, prompts, tools and their errors, subagent chats, session summaries as titles. The project comes from the folder's `.project_root`. Chats from before v0.39 (one JSON file each) are read too |
 | GitHub Copilot CLI | `~/.copilot/session-state/<id>/events.jsonl` (or `$COPILOT_HOME`) | prompts, tools and their errors, and the tokens and premium requests per model and agent that Copilot writes when a session ends, as one row per model on that moment. Copilot logs no tokens per call, and a session that never ended cleanly has none. Billed through GitHub Copilot, cost shown at API prices |
-| Cursor | CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Import the CSV in **Settings** or with `import-cursor` |
+| Cursor | cursor.com, asked with the login the Cursor editor keeps on the machine (`~/.config/Cursor/User/globalStorage/state.vscdb`, macOS `~/Library/Application Support/Cursor/…`, Windows `%APPDATA%\Cursor\…`), or the CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Turn on **Settings → Sync Cursor usage** (off by default) to fetch it every 6 hours, or import the CSV in **Settings** or with `import-cursor`. A row per model call with its tokens and the cost Cursor charged. A call that is both synced and imported counts once. The login is read from Cursor's database each time (read-only), never stored, logged or renewed, and sent to cursor.com only. An expired one is reported until Cursor signs in again |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
 bytes appended since the last one, so rescans take milliseconds.
@@ -222,6 +226,84 @@ scan, every 30 seconds while the dashboard runs. A session not scanned yet shows
 
 "Today" starts at local midnight and counts your own usage, by the user name in **Settings**.
 
+### Reports from the command line
+
+Three commands print reports for a terminal, a script or cron. They read the database only, never scan and make no
+network request, so the numbers are as fresh as the last scan of the running dashboard. Add `--scan` to scan the local
+logs first, which writes the database.
+
+```sh
+harness-dashboard today                              # today against yesterday, top projects and models, budgets, Claude 5h limit
+harness-dashboard report                             # cost by project, last 30 days
+harness-dashboard report --range 7d --by model
+harness-dashboard report --from 2026-09-01 --to 2026-09-30 --by day --csv > september.csv
+harness-dashboard report --by week --provider claude --json
+harness-dashboard limits                             # latest plan-limit readings and budgets
+harness-dashboard limits --check --warn 90
+```
+
+```text
+Today  Wed, Oct 7, 2026
+
+          Today  Yesterday  Change
+Cost      $6.19     $42.40    -85%
+Tokens    17.3M       134M    -87%
+Sessions      3         17    -82%
+Prompts      12         61    -80%
+
+Top projects
+  docs-site    $3.40  55%
+  billing-api  $1.71  28%
+  storefront   $1.08  17%
+```
+
+| Option | What it does |
+|---|---|
+| `--range <range>` | `today`, `7d`, `30d`, `month` or `all`. Default `30d` for `report` |
+| `--from`, `--to <date>` | A custom range in local days (`YYYY-MM-DD`), both included. Use instead of `--range` |
+| `--by <what>` | `report` rows: `project` (default), `model`, `provider`, `user`, `day`, `week` or `month` |
+| `--provider`, `--project`, `--model`, `--user` | Only this harness, project (path or folder name), model or user |
+| `--json`, `--csv` | Machine-readable output. CSV is for `report` only |
+| `--limit <n>` | Rows in the `report` table, 25 by default, `0` for all. JSON and CSV always have every row |
+| `--check` | `limits` ends with an exit code (below) |
+| `--warn <percent>` | The `--check` threshold for plan limits and budgets, 80 by default |
+| `--no-color` | Plain text. Setting `NO_COLOR` or piping the output does the same |
+| `--db <path>` | Read this database instead of the configured one |
+
+JSON and CSV rows use the field names of the dashboard's table export: `cost` in USD at API-equivalent prices, token
+counts, `share` as a fraction, times in ISO 8601. CSV follows RFC 4180, without a byte order mark, and text a
+spreadsheet would run as a formula starts with an apostrophe.
+
+`limits --check` exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Every plan limit and budget is below `--warn` |
+| `10` | A plan limit or budget is at or above `--warn` |
+| `11` | A plan limit or budget is used up (100% or more) |
+| `2` | No plan-limit reading from the last 15 minutes and nothing above the threshold, or bad options or no database |
+
+Plan-limit readings come from the running dashboard, which refreshes them every few minutes. Budgets are the caps from
+**Settings → Budgets and alerts**.
+
+A weekly report to a file, every Monday at 8:00 (crontab):
+
+```sh
+0 8 * * 1  harness-dashboard report --range 7d --by project --csv > "$HOME/reports/ai-usage-$(date +\%F).csv"
+```
+
+A mark in the shell prompt (bash) when a limit or budget is close:
+
+```sh
+limit_mark() {
+  harness-dashboard limits --check >/dev/null 2>&1
+  code=$?
+  [ "$code" = 10 ] && printf '[limit near] '
+  [ "$code" = 11 ] && printf '[limit hit] '
+}
+PS1='$(limit_mark)'"$PS1"
+```
+
 ### MCP server
 
 `harness-dashboard mcp` is a local [MCP](https://modelcontextprotocol.io) server over stdio. With it an agent can check
@@ -234,8 +316,8 @@ writes, or makes a network request, and needs no sign-in. It finds the database 
 |---|---|
 | `usage_summary` | Cost, tokens by type, sessions, prompts and cache hit rate for a range (`today`, `7d`, `30d`, `month`, `all` or `custom`), compared with the period before |
 | `breakdown` | Cost and tokens by project, model, provider, user, skill or agent |
-| `session_cost` | One session with its subagents. Without an id, the current Claude Code session when known, else the latest one in the working directory |
-| `branch_cost` | A git branch over its whole life. Without a name, the branch checked out in the working directory |
+| `session_cost` | One session with its subagents, and the lines their edits changed. Without an id, the current Claude Code session when known, else the latest one in the working directory |
+| `branch_cost` | A git branch over its whole life, with the lines changed on it and the cost per 100 of them. Without a name, the branch checked out in the working directory |
 | `limits` | The latest stored plan-limit readings, with the share used, the reset time and their age |
 | `budget_status` | Today's and this month's spend against the caps from **Settings → Budgets and alerts** |
 | `failures` | Why tool calls failed, the tools that fail most, and the latest errors as stored (redacted, shortened) |
@@ -389,7 +471,7 @@ databases, and older ones after one Compact, give the space that trimming frees 
 - **Cost** is the *API-equivalent* list price: what the tokens would cost on the provider's API.
   Subscription plans (Claude Max, ChatGPT Pro, Cursor Pro) don't bill this way, but it is the fairest way to compare.
   Cache writes are priced at 1.25× input (5-minute TTL) or 2× input (1-hour TTL), and cache reads use the model's read price.
-  Claude fast mode is priced at 2×. Cursor rows use the cost from the export when present, and Cline, Roo Code and Kilo
+  Claude fast mode is priced at 2×. Cursor rows use the cost Cursor charged when there is one, and Cline, Roo Code and Kilo
   Code rows the cost the extension worked out for each call (Roo and Kilo don't always record the model). Model ids are priced as the
   model they name, whatever router they came through: `github-copilot/claude-opus-5.5` is `claude-opus-5-5`.
   GitHub Copilot doesn't bill per token either. Its calls keep their premium-request count, shown per plan or account
@@ -404,6 +486,15 @@ databases, and older ones after one Compact, give the space that trimming frees 
 - **Skills.** From the moment a skill is invoked until the next prompt, calls count toward that skill. Claude Code invokes
   one with the `Skill` tool or a `/skill` command, Codex with `$skill`, an injected `<skill>` block or a `SKILL.md` read,
   and omp by reading `skill://<name>`.
+- **Lines changed.** Counted per edit tool call from what the harness logged: Claude Code's Edit, MultiEdit, Write and
+  NotebookEdit, Codex's `apply_patch`, omp's and pi's edit and write, OpenCode's and Kilo Code's edit, write and patch,
+  Gemini CLI's replace and write_file, Copilot CLI's edit and create, and Cline's and Roo Code's file edits. Where the
+  result carries the diff (Claude Code, omp, OpenCode, Gemini CLI) the count is exact, as `git diff --numstat` would
+  count it. Otherwise it comes from the call's input: replaced text is diffed line by line and a new file counts all its
+  lines. Only edits that succeeded count. Edits by hand, by shell commands (`sed -i`, scripts, `git checkout`) and in
+  Zed and Cursor are not counted, a file a Codex patch deletes counts no removed lines, and a file written over counts
+  its new content when the harness logs no diff. Only the numbers are stored, never the text. **Cost per 100 lines** is
+  all spend in the same scope divided by the lines changed, so planning, reviews and questions count too.
 - **Users.** The name in **Settings → Your name** (defaults to your OS user name), stored with every row this machine
   ingests.
 - **Model drift.** Each model's last 7 days are compared with the 28 days before, one measure at a time: output token speed,
@@ -442,10 +533,12 @@ state-changing requests (CSRF protection), and sends a Content-Security-Policy t
 app. Updates install only when the binary matches the release's `checksums.txt`. Prompt text is stored truncated to 2,000 characters so you can recognise
 expensive prompts. API keys, tokens and private keys in it are replaced with `[redacted]` before anything is stored. Set **Stored prompt length** to `0` to keep no prompt text at all.
 
-The app makes two kinds of outbound request, and never sends your usage in either: the optional update check against
-the GitHub releases API, and, while the Live view is open, the plan-limit checks: with Anthropic, ChatGPT and GitHub,
-each with the login Claude Code, OpenCode or pi keeps for it and sent to that provider only, and through `omp usage`.
-Every plan-limit source can be switched off in **Settings**.
+The app makes three kinds of outbound request, and never sends your usage in any: the optional update check against
+the GitHub releases API, while the Live view is open the plan-limit checks: with Anthropic, ChatGPT and GitHub,
+each with the login Claude Code, OpenCode or pi keeps for it and sent to that provider only, and through `omp usage`,
+and, only once you turn on **Sync Cursor usage**, a request to cursor.com every 6 hours for your Cursor usage, with the
+login the Cursor editor keeps on this machine. That login stays in Cursor: it is read when needed and sent to cursor.com
+only. Every plan-limit source and the Cursor sync can be switched off in **Settings**.
 
 ## Development
 

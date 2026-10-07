@@ -11,7 +11,7 @@
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
-  import { compact, entityLabel, percent, relative, usd } from "../lib/format.ts";
+  import { compact, entityLabel, integer, percent, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { navigate } from "../lib/state.svelte.ts";
 
@@ -29,6 +29,9 @@
     firstTs: number;
     lastTs: number;
     days: number;
+    added: number;
+    removed: number;
+    costPer100: number | null;
   }
   interface BranchesData {
     total: { cost: number; tokens: number };
@@ -96,7 +99,7 @@
   const maxSize = $derived(Math.max(1, ...sizes.map((x) => x.n)));
   const branchName = (r: { branch: string }) => (r.branch === NONE ? t("branches.noBranch") : r.branch);
 
-  type Sort = "cost" | "tokens" | "sessions" | "days" | "recent" | "branch";
+  type Sort = "cost" | "tokens" | "sessions" | "days" | "lines" | "per100" | "recent" | "branch";
   let sort = $state<Sort>("cost");
   let asc = $state(false);
   const SORTS = $derived<{ value: Sort; label: string; asc?: boolean }[]>([
@@ -104,12 +107,16 @@
     { value: "tokens", label: t("col.tokens") },
     { value: "sessions", label: t("col.sessions") },
     { value: "days", label: t("branches.days") },
+    { value: "lines", label: t("col.lines") },
+    { value: "per100", label: t("col.per100"), asc: true },
     { value: "recent", label: t("sort.recent") },
     { value: "branch", label: t("col.branch"), asc: true },
   ]);
   const sorted = $derived.by(() => {
     const dir = asc ? 1 : -1;
-    const value = (r: BranchRow) => (sort === "recent" ? r.lastTs : sort === "branch" ? r.branch : r[sort]);
+    // A branch without lines has no cost per line: it sorts last either way.
+    const value = (r: BranchRow) =>
+      sort === "recent" ? r.lastTs : sort === "branch" ? r.branch : sort === "lines" ? r.added + r.removed : sort === "per100" ? (r.costPer100 ?? (asc ? Infinity : -Infinity)) : r[sort];
     return [...rows].sort((a, b) => {
       const x = value(a);
       const y = value(b);
@@ -120,7 +127,7 @@
     if (sort === k) asc = !asc;
     else {
       sort = k;
-      asc = k === "branch";
+      asc = k === "branch" || k === "per100";
     }
   }
   const dir = (k: Sort) => (sort === k ? (asc ? "ascending" : "descending") : undefined);
@@ -198,6 +205,8 @@
               <col class="w-24" />
               <col class="w-24" />
               <col class="w-24" />
+              <col class="w-28" />
+              <col class="w-28" />
               <col class="w-44" />
               <col class="w-28" />
             </colgroup>
@@ -208,6 +217,8 @@
                 <SortTh num label={t("col.sessions")} sort={dir("sessions")} onclick={() => sortBy("sessions")} />
                 <SortTh num label={t("branches.days")} sort={dir("days")} onclick={() => sortBy("days")} />
                 <SortTh num label={t("col.tokens")} sort={dir("tokens")} onclick={() => sortBy("tokens")} />
+                <SortTh num label={t("col.lines")} sort={dir("lines")} onclick={() => sortBy("lines")} />
+                <SortTh num label={t("col.per100")} sort={dir("per100")} onclick={() => sortBy("per100")} />
                 <SortTh num label={t("col.cost")} sort={dir("cost")} onclick={() => sortBy("cost")} />
                 <SortTh num label={t("col.lastSeen")} sort={dir("recent")} onclick={() => sortBy("recent")} />
               </tr>
@@ -225,6 +236,8 @@
                   <td class="num text-ink-2">{compact(r.sessions)}</td>
                   <td class="num text-ink-2">{r.days}</td>
                   <td class="num text-ink-2">{compact(r.tokens)}</td>
+                  <td class="num text-ink-2" title={t("lines.addedRemoved", { added: integer(r.added), removed: integer(r.removed) })}>{r.added + r.removed ? compact(r.added + r.removed) : "–"}</td>
+                  <td class="num text-ink-2">{r.costPer100 != null ? usd(r.costPer100) : "–"}</td>
                   <td class="num"><ValueBar label={usd(r.cost)} fraction={r.cost / maxTop} /></td>
                   <td class="num text-ink-2">{relative(r.lastTs)}</td>
                 </tr>

@@ -3,6 +3,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
+import { countLines, diffLines, type LineCount, patchLines, sumLines, unifiedDiffLines } from "./lines.ts";
 import { type IngestSink, num, type Provider, truncate } from "./types.ts";
 
 /**
@@ -72,6 +73,33 @@ function outputExcludesReasoning(version: string | null): boolean {
 
 /** Files an apply_patch names: "*** Add File: path", "*** Update File: path", "*** Delete File: path". */
 const PATCH_FILE_RE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
+const counted = (x: Record<string, any> | null | undefined): LineCount | null =>
+  typeof x?.additions === "number" && typeof x.deletions === "number" ? { added: x.additions, removed: x.deletions } : null;
+
+/**
+ * The lines a finished edit, write or patch changed. Its metadata counts them when the version does (`filediff`,
+ * `files`) or carries the diff, else they come from its input: the old and new text, a patch, or a file's content.
+ */
+export function opencodeEditLines(tool: string, input: Record<string, any>, metadata: Record<string, any> | null | undefined): LineCount | null {
+  const md = metadata ?? {};
+  switch (tool) {
+    case "edit":
+      return counted(md.filediff) ?? unifiedDiffLines(md.diff) ?? diffLines(input.oldString, input.newString);
+    case "multiedit":
+      return (
+        sumLines((Array.isArray(md.results) ? md.results : []).map((r: any) => counted(r?.filediff ?? r?.metadata?.filediff))) ??
+        sumLines((Array.isArray(input.edits) ? input.edits : []).map((e: any) => diffLines(e?.oldString, e?.newString))) ?? { added: 0, removed: 0 }
+      );
+    case "write":
+      return counted(md.filediff) ?? { added: countLines(input.content), removed: 0 };
+    case "apply_patch":
+    case "patch":
+      return sumLines((Array.isArray(md.files) ? md.files : []).map(counted)) ?? unifiedDiffLines(md.diff) ?? patchLines(input.patchText);
+    default:
+      return null;
+  }
+}
+
 /** A subagent session is titled "<description> (@<agent> subagent)". */
 const SUBAGENT_TITLE_RE = /\(@([\w.-]+) subagent\)\s*$/;
 /** A message's errors that are a failed model request (not the user stopping it, nor the reply running too long). */
@@ -228,6 +256,8 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
               ? [input.filePath as string]
               : [];
         const callId = oc(typeof p.callID === "string" ? p.callID : p.id);
+        // A failed edit changed nothing.
+        const lines = status === "completed" ? opencodeEditLines(p.tool, input, p.state?.metadata) : null;
         (files.length ? files : [null]).forEach((filePath, n) =>
           sink.tool({
             id: n === 0 ? callId : `${callId}:f${n}`,
@@ -242,6 +272,10 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
             skill: promptId ? (skillOf.get(promptId) ?? null) : null,
             agent,
             spawnRef,
+            model,
+            // A further file's row counts as an edit of its own, its lines on the first.
+            linesAdded: lines ? (n === 0 ? lines.added : 0) : null,
+            linesRemoved: lines ? (n === 0 ? lines.removed : 0) : null,
           }),
         );
       }

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
+import { countLines, diffLines, hunkLines, type LineCount, sumLines } from "./lines.ts";
 import {
   type FileContext,
   type IngestSink,
@@ -100,6 +101,35 @@ export function parseClaudePrompt(content: unknown): ParsedPrompt | null {
   return { text, command: null };
 }
 
+/** The lines an edit tool call changes, from its input. Its result's patch, when there is one, is exact (below). */
+export function claudeEditLines(tool: string, input: Record<string, any>): LineCount | null {
+  switch (tool) {
+    case "Edit":
+      // replace_all changes every occurrence: the result's patch counts them.
+      return diffLines(input.old_string, input.new_string);
+    case "MultiEdit":
+      return sumLines((Array.isArray(input.edits) ? input.edits : []).map((e: any) => diffLines(e?.old_string, e?.new_string))) ?? { added: 0, removed: 0 };
+    case "Write":
+      return { added: countLines(input.content), removed: 0 };
+    case "NotebookEdit":
+      // A replaced cell's old source isn't in the call: only its new lines count.
+      return { added: input.edit_mode === "delete" ? 0 : countLines(input.new_source), removed: 0 };
+    default:
+      return null;
+  }
+}
+
+/**
+ * The exact lines from an edit's result (`toolUseResult`): the hunks of its `structuredPatch`, or, for a new file
+ * (whose patch is empty), its content.
+ */
+function resultLines(r: unknown): LineCount | null {
+  if (!r || typeof r !== "object") return null;
+  const x = r as Record<string, any>;
+  if (typeof x.filePath !== "string" || !Array.isArray(x.structuredPatch)) return null;
+  return hunkLines(x.structuredPatch) ?? (x.type === "create" ? { added: countLines(x.content), removed: 0 } : null);
+}
+
 /** The tools that start a subagent (Task in older Claude Code versions). */
 const SPAWN_TOOLS = new Set(["Agent", "Task"]);
 /** A text input's first line, if it has any words. */
@@ -189,6 +219,7 @@ export const claudeParser: LineParser<ClaudeState> = {
           const blocks: ContentBlock[] = Array.isArray(rec.message?.content) ? rec.message.content : [];
           const texts = typeof rec.message?.content === "string" ? [rec.message.content as string] : blocks.filter((b) => b?.type === "text").map((b) => b.text ?? "");
           const outcome = { provider: "claude" as const, sessionId, ts, project: rec.cwd ?? null, model: state.model ?? null, agent, effort: state.effort ?? null };
+          const results = blocks.filter((b) => b?.type === "tool_result" && b.tool_use_id);
           for (const b of blocks) {
             if (b?.type !== "tool_result" || !b.tool_use_id) continue;
             const id = `claude:${b.tool_use_id}`;
@@ -196,6 +227,9 @@ export const claudeParser: LineParser<ClaudeState> = {
             const error = b.is_error ? resultText(b.content).trim() : "";
             const kind = !b.is_error ? "tool_ok" : REJECTED_RE.test(error) ? "tool_rejected" : "tool_error";
             sink.outcome?.({ ...outcome, id, kind, ...failureOf(kind, call.tool, error, call.input, ctx.promptTextLimit) });
+            // The record's toolUseResult belongs to its only result.
+            const lines = kind === "tool_ok" && results.length === 1 ? resultLines(rec.toolUseResult) : null;
+            if (lines) sink.editLines?.({ toolId: id, ...lines });
           }
           if (texts.some((t) => t.trim().startsWith("[Request interrupted by user"))) {
             sink.outcome?.({ ...outcome, id: `${sessionId}:${rec.uuid ?? ts}:interrupt`, kind: "interrupt" });
@@ -308,6 +342,7 @@ export const claudeParser: LineParser<ClaudeState> = {
         }
         const toolName = block.name.startsWith("mcp__") ? block.name.split("__").slice(0, 2).join("__") : block.name;
         const toolId = `claude:${block.id ?? `${usageId}:${block.name}`}`;
+        const lines = claudeEditLines(block.name, input);
         // Streaming repeats a response's lines: a call seen again is still the one waiting.
         if (block.id) rememberCall((state.calls ??= {}), toolId, block.name, inputSummary(input, ctx.promptTextLimit));
         sink.tool({
@@ -325,6 +360,9 @@ export const claudeParser: LineParser<ClaudeState> = {
           spawnRef: sidechain ? state.spawnRef : null,
           // A subagent's run is named by what the call that started it asked of it.
           brief: SPAWN_TOOLS.has(block.name) ? truncate(firstText(input.description) ?? firstText(input.prompt), Math.min(200, ctx.promptTextLimit)) : null,
+          model: msg.model ?? null,
+          linesAdded: lines?.added ?? null,
+          linesRemoved: lines?.removed ?? null,
         });
         if (block.name === "Skill" && typeof input.skill === "string") state.skill = input.skill;
       }

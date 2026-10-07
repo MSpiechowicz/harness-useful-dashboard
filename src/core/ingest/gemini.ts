@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { failureOf, inputSummary } from "../failures.ts";
+import { countLines, diffLines, type LineCount, unifiedDiffLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
 /**
@@ -74,6 +75,22 @@ function textOf(content: unknown): string | null {
   const parts = Array.isArray(content) ? content : content && typeof content === "object" ? [content] : [];
   const text = parts.filter((p) => typeof p?.text === "string").map((p) => p.text as string).join("\n");
   return text || null;
+}
+
+/** The lines an edit or write changes, from its arguments. */
+export function geminiEditLines(tool: string, args: Record<string, unknown>): LineCount | null {
+  if (tool === "write_file") return { added: countLines(args.content), removed: 0 };
+  if (tool === "replace" || tool === "edit") return diffLines(args.old_string, args.new_string);
+  return null;
+}
+
+/** The exact lines from an edit's result: the model's lines of its diff stat, else its diff. */
+function resultLines(display: unknown): LineCount | null {
+  if (!display || typeof display !== "object") return null;
+  const d = display as Record<string, any>;
+  const stat = d.diffStat;
+  if (typeof stat?.model_added_lines === "number" && typeof stat.model_removed_lines === "number") return { added: stat.model_added_lines, removed: stat.model_removed_lines };
+  return unifiedDiffLines(d.fileDiff);
 }
 
 /** What a finished tool call said: the error, else its output. */
@@ -157,7 +174,12 @@ function record(rec: Record<string, any>, ctx: { promptTextLimit: number }, stat
     const path = [args.file_path, args.absolute_path, args.path].find((p) => typeof p === "string") as string | undefined;
     const id = `${sessionId}:${call.id}`;
     const at = parseTs(call.timestamp) ?? ts;
-    sink.tool({ id, usageId, sessionId, promptId: state.promptId, provider: "gemini", ts: at, project: state.cwd, tool: call.name, filePath: FILE_TOOLS.has(call.name) ? (path ?? null) : null, skill: null, agent });
+    const lines = geminiEditLines(call.name, args);
+    sink.tool({
+      id, usageId, sessionId, promptId: state.promptId, provider: "gemini", ts: at, project: state.cwd, tool: call.name,
+      filePath: FILE_TOOLS.has(call.name) ? (path ?? null) : null, skill: null, agent, model,
+      linesAdded: lines?.added ?? null, linesRemoved: lines?.removed ?? null,
+    });
     const kind = call.status === "success" ? "tool_ok" : call.status === "error" ? "tool_error" : call.status === "cancelled" ? "tool_rejected" : null;
     if (!kind) continue; // still running: its outcome comes with a later copy
     sink.outcome?.({
@@ -171,6 +193,8 @@ function record(rec: Record<string, any>, ctx: { promptTextLimit: number }, stat
       kind,
       ...failureOf(kind, call.name, kind === "tool_ok" ? "" : resultText(call), inputSummary(args, ctx.promptTextLimit), ctx.promptTextLimit),
     });
+    const exact = kind === "tool_ok" && lines ? resultLines(call.resultDisplay) : null;
+    if (exact) sink.editLines?.({ toolId: id, ...exact });
   }
 
   const t = rec.tokens;

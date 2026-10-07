@@ -8,9 +8,9 @@
   import PageHeader from "../components/PageHeader.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import UsageChart from "../components/UsageChart.svelte";
-  import { apiUrl, settled, useFetch, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
-  import { cumulativeChart, seriesLabel, trendAverage } from "../lib/charts.ts";
-  import { bucketLabel, dayWithYear, days, metricValue } from "../lib/format.ts";
+  import { apiUrl, settled, useFetch, type LinesSeries, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
+  import { cumulativeChart, seriesLabel, timeSeriesChart, trendAverage } from "../lib/charts.ts";
+  import { bucketLabel, compact, dayWithYear, days, integer, metricValue, usd } from "../lib/format.ts";
   import { seriesRows } from "../lib/export.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
@@ -52,6 +52,17 @@
     return { peakDay: buckets[peak]!, peakValue: d[peak]!, avg, projection };
   });
 
+  // Lines the agents changed per bucket: one neutral series, as the cost on a branch's page.
+  const lines = useFetch<LinesSeries>(() => apiUrl("/api/lines/series", { bucket: effBucket }));
+  const linesTotal = $derived(lines.data ? lines.data.added.reduce((a, b) => a + b, 0) + lines.data.removed.reduce((a, b) => a + b, 0) : 0);
+  const linesOption = $derived.by(() => {
+    void store.dark;
+    const x = lines.data;
+    if (!x?.buckets.length || !linesTotal) return null;
+    const data = x.buckets.map((_, i) => (x.added[i] ?? 0) + (x.removed[i] ?? 0));
+    return timeSeriesChart({ buckets: x.buckets, series: [{ key: "all", name: t("lines.kpi"), data }] }, { dim: "none", metric: "tokens", bucket: effBucket, kind });
+  });
+
   const groups: Group[] = ["none", "type", "provider", "model", "project", "user", "agent", "skill"];
   function groupLabel(g: Group): string {
     if (g === "none") return t("trends.none");
@@ -62,7 +73,7 @@
 
 <div class="flex flex-col gap-5">
   <PageHeader title={t("trends.title")} subtitle={t("trends.subtitle")} />
-  <ViewGate ready={settled(series, daily, summary, cumulative)}>
+  <ViewGate ready={settled(series, daily, summary, cumulative, lines)}>
 
     {#if summary.data && summary.data.messages === 0}
       <div class="card"><Empty /></div>
@@ -119,6 +130,33 @@
         {/snippet}
         {#if cumOption}<Chart option={cumOption} height={300} dim={cumulative.loading} />{/if}
       </Card>
+
+      {#if linesOption && lines.data}
+        {@const x = lines.data}
+        <Card title={t("lines.title")} subtitle={t("lines.trendHint")} exportName="lines-over-time" exportRows={() => x.buckets.map((b, i) => ({ bucket: b, added: x.added[i], removed: x.removed[i], cost: x.cost[i] }))}>
+          {#snippet actions()}
+            <span class="text-2xl font-semibold tracking-tight text-ink tabular">{compact(linesTotal)}</span>
+          {/snippet}
+          {#snippet table()}
+            <table class="data">
+              <thead><tr><th>{t("col.time")}</th><th class="num">{t("col.added")}</th><th class="num">{t("col.removed")}</th><th class="num">{t("col.cost")}</th><th class="num">{t("col.per100")}</th></tr></thead>
+              <tbody>
+                {#each x.buckets as b, i (b)}
+                  {@const changed = (x.added[i] ?? 0) + (x.removed[i] ?? 0)}
+                  <tr>
+                    <td>{bucketLabel(b, effBucket)}</td>
+                    <td class="num">{integer(x.added[i])}</td>
+                    <td class="num">{integer(x.removed[i])}</td>
+                    <td class="num">{usd(x.cost[i])}</td>
+                    <td class="num">{changed ? usd(((x.cost[i] ?? 0) / changed) * 100) : "–"}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/snippet}
+          <Chart option={linesOption} height={260} dim={lines.loading} />
+        </Card>
+      {/if}
     {/if}
   </ViewGate>
 </div>

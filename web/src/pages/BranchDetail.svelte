@@ -23,8 +23,9 @@
     projectLabel: string;
     longLived: boolean;
     totals: { tokens: number; cost: number; messages: number; sessions: number; prompts: number; firstTs: number | null; lastTs: number | null };
+    lines: { added: number; removed: number; files: number; costPer100: number | null };
     days: { buckets: string[]; cost: number[]; tokens: number[] };
-    sessions: { id: string; title: string | null; provider: string; tokens: number; cost: number; messages: number; prompts: number; subagents: number; firstTs: number; lastTs: number }[];
+    sessions: { id: string; title: string | null; provider: string; tokens: number; cost: number; messages: number; prompts: number; subagents: number; firstTs: number; lastTs: number; added: number; removed: number }[];
     models: { key: string; tokens: number; cost: number; messages: number }[];
     files: { key: string; edits: number }[];
   }
@@ -64,11 +65,20 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <!-- Five tiles: the last one two columns wide on small screens, so both rows are full. -->
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Kpi label={t("col.cost")} amount={tot?.cost} format={usd} hint={tot?.sessions ? t("branches.perSession", { cost: usd((tot.cost ?? 0) / tot.sessions) }) : undefined} />
         <Kpi label={t("col.tokens")} amount={tot?.tokens} format={compact} hint={t("prompts.calls", { n: compact(tot?.messages) })} />
         <Kpi label={t("col.sessions")} amount={tot?.sessions} format={compact} hint={`${compact(tot?.prompts)} ${t("col.prompts")}`} />
         <Kpi label={t("branches.days")} amount={activeDays} format={integer} hint={t("branches.over", { span: days(spanDays) })} />
+        <div class="col-span-2 lg:col-span-1">
+          <Kpi
+            label={t("lines.kpi")}
+            amount={d.data.lines.added + d.data.lines.removed}
+            format={compact}
+            hint={d.data.lines.costPer100 != null ? t("lines.per100", { v: usd(d.data.lines.costPer100) }) : t("lines.none")}
+          />
+        </div>
       </div>
 
       <Card title={t("branches.costByDay")} subtitle={t("branches.costByDayHint")}>
@@ -84,6 +94,7 @@
                   <th>{t("col.title")}</th>
                   <th class="num">{t("col.prompts")}</th>
                   <th class="num">{t("col.tokens")}</th>
+                  <th class="num">{t("col.lines")}</th>
                   <th class="num">{t("col.cost")}</th>
                   <th class="num">{t("col.lastSeen")}</th>
                 </tr>
@@ -100,6 +111,7 @@
                     </td>
                     <td class="num text-ink-2">{s.prompts}</td>
                     <td class="num text-ink-2">{compact(s.tokens)}</td>
+                    <td class="num text-ink-2" title={t("lines.addedRemoved", { added: integer(s.added), removed: integer(s.removed) })}>{s.added + s.removed ? compact(s.added + s.removed) : "–"}</td>
                     <td class="num"><ValueBar label={usd(s.cost)} fraction={s.cost / maxSession} /></td>
                     <td class="num text-ink-2">{relative(s.lastTs)}</td>
                   </tr>

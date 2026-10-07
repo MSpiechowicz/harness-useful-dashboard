@@ -6,6 +6,7 @@
   import DonutList from "../components/DonutList.svelte";
   import MixByWeek from "../components/MixByWeek.svelte";
   import Empty from "../components/Empty.svelte";
+  import LinesCard from "../components/LinesCard.svelte";
   import TableCard from "../components/TableCard.svelte";
   import Toggle from "../components/Toggle.svelte";
   import PageHeader from "../components/PageHeader.svelte";
@@ -146,6 +147,8 @@
         {/snippet}
       </TableCard>
       {#if dim === "skill"}<p class="text-xs text-muted">{t("breakdown.skillsHint")}</p>{/if}
+      <!-- Lines changed per model (which one changes code for the least), provider and project. -->
+      {#if dim === "model" || dim === "provider" || dim === "project"}<LinesCard {dim} />{/if}
       {#if dim === "provider" && billing.data?.length}
         <TableCard
           title={t("billing.title")}

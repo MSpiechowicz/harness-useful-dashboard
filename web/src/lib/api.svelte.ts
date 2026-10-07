@@ -172,6 +172,31 @@ export interface Breakdown {
   rows: BreakdownRow[];
 }
 
+/** Lines the agents' edits added and removed, and the cost per 100 of them (/api/lines). */
+export interface LineTotals {
+  added: number;
+  removed: number;
+  changed: number;
+  edits: number;
+  files: number;
+  cost: number;
+  costPer100: number | null;
+}
+export interface LineRow extends LineTotals {
+  key: string;
+  label: string;
+}
+export interface Lines {
+  total: LineTotals;
+  rows: LineRow[];
+}
+export interface LinesSeries {
+  buckets: string[];
+  added: number[];
+  removed: number[];
+  cost: number[];
+}
+
 export interface FilterOption {
   value: string;
   label: string;
