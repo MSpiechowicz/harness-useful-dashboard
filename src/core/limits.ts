@@ -488,12 +488,15 @@ function withDefaults(d: LimitDeps): Required<LimitDeps> {
 }
 
 /**
- * Network sources are asked sparingly, however often pages poll: a reading is kept for 2 minutes, "Refresh" asks
- * again only once it's a minute old, and a failure waits before the next try. When a provider says it's asked too
- * often, the wait starts at 5 minutes (or what it asks for) and doubles each time up to 30. Meanwhile the last good
- * reading is still shown.
+ * Network sources are asked sparingly, however often pages poll: a reading is kept for 5 minutes (a 5-hour window
+ * moves slowly, and Anthropic's usage endpoint answers "too often" quickly, more so beside Claude Code's own /usage),
+ * "Refresh" asks again only once it's a minute old, and a failure waits before the next try. When a provider says it's
+ * asked too often, the wait starts at 5 minutes (or what it asks for) and doubles each time up to 30. Meanwhile the last
+ * good reading is still shown: the one in memory, or after a restart the last one stored (see storedReports).
  */
-const FRESH_MS = 2 * 60_000;
+const FRESH_MS = 5 * 60_000;
+/** How old a stored reading may be to stand in for one that can't be taken now. */
+const STORED_MAX_AGE_MS = 6 * 60 * 60_000;
 const FORCE_AFTER_MS = 60_000;
 const RETRY_MS = 2 * 60_000;
 const RATE_LIMITED_MS = 5 * 60_000;
@@ -509,6 +512,36 @@ interface Cached {
   nextAt: number;
   /** Failures in a row, for the backoff. */
   failures: number;
+}
+
+/**
+ * The last readings this machine stored for a source, for when its provider can't be asked right now: the app just
+ * started (an update, a restart) and the first answer is "asked too often". Windows that have reset since are left out,
+ * their use is no longer known.
+ */
+export function storedReports(db: Database, host: string, source: LimitSource, now: number): LimitReport[] {
+  const rows = db
+    .query<
+      { key: string; provider: string; plan: string | null; windowId: string; windowMs: number | null; scope: string | null; label: string | null; used: number; resetsAt: number | null; observedAt: number },
+      [string, string, number]
+    >(
+      `SELECT report_key AS key, provider, plan, window_id AS windowId, window_ms AS windowMs, scope, label, used_fraction AS used,
+              resets_at AS resetsAt, observed_at AS observedAt
+       FROM limit_readings r
+       WHERE host = ? AND report_key LIKE ? AND observed_at >= ?
+         AND observed_at = (SELECT MAX(observed_at) FROM limit_readings x WHERE x.host = r.host AND x.report_key = r.report_key AND x.window_id = r.window_id)
+       ORDER BY report_key, window_ms`,
+    )
+    .all(host, `${source}:%`, now - STORED_MAX_AGE_MS);
+  const reports = new Map<string, LimitReport>();
+  for (const r of rows) {
+    if (r.resetsAt != null && r.resetsAt <= now) continue;
+    let rep = reports.get(r.key);
+    if (!rep) reports.set(r.key, (rep = { key: r.key, provider: r.provider, plan: r.plan, account: null, source, observedAt: r.observedAt, windows: [] }));
+    rep.observedAt = Math.min(rep.observedAt, r.observedAt);
+    rep.windows.push({ id: r.windowId, windowMs: r.windowMs, scope: r.scope, label: r.label, usedFraction: r.used, resetsAt: r.resetsAt });
+  }
+  return [...reports.values()].filter((r) => r.windows.length);
 }
 
 export class LimitsCache {
@@ -561,7 +594,7 @@ export class LimitsCache {
     for (const [source] of remote) {
       const c = this.cached.get(source);
       if (!on(source) || !c) continue;
-      reports.push(...c.reports);
+      reports.push(...(c.reports.length || !c.problem ? c.reports : storedReports(db, host, source, now)));
       // omp missing is not a problem worth showing: most people don't use it.
       if (c.problem && c.problem.code !== "not-installed") problems.push(c.problem);
     }

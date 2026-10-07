@@ -66,7 +66,7 @@ describe("Claude limits", () => {
 });
 
 describe("asking sparingly", () => {
-  test("a reading is kept for 2 minutes, and a 429 backs off while the last reading stays", async () => {
+  test("a reading is kept for 5 minutes, and a 429 backs off while the last reading stays", async () => {
     let now = NOW;
     let calls = 0;
     let status = 200;
@@ -92,7 +92,7 @@ describe("asking sparingly", () => {
     expect(calls).toBe(2);
 
     status = 429;
-    now += 3 * 60_000;
+    now += 6 * 60_000;
     const limited = await cache.get(db, ID.host, on);
     expect(calls).toBe(3);
     expect(limited.reports.map((r) => r.provider)).toEqual(["claude"]);
@@ -106,6 +106,34 @@ describe("asking sparingly", () => {
     const back = await cache.get(db, ID.host, on);
     expect(calls).toBe(4);
     expect(back.problems).toEqual([]);
+  });
+});
+
+describe("after a restart", () => {
+  test("a first answer of 'too often' shows the last stored reading, not nothing", async () => {
+    const db = memDb();
+    const resets = NOW + 2 * HOUR;
+    const make = (status: number) =>
+      new LimitsCache({
+        now: () => NOW,
+        home: "/home/me",
+        env: {},
+        platform: "linux",
+        readFile: (p: string) => (p === join("/home/me", ".claude", ".credentials.json") ? JSON.stringify({ claudeAiOauth: { accessToken: "t", expiresAt: NOW + 24 * HOUR } }) : null),
+        fetch: (async () =>
+          status === 200 ? Response.json({ five_hour: { utilization: 42, resets_at: new Date(resets).toISOString() } }) : new Response("", { status })) as unknown as typeof fetch,
+      });
+    const on = { claude: true, omp: false, codex: false };
+    // The app before the restart took a reading, which went into the history.
+    await make(200).get(db, ID.host, on);
+    // A new process (empty memory) is told to wait.
+    const after = await make(429).get(db, ID.host, on);
+    expect(after.problems.map((p) => p.code)).toEqual(["rate-limited"]);
+    expect(after.reports).toHaveLength(1);
+    expect(after.reports[0]!.windows.map((w) => [w.id, w.usedFraction])).toEqual([["five_hour", 0.42]]);
+    // Once that window has reset, its old use means nothing: no reading rather than a wrong one.
+    const later = new LimitsCache({ now: () => resets + 60_000, home: "/home/me", env: {}, platform: "linux", readFile: () => JSON.stringify({ claudeAiOauth: { accessToken: "t", expiresAt: resets + 24 * HOUR } }), fetch: (async () => new Response("", { status: 429 })) as unknown as typeof fetch });
+    expect((await later.get(db, ID.host, on)).reports).toEqual([]);
   });
 });
 

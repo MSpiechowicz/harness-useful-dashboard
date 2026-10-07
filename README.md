@@ -185,9 +185,9 @@ omp against whatever they billed a call through, read with their own logins.
 | Everything omp is logged in to | `omp usage --json`: Claude, ChatGPT/Codex, GitHub Copilot premium requests, Gemini and more |
 | Everything OpenCode or pi is logged in to | Their logins (`~/.local/share/opencode/auth.json`, `~/.pi/agent/auth.json`), each asked at its own provider: Anthropic for a Claude plan, ChatGPT for a Codex plan, GitHub for Copilot premium requests. Logins are never renewed, so an expired one is reported until the tool is used again |
 
-Each source can be switched off in **Settings → Plan limits**. Network sources are asked at most every 2 minutes. When a
+Each source can be switched off in **Settings → Plan limits**. Network sources are asked at most every 5 minutes. When a
 provider says it's asked too often, the dashboard waits at least 5 minutes (doubling up to 30) and keeps showing the
-last reading.
+last reading, also right after a restart, when that reading comes from the stored history.
 
 ### Claude Code status line
 
