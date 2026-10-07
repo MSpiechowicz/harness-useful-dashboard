@@ -139,6 +139,7 @@ export const pl: Record<MessageKey, string> = {
   "settings.labelsNow": "Oznacz teraz",
   "settings.labelsNowButton": "Oznacz teraz",
   "settings.labelsNowRunning": "Oznaczanie…",
+  "settings.labelsNowMissing": "{name} nie jest zainstalowany na tym komputerze. Zainstaluj go lub wybierz drugie CLI.",
   "settings.labelsStatus.never": "Jeszcze nie uruchomiono",
   "settings.labelsStatus.ok": "Ostatnie uruchomienie {when}: oznaczono {n}, bez etykiety {failed}. Dziś wysłano {sent} z {cap} sesji.",
   "settings.labelsStatus.cap": "Dzienny limit osiągnięty. Jutro ciąg dalszy.",

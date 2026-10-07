@@ -139,6 +139,7 @@ export const fr: Record<MessageKey, string> = {
   "settings.labelsNow": "Étiqueter maintenant",
   "settings.labelsNowButton": "Étiqueter maintenant",
   "settings.labelsNowRunning": "Étiquetage…",
+  "settings.labelsNowMissing": "{name} n'est pas installé sur cette machine. Installez-le ou choisissez l'autre CLI.",
   "settings.labelsStatus.never": "Pas encore lancé",
   "settings.labelsStatus.ok": "Dernière exécution {when} : {n} étiquetées, {failed} sans étiquette. Aujourd'hui {sent} sessions sur {cap} envoyées.",
   "settings.labelsStatus.cap": "Limite quotidienne atteinte. L'étiquetage reprend demain.",

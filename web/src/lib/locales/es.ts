@@ -139,6 +139,7 @@ export const es: Record<MessageKey, string> = {
   "settings.labelsNow": "Etiquetar ahora",
   "settings.labelsNowButton": "Etiquetar ahora",
   "settings.labelsNowRunning": "Etiquetando…",
+  "settings.labelsNowMissing": "{name} no está instalado en este equipo. Instálalo o elige la otra CLI.",
   "settings.labelsStatus.never": "Aún no se ha ejecutado",
   "settings.labelsStatus.ok": "Última ejecución {when}: {n} etiquetadas, {failed} sin etiqueta. Hoy se enviaron {sent} de {cap} sesiones.",
   "settings.labelsStatus.cap": "Límite diario alcanzado. Mañana se sigue.",

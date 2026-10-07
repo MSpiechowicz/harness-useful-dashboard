@@ -214,6 +214,8 @@
     const have = labelStatus?.available;
     return (["claude", "codex"] as const).map((v) => ({ value: v, label: have && !have[v] ? t("settings.labelsCliMissing", { name: CLI_NAMES[v] }) : CLI_NAMES[v] }));
   });
+  // The chosen CLI isn't on this machine: nothing to run, so Label now is off and says why.
+  const labelCliMissing = $derived(!!cfg?.labels && !!labelStatus && !labelStatus.available[cfg.labels.cli]);
   const labelLine = $derived.by(() => {
     const s = labelStatus;
     const l = cfg?.labels;
@@ -794,8 +796,8 @@
           <SettingRow label={t("settings.labelsCap")} hint={t("settings.labelsCapHint")}>
             <NumberField bind:value={cfg.labels.dailyCap} unit={t("settings.unit.sessions")} label={t("settings.labelsCap")} min={1} />
           </SettingRow>
-          <SettingRow label={t("settings.labelsNow")} hint={labelLine?.text}>
-            <button class="btn" onclick={labelNow} disabled={labelsRunning || busy || (labelStatus?.textLimit ?? 1) <= 0}>
+          <SettingRow label={t("settings.labelsNow")} hint={labelCliMissing ? t("settings.labelsNowMissing", { name: CLI_NAMES[cfg.labels.cli] }) : labelLine?.text}>
+            <button class="btn" onclick={labelNow} disabled={labelsRunning || busy || labelCliMissing || (labelStatus?.textLimit ?? 1) <= 0}>
               {#if labelsRunning}<Loader size={14} class="animate-spin" />{t("settings.labelsNowRunning")}{:else}<Tags size={14} />{t("settings.labelsNowButton")}{/if}
             </button>
           </SettingRow>

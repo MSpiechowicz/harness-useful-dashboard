@@ -139,6 +139,7 @@ export const de: Record<MessageKey, string> = {
   "settings.labelsNow": "Jetzt labeln",
   "settings.labelsNowButton": "Jetzt labeln",
   "settings.labelsNowRunning": "Label wird erstellt…",
+  "settings.labelsNowMissing": "{name} ist auf diesem Gerät nicht installiert. Installiere es oder wähle die andere CLI.",
   "settings.labelsStatus.never": "Noch nicht gelaufen",
   "settings.labelsStatus.ok": "Letzter Lauf {when}: {n} gelabelt, {failed} ohne Label. Heute {sent} von {cap} Sitzungen gesendet.",
   "settings.labelsStatus.cap": "Tageslimit erreicht. Morgen geht es weiter.",

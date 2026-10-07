@@ -137,6 +137,7 @@ export const en = {
   "settings.labelsNow": "Label now",
   "settings.labelsNowButton": "Label now",
   "settings.labelsNowRunning": "Labelling…",
+  "settings.labelsNowMissing": "{name} isn't installed on this machine. Install it or choose the other CLI.",
   "settings.labelsStatus.never": "Not run yet",
   "settings.labelsStatus.ok": "Last run {when}: {n} labelled, {failed} without a label. Today {sent} of {cap} sessions sent.",
   "settings.labelsStatus.cap": "Daily limit reached. Labelling continues tomorrow.",
