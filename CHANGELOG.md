@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.5...v1.19.0) (2026-10-07)
+
+
+### Features
+
+* Prometheus metrics endpoint and opt-in AI session labels ([512cd19](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/512cd19f8198f8f4ef3a7d508edaeeb979873d21))
+
 ## [1.18.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.4...v1.18.5) (2026-10-07)
 
 
