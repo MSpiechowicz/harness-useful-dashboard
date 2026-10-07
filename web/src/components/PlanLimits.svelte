@@ -21,7 +21,7 @@
     observedAt: number;
     windows: LimitWindow[];
   }
-  type Source = "claude" | "omp" | "codex" | "pi" | "opencode";
+  type Source = "claude" | "omp" | "codex" | "pi" | "opencode" | "copilot";
   export interface LimitsResult {
     reports: LimitReport[];
     problems: { source: Source; code: string; retryAt?: number }[];
@@ -76,7 +76,7 @@
 
   // A reading is only dated when it's old (Codex logs it only while in use): a fresh one needs no note.
   const STALE_MS = 5 * 60_000;
-  const PROBLEM_SOURCES = { claude: "Claude Code", omp: "omp", codex: "Codex", pi: "pi", opencode: "OpenCode" };
+  const PROBLEM_SOURCES = { claude: "Claude Code", omp: "omp", codex: "Codex", pi: "pi", opencode: "OpenCode", copilot: "Copilot CLI" };
 </script>
 
 {#snippet reset(w: LimitWindow)}

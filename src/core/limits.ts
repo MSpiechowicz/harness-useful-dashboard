@@ -11,10 +11,11 @@ import { recordReports } from "./plans.ts";
  *  - "codex": the readings Codex writes into its session logs, stored while ingesting. No network.
  *  - "pi", "opencode": the logins those harnesses keep (auth.json), each asked at its own provider: Anthropic for a
  *    Claude plan, ChatGPT for a Codex plan, GitHub for Copilot premium requests.
+ *  - "copilot": the login GitHub Copilot CLI keeps (its config file, else the OS keychain, else `gh`'s), asked at GitHub.
  * Credentials never leave this process except to their own provider, and errors carry fixed messages only.
  */
 
-export type LimitSource = "claude" | "omp" | "codex" | "pi" | "opencode";
+export type LimitSource = "claude" | "omp" | "codex" | "pi" | "opencode" | "copilot";
 
 export interface LimitWindow {
   id: string;
@@ -236,6 +237,52 @@ export function copilotWindows(body: Record<string, any>): LimitWindow[] {
   ];
 }
 
+/** GitHub's premium requests for the account a GitHub token belongs to. */
+async function askCopilot(d: Required<LimitDeps>, token: string): Promise<{ plan: string | null; windows: LimitWindow[] }> {
+  const body = await askProvider(d, "https://api.github.com/copilot_internal/user", { Authorization: `token ${token}` });
+  return { plan: typeof body.copilot_plan === "string" ? body.copilot_plan : null, windows: copilotWindows(body) };
+}
+
+/** A GitHub token as GitHub issues them: OAuth (gho_), user-to-server (ghu_), personal (ghp_, github_pat_). */
+const GITHUB_TOKEN = /^(?:gh[opsu]_|github_pat_)[A-Za-z0-9_]{20,}$/;
+
+/**
+ * The token of the login GitHub Copilot CLI keeps (it documents the order: keychain service "copilot-cli", the plaintext
+ * ~/.copilot/config.json when there is no keychain, then `gh auth token` as the last resort). Environment tokens are the
+ * CLI's own process settings, not a login, so they aren't read. Read-only, never stored or renewed.
+ */
+async function copilotLogin(d: Required<LimitDeps>): Promise<string | null> {
+  const dir = d.env.COPILOT_HOME ?? join(d.home, ".copilot");
+  const raw = d.readFile(join(dir, "config.json"));
+  if (raw != null) {
+    try {
+      // The file may start with // comment lines.
+      const cfg = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "")) as { copilot_tokens?: Record<string, unknown>; last_logged_in_user?: { host?: string; login?: string } };
+      const tokens = cfg.copilot_tokens && typeof cfg.copilot_tokens === "object" ? cfg.copilot_tokens : {};
+      const last = cfg.last_logged_in_user;
+      const own = last ? tokens[`${last.host}:${last.login}`] : null;
+      const found = [own, ...Object.values(tokens)].find((t): t is string => typeof t === "string" && GITHUB_TOKEN.test(t));
+      if (found) return found;
+    } catch {}
+  }
+  const clean = (out: string | null) => (out && GITHUB_TOKEN.test(out.trim()) ? out.trim() : null);
+  const keychain =
+    d.platform === "darwin" ? await d.run(["security", "find-generic-password", "-s", "copilot-cli", "-w"], 5000)
+    : d.platform === "linux" ? await d.run(["secret-tool", "lookup", "service", "copilot-cli"], 5000)
+    : null;
+  return clean(keychain) ?? clean(await d.run(["gh", "auth", "token"], 5000));
+}
+
+/** GitHub Copilot CLI's premium requests, asked with its own login. */
+export async function copilotLimits(deps: LimitDeps = {}): Promise<LimitReport | null> {
+  const d = withDefaults(deps);
+  const token = await copilotLogin(d);
+  if (!token) return null;
+  const { plan, windows } = await askCopilot(d, token);
+  if (!windows.length) return null;
+  return { key: "copilot:login", provider: "copilot", plan, account: null, source: "copilot", observedAt: d.now(), windows };
+}
+
 /** The ChatGPT account a Codex login belongs to, from the login token's claims when not stored beside it. */
 function chatgptAccount(token: string): string | null {
   try {
@@ -315,8 +362,7 @@ export async function loginLimits(source: "pi" | "opencode", deps: LimitDeps = {
       const l = storedLogin(auth["github-copilot"]);
       const token = l?.refresh ?? l?.access;
       if (!token) return null;
-      const body = await askProvider(d, "https://api.github.com/copilot_internal/user", { Authorization: `token ${token}` });
-      return { plan: typeof body.copilot_plan === "string" ? body.copilot_plan : null, windows: copilotWindows(body) };
+      return await askCopilot(d, token);
     }],
   ];
   for (const [provider, ask] of asks) {
@@ -447,11 +493,12 @@ export interface ActivePlan {
 /**
  * The plan a call counts against: Claude Code against the Claude plan of its login, Codex against the ChatGPT plan it
  * logs, and omp, pi and OpenCode against whatever they billed the call through (a Claude or ChatGPT login, Copilot),
- * read with their own logins. Cursor reports none.
+ * read with their own logins, and Copilot CLI against the GitHub Copilot plan of its login. Cursor reports none.
  */
 export function planFor(provider: string, billing: string | null): ActivePlan | null {
   if (provider === "claude") return { provider: "claude", source: "claude" };
   if (provider === "codex") return { provider: "codex", source: "codex" };
+  if (provider === "copilot") return { provider: "copilot", source: "copilot" };
   if ((provider === "omp" || provider === "pi" || provider === "opencode") && billing) {
     // OpenCode names its ChatGPT login "openai".
     const plan = provider === "opencode" && billing === "openai" ? "codex" : (OMP_PROVIDERS[billing] ?? billing);
@@ -558,6 +605,7 @@ export class LimitsCache {
     const remote: [LimitSource, () => Promise<Loaded>][] = [
       ["claude", async () => ({ reports: ((r) => (r ? [r] : []))(await claudeLimits(this.deps)), problem: null })],
       ["omp", async () => ({ reports: await ompLimits(this.deps), problem: null })],
+      ["copilot", async () => ({ reports: ((r) => (r ? [r] : []))(await copilotLimits(this.deps)), problem: null })],
       ["pi", () => loginLimits("pi", this.deps)],
       ["opencode", () => loginLimits("opencode", this.deps)],
     ];
@@ -611,7 +659,15 @@ export class LimitsCache {
         console.error("[limits] could not keep the readings:", e);
       }
     }
-    const shown = active ? reports.filter((r) => active.some((a) => a.provider === r.provider && a.source === r.source)) : reports;
+    const picked = active ? reports.filter((r) => active.some((a) => a.provider === r.provider && a.source === r.source)) : reports;
+    // One GitHub account that several harnesses are logged in to answers each of them alike: it's shown once.
+    const seen = new Set<string>();
+    const shown = picked.filter((r) => {
+      if (r.provider !== "copilot") return true;
+      const w = r.windows[0];
+      const same = `${r.plan}|${w?.used}|${w?.limit}|${w?.resetsAt}`;
+      return !seen.has(same) && !!seen.add(same);
+    });
     return { reports: shown, problems, fetchedAt: now };
   }
 }

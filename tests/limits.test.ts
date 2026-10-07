@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { scan } from "../src/core/ingest/index.ts";
 import { DbWriter } from "../src/core/ingest/writer.ts";
-import { activePlans, chatgptWindows, claudeLimits, claudeWindows, codexLimits, copilotWindows, LimitsCache, loginLimits, ompReports, planFor } from "../src/core/limits.ts";
+import { activePlans, chatgptWindows, claudeLimits, claudeWindows, codexLimits, copilotLimits, copilotWindows, LimitsCache, loginLimits, ompReports, planFor } from "../src/core/limits.ts";
 import { PriceBook } from "../src/core/pricing.ts";
 import { Queries } from "../src/core/queries.ts";
 import { codexMeta, codexTokenCount, codexTurn, ID, memDb, tempDir, testConfig, writeJsonl } from "./helpers.ts";
@@ -329,5 +329,98 @@ describe("live usage", () => {
     expect(live.series).toEqual([{ key: "codex", data: [0, 0, 1000, 500, 0] }]);
     expect(live.sessions.map((s) => [s.id, s.tokens])).toEqual([["codex:thread-b", 1600]]);
     expect(live.lastTs).toBe(Date.parse("2026-10-05T11:59:30.000Z"));
+  });
+});
+
+describe("Copilot CLI limits", () => {
+  const TOKEN = "gho_" + "a".repeat(36);
+  const body = { copilot_plan: "individual_pro", quota_reset_date: "2026-11-01", quota_snapshots: { premium_interactions: { entitlement: 300, remaining: 75, unlimited: false } } };
+  const config = (tokens: Record<string, string> = { "https://github.com:me": TOKEN }) => JSON.stringify({ last_logged_in_user: { host: "https://github.com", login: "me" }, copilot_tokens: tokens });
+  const make = (opts: { file?: string | null; platform?: NodeJS.Platform; ran?: string[][]; out?: Record<string, string | null>; status?: number; seen?: { url: string; init: RequestInit }[]; now?: () => number }) => ({
+    now: opts.now ?? (() => NOW),
+    home: "/home/me",
+    env: {},
+    platform: opts.platform ?? ("linux" as const),
+    readFile: (p: string) => (p === join("/home/me", ".copilot", "config.json") ? (opts.file ?? null) : null),
+    run: async (cmd: string[]) => (opts.ran?.push(cmd), opts.out?.[cmd[0]!] ?? null),
+    fetch: (async (url: string, init: RequestInit) => {
+      opts.seen?.push({ url, init });
+      return opts.status && opts.status !== 200 ? new Response("provider text", { status: opts.status }) : Response.json(body);
+    }) as unknown as typeof fetch,
+  });
+
+  test("reads the token from Copilot CLI's config file and asks GitHub with it in a header only", async () => {
+    const seen: { url: string; init: RequestInit }[] = [];
+    const ran: string[][] = [];
+    const r = await copilotLimits(make({ file: config(), seen, ran }));
+    expect(r!.key).toBe("copilot:login");
+    expect(r!.plan).toBe("individual_pro");
+    expect(r!.windows[0]).toMatchObject({ id: "premium", used: 225, limit: 300, usedFraction: 0.75 });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("https://api.github.com/copilot_internal/user");
+    expect(seen[0]!.url).not.toContain(TOKEN);
+    expect((seen[0]!.init.headers as Record<string, string>).Authorization).toBe(`token ${TOKEN}`);
+    expect(seen[0]!.init.redirect).toBe("error");
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+    expect(ran).toEqual([]);
+  });
+
+  test("without a token in the file the keychain is read, then gh", async () => {
+    const ran: string[][] = [];
+    const mac = await copilotLimits(make({ platform: "darwin", ran, out: { security: `${TOKEN}\n` } }));
+    expect(mac).not.toBeNull();
+    expect(ran).toEqual([["security", "find-generic-password", "-s", "copilot-cli", "-w"]]);
+    const lin: string[][] = [];
+    expect(await copilotLimits(make({ ran: lin, out: { "secret-tool": TOKEN } }))).not.toBeNull();
+    expect(lin).toEqual([["secret-tool", "lookup", "service", "copilot-cli"]]);
+    const gh: string[][] = [];
+    expect(await copilotLimits(make({ ran: gh, out: { gh: TOKEN } }))).not.toBeNull();
+    expect(gh.map((c) => c[0])).toEqual(["secret-tool", "gh"]);
+  });
+
+  test("no login anywhere reads nothing and asks nobody", async () => {
+    const seen: { url: string; init: RequestInit }[] = [];
+    expect(await copilotLimits(make({ file: "{}", seen, out: { gh: "not a token" } }))).toBeNull();
+    expect(seen).toEqual([]);
+  });
+
+  test("an unauthorized login is reported, never renewed, and carries no provider text", async () => {
+    const seen: { url: string; init: RequestInit }[] = [];
+    const err = await copilotLimits(make({ file: config(), status: 401, seen })).catch((e) => e);
+    expect(err.code).toBe("unauthorized");
+    expect(err.message).toBe("unauthorized");
+    expect(seen).toHaveLength(1);
+  });
+
+  test("a 429 backs off, and after a restart the stored reading stands in", async () => {
+    const db = memDb();
+    let now = NOW;
+    const on = { copilot: true };
+    await new LimitsCache(make({ file: config(), now: () => now })).get(db, ID.host, on);
+    const seen: { url: string; init: RequestInit }[] = [];
+    const cache = new LimitsCache(make({ file: config(), status: 429, seen, now: () => now }));
+    const after = await cache.get(db, ID.host, on);
+    expect(after.problems.map((p) => p.code)).toEqual(["rate-limited"]);
+    expect(after.reports.map((r) => [r.key, r.source])).toEqual([["copilot:login", "copilot"]]);
+    expect(after.reports[0]!.windows[0]!.usedFraction).toBe(0.75);
+    now += 4 * 60_000;
+    await cache.get(db, ID.host, on, true);
+    expect(seen).toHaveLength(1);
+  });
+
+  test("Copilot CLI sessions activate the copilot source, and one GitHub account shows once", async () => {
+    expect(planFor("copilot", "github-copilot")).toEqual({ provider: "copilot", source: "copilot" });
+    const db = memDb();
+    const w = new DbWriter(db, PriceBook.fromDb(db), ID);
+    w.usage({ id: "c", provider: "copilot", sessionId: "copilot:s", promptId: null, ts: NOW - 60_000, project: null, model: "m", skill: null, agent: "main", isSubagent: false,
+      input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, billing: "github-copilot" });
+    w.usage({ id: "o", provider: "omp", sessionId: "omp:s", promptId: null, ts: NOW - 60_000, project: null, model: "m", skill: null, agent: "main", isSubagent: false,
+      input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, billing: "github-copilot" });
+    const active = activePlans(db, NOW - HOUR);
+    expect(active).toEqual(expect.arrayContaining([{ provider: "copilot", source: "copilot" }, { provider: "copilot", source: "omp" }]));
+    const ompJson = JSON.stringify({ reports: [{ provider: "github-copilot", limits: [{ id: "premium", label: "Premium requests", amount: { used: 225, limit: 300, unit: "requests" }, window: { resetsAt: Date.parse("2026-11-01") } }], metadata: { planType: "individual_pro" } }] });
+    const cache = new LimitsCache({ ...make({ file: config() }), run: async (cmd: string[]) => (cmd[0] === "gh" ? null : ompJson) });
+    const result = await cache.get(db, ID.host, { copilot: true, omp: true }, false, active);
+    expect(result.reports.map((r) => r.provider)).toEqual(["copilot"]);
   });
 });
