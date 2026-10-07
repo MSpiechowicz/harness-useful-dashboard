@@ -12,7 +12,20 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    chunkSizeWarningLimit: 1500,
+    // The ECharts chunk is about 690 kB, loaded only by the pages with charts. Every other chunk stays far below.
+    chunkSizeWarningLimit: 750,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            // ECharts is the one large dependency, loaded with the first page that draws a chart.
+            { name: "echarts", test: /node_modules[\\/](echarts|zrender)[\\/]/ },
+            // The icons in one file, not one small file per icon the pages share.
+            { name: "icons", test: /node_modules[\\/]@lucide[\\/]/ },
+          ],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

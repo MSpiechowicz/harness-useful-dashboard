@@ -1,8 +1,4 @@
-import { de } from "./locales/de.ts";
 import { en, type MessageKey } from "./locales/en.ts";
-import { es } from "./locales/es.ts";
-import { fr } from "./locales/fr.ts";
-import { pl } from "./locales/pl.ts";
 
 export type Lang = "en" | "de" | "es" | "fr" | "pl";
 /** Each language named in itself, as a language picker lists them. */
@@ -14,7 +10,14 @@ export const LANGS: { code: Lang; label: string }[] = [
   { code: "pl", label: "Polski" },
 ];
 
-const DICTS: Record<Lang, Record<MessageKey, string>> = { en, de, es, fr, pl };
+type Dict = Record<MessageKey, string>;
+// English is built in. The others load when chosen, each in its own file (every one must still have every key).
+const LOADERS: Record<Exclude<Lang, "en">, () => Promise<Dict>> = {
+  de: () => import("./locales/de.ts").then((m) => m.de),
+  es: () => import("./locales/es.ts").then((m) => m.es),
+  fr: () => import("./locales/fr.ts").then((m) => m.fr),
+  pl: () => import("./locales/pl.ts").then((m) => m.pl),
+};
 const LOCALES: Record<Lang, string> = { en: "en-US", de: "de-DE", es: "es-ES", fr: "fr-FR", pl: "pl-PL" };
 
 function initialLang(): Lang {
@@ -29,20 +32,46 @@ function initialLang(): Lang {
 }
 
 class I18n {
-  lang = $state<Lang>(initialLang());
+  lang = $state<Lang>("en");
+  /** The messages of `lang`. Switched together with it, so the UI never shows a language half loaded. */
+  dict = $state.raw<Dict>(en);
+  /** Settles once the saved language is loaded: the app mounts after it, so it never shows English first. */
+  readonly ready: Promise<void>;
+  private seq = 0;
+
+  constructor() {
+    this.ready = this.load(initialLang());
+  }
 
   get locale(): string {
     return LOCALES[this.lang];
   }
 
   set(lang: Lang): void {
-    this.lang = lang;
-    document.documentElement.lang = lang;
     try {
       localStorage.setItem("hd.lang", lang);
     } catch {
       /* ignore */
     }
+    void this.load(lang);
+  }
+
+  private async load(lang: Lang): Promise<void> {
+    const mine = ++this.seq;
+    let dict: Dict = en;
+    if (lang !== "en") {
+      try {
+        dict = await LOADERS[lang]();
+      } catch {
+        // Its file didn't load (e.g. the server restarted with a new version): stay in the language shown.
+        return;
+      }
+    }
+    // A later choice won.
+    if (mine !== this.seq) return;
+    this.dict = dict;
+    this.lang = lang;
+    document.documentElement.lang = lang;
   }
 }
 
@@ -52,7 +81,7 @@ export type Params = Record<string, string | number | null | undefined>;
 
 /** Translate a key, interpolating `{name}` placeholders. Reactive on the current language. */
 export function t(key: MessageKey, params?: Params): string {
-  const template = DICTS[i18n.lang][key] ?? en[key] ?? key;
+  const template = i18n.dict[key] ?? en[key] ?? key;
   if (!params) return template;
   return template.replace(/\{(\w+)\}/g, (_, name: string) => {
     const v = params[name];

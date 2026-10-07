@@ -31,11 +31,19 @@ class Live {
   /** Set by the Live page while it is open. */
   watching = false;
   private pending: ReturnType<typeof setTimeout> | null = null;
+  /** New data (or a change of settings) came in while the tab was hidden: it reloads once the tab is shown again. */
+  private stale = false;
+  private statusStale = false;
 
-  /** Reloads the open view's data now. */
+  /** Reloads the open view's data now. A hidden tab makes no requests: it waits until it is shown again. */
   private refresh(): void {
     if (this.pending) clearTimeout(this.pending);
     this.pending = null;
+    if (document.hidden) {
+      this.stale = true;
+      return;
+    }
+    this.stale = false;
     this.updatedAt = Date.now();
     store.refreshTick++;
     void loadColorRanking();
@@ -60,6 +68,18 @@ class Live {
       .catch(() => {});
 
     this.connect();
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      if (this.statusStale) this.loadStatus();
+      if (this.stale) this.refresh();
+    });
+  }
+
+  /** Asks the server for its status again, after a change in Settings. A hidden tab asks once it is shown again. */
+  private loadStatus(): void {
+    this.statusStale = document.hidden;
+    if (this.statusStale) return;
+    getJson<Status>("/api/status").then((s) => (this.status = s)).catch(() => {});
   }
 
   private connect(): void {
@@ -94,7 +114,7 @@ class Live {
         case "pricing-changed":
           // A change made in Settings: show it right away.
           this.refresh();
-          getJson<Status>("/api/status").then((s) => (this.status = s)).catch(() => {});
+          this.loadStatus();
           break;
       }
     };

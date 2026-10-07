@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, type Component } from "svelte";
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
@@ -14,25 +14,39 @@
   import { send } from "./lib/api.svelte.ts";
   import { live } from "./lib/live.svelte.ts";
   import { store } from "./lib/state.svelte.ts";
-  import BranchDetail from "./pages/BranchDetail.svelte";
-  import Branches from "./pages/Branches.svelte";
-  import Breakdown from "./pages/Breakdown.svelte";
-  import Cache from "./pages/Cache.svelte";
-  import Files from "./pages/Files.svelte";
-  import Friction from "./pages/Friction.svelte";
-  import Live from "./pages/Live.svelte";
-  import ModelDrift from "./pages/ModelDrift.svelte";
-  import Overview from "./pages/Overview.svelte";
-  import Plans from "./pages/Plans.svelte";
-  import PromptDetail from "./pages/PromptDetail.svelte";
-  import Prompts from "./pages/Prompts.svelte";
-  import SessionDetail from "./pages/SessionDetail.svelte";
-  import Sessions from "./pages/Sessions.svelte";
-  import Settings from "./pages/Settings.svelte";
-  import Time from "./pages/Time.svelte";
-  import Tips from "./pages/Tips.svelte";
-  import Tools from "./pages/Tools.svelte";
-  import Trends from "./pages/Trends.svelte";
+
+  // Each page is its own file, loaded when first shown, so the first view doesn't wait for all the others.
+  type PageComponent = Component<any>;
+  const PAGES = {
+    overview: () => import("./pages/Overview.svelte"),
+    live: () => import("./pages/Live.svelte"),
+    trends: () => import("./pages/Trends.svelte"),
+    breakdown: () => import("./pages/Breakdown.svelte"),
+    branchDetail: () => import("./pages/BranchDetail.svelte"),
+    branches: () => import("./pages/Branches.svelte"),
+    drift: () => import("./pages/ModelDrift.svelte"),
+    sessionDetail: () => import("./pages/SessionDetail.svelte"),
+    sessions: () => import("./pages/Sessions.svelte"),
+    promptDetail: () => import("./pages/PromptDetail.svelte"),
+    prompts: () => import("./pages/Prompts.svelte"),
+    tools: () => import("./pages/Tools.svelte"),
+    files: () => import("./pages/Files.svelte"),
+    time: () => import("./pages/Time.svelte"),
+    friction: () => import("./pages/Friction.svelte"),
+    plans: () => import("./pages/Plans.svelte"),
+    cache: () => import("./pages/Cache.svelte"),
+    tips: () => import("./pages/Tips.svelte"),
+    settings: () => import("./pages/Settings.svelte"),
+  } satisfies Record<string, () => Promise<{ default: PageComponent }>>;
+  type PageName = keyof typeof PAGES;
+  /** The pages loaded so far. A page shown before renders at once, without waiting a turn. */
+  let loaded = $state.raw<Partial<Record<PageName, PageComponent>>>({});
+  function loadPage(name: PageName): Promise<void> {
+    if (loaded[name]) return Promise.resolve();
+    return PAGES[name]().then((m) => {
+      loaded = { ...loaded, [name]: m.default };
+    });
+  }
 
   interface NavItem {
     page: string;
@@ -95,6 +109,30 @@
   $effect(() => {
     const h = setInterval(() => (now = Date.now()), 15_000);
     return () => clearInterval(h);
+  });
+
+  // The page the route shows, and what it is given.
+  const BREAKDOWNS: Record<string, string> = { projects: "project", models: "model", providers: "provider", users: "user", skills: "skill", agents: "agent" };
+  /** Pages that need what the route gives them: they have no address of their own. */
+  const NEEDS_ROUTE = new Set<string>(["breakdown", "branchDetail", "sessionDetail", "promptDetail"]);
+  const view = $derived.by((): { name: PageName; props?: Record<string, string> } => {
+    if (Object.hasOwn(BREAKDOWNS, page)) return { name: "breakdown", props: { dim: BREAKDOWNS[page] } };
+    if (id && page === "branches") return { name: "branchDetail", props: { id } };
+    if (id && page === "sessions") return { name: "sessionDetail", props: { id } };
+    if (id && page === "prompts") return { name: "promptDetail", props: { id } };
+    const plain = Object.hasOwn(PAGES, page) && !NEEDS_ROUTE.has(page);
+    return { name: plain ? (page as PageName) : "overview" };
+  });
+  const Page = $derived(loaded[view.name]);
+  $effect(() => {
+    loadPage(view.name).catch((e) => console.error(e));
+  });
+  // Once the first page shows, the others load in the background, so moving to one doesn't wait for its file.
+  $effect(() => {
+    const h = setTimeout(() => {
+      for (const name of Object.keys(PAGES) as PageName[]) loadPage(name).catch(() => {});
+    }, 3_000);
+    return () => clearTimeout(h);
   });
 
   // When the data on screen was loaded. A clock time, so it changes only when the page reloads, at most once a minute.
@@ -275,32 +313,8 @@
     </header>
     <main bind:this={main} tabindex="-1" class="mx-auto w-full max-w-[1500px] flex-1 px-4 py-6 outline-none sm:px-6">
       {#key page + (id ?? "")}
-        {#if page === "overview"}<Overview />
-        {:else if page === "live"}<Live />
-        {:else if page === "trends"}<Trends />
-        {:else if page === "projects"}<Breakdown dim="project" />
-        {:else if page === "branches" && id}<BranchDetail {id} />
-        {:else if page === "branches"}<Branches />
-        {:else if page === "models"}<Breakdown dim="model" />
-        {:else if page === "drift"}<ModelDrift />
-        {:else if page === "providers"}<Breakdown dim="provider" />
-        {:else if page === "users"}<Breakdown dim="user" />
-        {:else if page === "skills"}<Breakdown dim="skill" />
-        {:else if page === "agents"}<Breakdown dim="agent" />
-        {:else if page === "sessions" && id}<SessionDetail {id} />
-        {:else if page === "sessions"}<Sessions />
-        {:else if page === "prompts" && id}<PromptDetail {id} />
-        {:else if page === "prompts"}<Prompts />
-        {:else if page === "tools"}<Tools />
-        {:else if page === "files"}<Files />
-        {:else if page === "time"}<Time />
-        {:else if page === "friction"}<Friction />
-        {:else if page === "plans"}<Plans />
-        {:else if page === "cache"}<Cache />
-        {:else if page === "tips"}<Tips />
-        {:else if page === "settings"}<Settings />
-        {:else}<Overview />
-        {/if}
+        <!-- Nothing while its file loads: the page's own loading state takes over once it renders. -->
+        {#if Page}<Page {...view.props} />{/if}
       {/key}
     </main>
   </div>

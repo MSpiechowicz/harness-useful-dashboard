@@ -1,6 +1,7 @@
 import { getJson, send, type UpdateStatus } from "./api.svelte.ts";
 import { t } from "./i18n.svelte.ts";
 import { RESTART_POLL_MS, restartDone, type RestartProbe } from "./restart.ts";
+import { everyWhileVisible, waitOrVisible } from "./visibility.ts";
 
 /** How often the app asks whether a newer release is out (the server answers from its cache within the hour). */
 const RECHECK_MS = 3600_000;
@@ -17,12 +18,12 @@ export const updater = $state<{ status: UpdateStatus | null; installing: boolean
 
 let watching = false;
 
-/** Checks now and then every hour, once per page. */
+/** Checks now and then every hour, once per page. A hidden tab checks once it is shown again. */
 export function watchUpdates(): void {
   if (watching) return;
   watching = true;
   void checkUpdate();
-  setInterval(() => void checkUpdate(), RECHECK_MS);
+  everyWhileVisible(RECHECK_MS, () => void checkUpdate());
 }
 
 /** `force` skips the server's cache and asks GitHub, even when automatic checks are off (Settings → Check now). */
@@ -51,12 +52,13 @@ export async function installUpdate(): Promise<void> {
 
 /**
  * Loads the page again once the updated server is up. The live stream does that too when it reconnects, but not when
- * the new server refuses it, so this doesn't depend on it.
+ * the new server refuses it, so this doesn't depend on it. It keeps asking in a hidden tab too, and asks right away
+ * when the tab is shown again.
  */
 async function reloadWhenRestarted(from: string): Promise<void> {
   const started = Date.now();
   for (;;) {
-    await new Promise((r) => setTimeout(r, RESTART_POLL_MS));
+    await waitOrVisible(RESTART_POLL_MS);
     let probe: RestartProbe = null;
     try {
       const res = await fetch("/api/status", { cache: "no-store", signal: AbortSignal.timeout(RESTART_POLL_MS * 3) });
