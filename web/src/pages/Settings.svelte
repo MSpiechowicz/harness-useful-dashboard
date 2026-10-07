@@ -122,6 +122,8 @@
   let dbSize = $state<{ bytes: number; freeBytes: number; incremental: boolean } | null>(null);
   let compacting = $state(false);
   let compactMsg = $state<string | null>(null);
+  /** At least a megabyte unused: below that, compacting isn't worth rewriting the file. */
+  const reclaimable = $derived(!!dbSize && dbSize.freeBytes >= 1024 * 1024);
   const RETENTION = [0, 3, 6, 12, 24];
   const retentionOptions = $derived(
     [...new Set([...RETENTION, Number(retention)])]
@@ -536,8 +538,15 @@
         <Dropdown full label={t("settings.retention")} bind:value={retention} options={retentionOptions} onchange={() => save()} />
       </SettingRow>
       <SettingRow label={t("settings.dbSize")} hint={compactMsg ?? `${t("settings.dbSizeHint")}${dbSize && !dbSize.incremental ? ` ${t("settings.dbSizeOnce")}` : ""}`}>
-        {#if dbSize}<span class="text-xs text-ink-2 tabular">{t("settings.dbSizeValue", { size: megabytes(dbSize.bytes), free: megabytes(dbSize.freeBytes) })}</span>{/if}
-        <button class="btn" onclick={compactDb} disabled={compacting || busy}>
+        <!-- The file's size, and how much of it Compact can give back. Nothing to gain: the button rests, unless the file
+             still needs its one-time switch to giving freed space back by itself. -->
+        {#if dbSize}
+          <span class="flex flex-col items-end leading-tight">
+            <span class="text-sm font-medium text-ink tabular">{megabytes(dbSize.bytes)}</span>
+            <span class="text-[11px] text-muted">{reclaimable ? t("settings.dbSizeValue", { free: megabytes(dbSize.freeBytes) }) : t("settings.dbNothingFree")}</span>
+          </span>
+        {/if}
+        <button class="btn" onclick={compactDb} disabled={compacting || busy || (!!dbSize && !reclaimable && dbSize.incremental)}>
           {#if compacting}<Loader size={14} class="animate-spin" />{t("settings.compacting")}{:else}<Shrink size={14} />{t("settings.compact")}{/if}
         </button>
       </SettingRow>
