@@ -1,3 +1,10 @@
+## [1.14.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.14.0...v1.14.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* the MCP server finds the working directory's session on Windows too ([c9009d3](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/c9009d39382ca5c04753dfd7ba07882d6ac1e245))
+
 # [1.14.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.5...v1.14.0) (2026-10-07)
 
 
