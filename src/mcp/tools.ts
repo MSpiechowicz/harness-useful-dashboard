@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import { en } from "../../web/src/lib/locales/en.ts";
 import { branchDetail, branches, branchId, type BranchRow } from "../core/branches.ts";
 import { type BudgetConfig, budgetStatus } from "../core/budgets.ts";
@@ -191,10 +191,14 @@ const limitOf = (args: Record<string, unknown>, fallback: number) => (typeof arg
 
 /** The folder and its parents, innermost first: usage is stored under the git root, which may be a parent. */
 function ancestors(dir: string): string[] {
+  // An absolute path is taken as it is, in its own style: a POSIX path stays one on Windows (a session recorded on
+  // another machine of a shared database), and a Windows one keeps its drive and backslashes.
+  const start = posix.isAbsolute(dir) || win32.isAbsolute(dir) ? dir : resolve(dir);
+  const p = /^[A-Za-z]:[\\/]|^\\\\/.test(start) ? win32 : posix;
   const out: string[] = [];
-  for (let d = resolve(dir); ; d = dirname(d)) {
+  for (let d = p.normalize(start); ; d = p.dirname(d)) {
     out.push(d);
-    if (dirname(d) === d) return out;
+    if (p.dirname(d) === d) return out;
   }
 }
 
