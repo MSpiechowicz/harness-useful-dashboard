@@ -3,7 +3,7 @@
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
-    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
+    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Search, Settings as SettingsIcon, Sparkles, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
@@ -13,7 +13,8 @@
   import { i18n, t, type MessageKey } from "./lib/i18n.svelte.ts";
   import { send } from "./lib/api.svelte.ts";
   import { live } from "./lib/live.svelte.ts";
-  import { store } from "./lib/state.svelte.ts";
+  import { isEditable, modKey, shortcutOf } from "./lib/palette-search.ts";
+  import { filtersApply, store } from "./lib/state.svelte.ts";
 
   // Each page is its own file, loaded when first shown, so the first view doesn't wait for all the others.
   type PageComponent = Component<any>;
@@ -97,7 +98,7 @@
   const noFiltersNote = $derived<MessageKey>(
     page === "live" ? "filters.none.live" : page === "settings" ? "filters.none.settings" : page === "prompts" ? "filters.none.prompt" : page === "branches" ? "filters.none.branch" : "filters.none.session",
   );
-  const showFilters = $derived(page !== "settings" && page !== "live" && !(page === "sessions" && id) && !(page === "prompts" && id) && !(page === "branches" && id));
+  const showFilters = $derived(filtersApply(store.route));
   // Desktop alerts come from the server: it writes them in the language the UI shows.
   $effect(() => {
     const language = i18n.lang;
@@ -204,13 +205,53 @@
     if (h) h.tabIndex = -1;
     target.focus({ preventScroll: true });
   }
+
+  // The command palette (Ctrl+K or Cmd+K): its own file, loaded the first time it opens.
+  let Palette = $state.raw<Component<any>>();
+  let paletteOpen = $state(false);
+  let paletteHelp = $state(false);
+  /** Where focus was when the palette opened: it goes back there when it closes. */
+  let paletteOpener: HTMLElement | null = null;
+  const mod = modKey(navigator.platform || navigator.userAgent);
+  const navPages = groups.flatMap((g) => g.items);
+  async function openPalette(help = false) {
+    paletteOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    paletteHelp = help;
+    if (!Palette) Palette = (await import("./components/CommandPalette.svelte")).default;
+    paletteOpen = true;
+  }
+  function closePalette() {
+    paletteOpen = false;
+    // Opened from the drawer, which closed: back to the button that opens it.
+    if (paletteOpener?.closest("[inert]")) openButton?.focus();
+    else paletteOpener?.focus();
+    paletteOpener = null;
+  }
+  /** `/` goes to the search box of the page's table, when it has one. */
+  function focusTableSearch(): boolean {
+    const box = [...(main?.querySelectorAll<HTMLInputElement>("input[type=search]") ?? [])].find((el) => el.offsetParent !== null);
+    if (!box) return false;
+    box.focus();
+    box.select();
+    return true;
+  }
+  function onKey(e: KeyboardEvent) {
+    // Shortcuts never take keys that are typed into a field, except Ctrl+K, which has no text to type.
+    const shortcut = e.defaultPrevented ? null : shortcutOf(e, isEditable(e.target as HTMLElement | null));
+    if (shortcut === "palette") {
+      e.preventDefault();
+      if (paletteOpen) closePalette();
+      else void openPalette();
+    } else if (shortcut === "help" && !paletteOpen) {
+      e.preventDefault();
+      void openPalette(true);
+    } else if (shortcut === "search" && !paletteOpen) {
+      if (focusTableSearch()) e.preventDefault();
+    } else if (e.key === "Escape" && menuOpen && !wide) closeMenu();
+  }
 </script>
 
-<svelte:window
-  onkeydown={(e) => {
-    if (e.key === "Escape" && menuOpen && !wide) closeMenu();
-  }}
-/>
+<svelte:window onkeydown={onKey} />
 
 <button type="button" class="skip-link" onclick={() => focusContent(false)}>{t("nav.skip")}</button>
 
@@ -225,6 +266,26 @@
       <img src="/favicon.svg" alt="" class="h-7 w-7 shrink-0" />
       <div class="truncate text-[15px] font-semibold tracking-tight" class:lg:hidden={collapsed}>{t("app.name")}</div>
       <button bind:this={closeButton} class="ml-auto lg:hidden" aria-label={t("nav.closeMenu")} title={t("nav.closeMenu")} onclick={closeMenu}><X size={18} /></button>
+    </div>
+    <!-- Search and commands, above the menu: its icon lines up with the menu's (px-2, then px-3 inside). -->
+    <div class="px-2 pt-1">
+      <button
+        type="button"
+        class="btn w-full !gap-2.5 !px-3 font-normal text-muted {collapsed ? 'lg:justify-center lg:!px-0' : ''}"
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Control+K Meta+K"
+        aria-label={collapsed ? t("palette.open") : undefined}
+        title={`${t("palette.key.palette")} (${mod}+K)`}
+        onclick={() => {
+          if (!wide) menuOpen = false;
+          void openPalette();
+        }}
+      >
+        <Search size={16} class="shrink-0" /><span class="truncate" class:lg:hidden={collapsed}>{t("palette.open")}</span>
+        <span class="ml-auto flex shrink-0 gap-0.5" class:lg:hidden={collapsed} aria-hidden="true">
+          {#each [mod, "K"] as k (k)}<kbd class="inline-flex h-[1.125rem] min-w-5 items-center justify-center rounded border border-line bg-surface-2 px-1 font-sans text-[10px] leading-none text-ink-2">{k}</kbd>{/each}
+        </span>
+      </button>
     </div>
     <nav class="flex-1 overflow-y-auto px-2 py-2" aria-label={t("nav.label")}>
       {#each groups as g, gi (gi)}
@@ -319,3 +380,7 @@
     </main>
   </div>
 </div>
+
+{#if paletteOpen && Palette}
+  <Palette pages={navPages} help={paletteHelp} filtersShown={showFilters} onclose={closePalette} />
+{/if}
