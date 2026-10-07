@@ -1,3 +1,11 @@
+# [1.12.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.11.1...v1.12.0) (2026-10-07)
+
+
+### Features
+
+* a status line for Claude Code with session cost, today's cost and the 5-hour limit ([e3f91cd](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/e3f91cdc49e9b5ec05a510a0d56120f6ee3335a5))
+* budgets with desktop alerts, and CSV or JSON export of every table ([8ec4777](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/8ec4777373dc6784e7d81a28449c2494bf7c7190))
+
 ## [1.11.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.11.0...v1.11.1) (2026-10-07)
 
 
