@@ -1,3 +1,16 @@
+# [1.11.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.10.0...v1.11.0) (2026-10-07)
+
+
+### Features
+
+* filters in the address, lists that remember where you were, keyboard and screen reader support ([c652da5](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/c652da5930ad02c7bb1758adbefeec3400561587))
+* sign-in for the local API, verified updates only, and secrets kept out of stored prompts ([4f40297](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/4f40297215d750e864dd4defd77d76b8c35ad1f5))
+
+
+### Performance Improvements
+
+* fast views on long histories, safer shared databases ([a88fca9](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a88fca97198d2ebf7c1883ec959a248e4126541e))
+
 # [1.10.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.9.1...v1.10.0) (2026-10-07)
 
 
