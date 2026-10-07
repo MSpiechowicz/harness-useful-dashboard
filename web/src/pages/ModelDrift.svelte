@@ -194,7 +194,8 @@
               <tbody>
                 {#each view.rows.slice(view.offset, view.offset + (view.limit ?? view.rows.length)) as r (r.model)}
                   <tr class="cursor-pointer" class:bg-surface-2={r.model === model} onclick={() => pick(r.model)}>
-                    <td class="text-ink">{r.model}</td>
+                    <!-- A button for the keyboard, without a handler of its own: its click reaches the row's. -->
+                    <td class="text-ink"><button type="button" class="text-left" aria-pressed={r.model === model}>{r.model}</button></td>
                     <td class="text-ink-2">{providerName(r.provider)}</td>
                     <td class="num text-ink-2">{compact(r.responses)}</td>
                     {#each METRICS as m (m)}

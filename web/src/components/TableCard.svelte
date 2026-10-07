@@ -57,12 +57,14 @@
     const q = query.trim().toLowerCase();
     return server || !q || !searchText ? rows : rows.filter((r) => searchText(r).toLowerCase().includes(q));
   });
-  // A new search or sort starts again on page 1.
+  // A new search or sort starts again on page 1. Not the first time: a list brought back keeps the page it was left on.
+  let primed = false;
   $effect(() => {
     void query;
     void sortKey;
     void asc;
-    page = 1;
+    if (primed) page = 1;
+    primed = true;
   });
 </script>
 

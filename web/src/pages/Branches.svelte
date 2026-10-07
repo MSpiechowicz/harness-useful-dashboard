@@ -2,8 +2,10 @@
   import Card from "../components/Card.svelte";
   import DonutList from "../components/DonutList.svelte";
   import Empty from "../components/Empty.svelte";
+  import Link from "../components/Link.svelte";
   import Kpi from "../components/Kpi.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import SortTh from "../components/SortTh.svelte";
   import TableCard from "../components/TableCard.svelte";
   import ValueBar from "../components/ValueBar.svelte";
   import ViewGate from "../components/ViewGate.svelte";
@@ -121,7 +123,7 @@
       asc = k === "branch";
     }
   }
-  const arrow = (k: Sort) => (sort === k ? (asc ? " ↑" : " ↓") : "");
+  const dir = (k: Sort) => (sort === k ? (asc ? "ascending" : "descending") : undefined);
 </script>
 
 <div class="flex flex-col gap-5">
@@ -201,13 +203,13 @@
             </colgroup>
             <thead>
               <tr>
-                <th><button onclick={() => sortBy("branch")}>{t("col.branch")}{arrow("branch")}</button></th>
+                <SortTh label={t("col.branch")} sort={dir("branch")} onclick={() => sortBy("branch")} />
                 <th>{t("col.project")}</th>
-                <th class="num"><button onclick={() => sortBy("sessions")}>{t("col.sessions")}{arrow("sessions")}</button></th>
-                <th class="num"><button onclick={() => sortBy("days")}>{t("branches.days")}{arrow("days")}</button></th>
-                <th class="num"><button onclick={() => sortBy("tokens")}>{t("col.tokens")}{arrow("tokens")}</button></th>
-                <th class="num"><button onclick={() => sortBy("cost")}>{t("col.cost")}{arrow("cost")}</button></th>
-                <th class="num"><button onclick={() => sortBy("recent")}>{t("col.lastSeen")}{arrow("recent")}</button></th>
+                <SortTh num label={t("col.sessions")} sort={dir("sessions")} onclick={() => sortBy("sessions")} />
+                <SortTh num label={t("branches.days")} sort={dir("days")} onclick={() => sortBy("days")} />
+                <SortTh num label={t("col.tokens")} sort={dir("tokens")} onclick={() => sortBy("tokens")} />
+                <SortTh num label={t("col.cost")} sort={dir("cost")} onclick={() => sortBy("cost")} />
+                <SortTh num label={t("col.lastSeen")} sort={dir("recent")} onclick={() => sortBy("recent")} />
               </tr>
             </thead>
             <tbody>
@@ -215,7 +217,7 @@
                 <tr class="cursor-pointer" onclick={() => navigate("branches", r.id)}>
                   <td>
                     <div class="flex items-center gap-2">
-                      <span class="truncate font-mono text-xs text-ink" class:italic={r.branch === NONE} title={r.branch}>{branchName(r)}</span>
+                      <Link to="#/branches/{encodeURIComponent(r.id)}" class="truncate font-mono text-xs text-ink {r.branch === NONE ? 'italic' : ''}" title={r.branch}>{branchName(r)}</Link>
                       {#if r.longLived}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{t("branches.longLived")}</span>{/if}
                     </div>
                   </td>

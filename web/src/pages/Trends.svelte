@@ -84,9 +84,9 @@
         {#snippet actions()}
           <Dropdown prefix label={t("trends.groupBy")} bind:value={group} options={groups.map((g) => ({ value: g, label: groupLabel(g) }))} />
           <Dropdown prefix label={t("trends.interval")} bind:value={bucket} options={buckets.map((b) => ({ value: b, label: b === "auto" ? `${t("bucket.auto")} (${t(`bucket.${store.bucket}`)})` : t(`bucket.${b}`) }))} />
-          <div class="seg" role="group">
-            <button aria-pressed={kind === "bar"} aria-label="Bars" onclick={() => (kind = "bar")}><ChartColumn size={13} /></button>
-            <button aria-pressed={kind === "area"} aria-label="Area" onclick={() => (kind = "area")}><ChartArea size={13} /></button>
+          <div class="seg" role="group" aria-label={t("chart.style")}>
+            <button aria-pressed={kind === "bar"} aria-label={t("chart.bars")} title={t("chart.bars")} onclick={() => (kind = "bar")}><ChartColumn size={13} /></button>
+            <button aria-pressed={kind === "area"} aria-label={t("chart.area")} title={t("chart.area")} onclick={() => (kind = "area")}><ChartArea size={13} /></button>
           </div>
         {/snippet}
         {#snippet table()}

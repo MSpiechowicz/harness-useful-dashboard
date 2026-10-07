@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
@@ -110,20 +111,77 @@
   function isActive(p: string): boolean {
     return page === p;
   }
+
+  // Below lg the sidebar is a drawer. Closed, it is only moved off screen: inert keeps its links out of the tab order.
+  const wideQuery = matchMedia("(min-width: 64rem)");
+  let wide = $state(wideQuery.matches);
+  $effect(() => {
+    const onChange = (e: MediaQueryListEvent) => (wide = e.matches);
+    wideQuery.addEventListener("change", onChange);
+    return () => wideQuery.removeEventListener("change", onChange);
+  });
+  let openButton = $state<HTMLButtonElement>();
+  let closeButton = $state<HTMLButtonElement>();
+  function openMenu() {
+    menuOpen = true;
+    // After the drawer stops being inert, or it can't take focus.
+    tick().then(() => closeButton?.focus());
+  }
+  function closeMenu() {
+    menuOpen = false;
+    openButton?.focus();
+  }
+
+  // The tab title names the view, e.g. "Models · Harness Dashboard".
+  const pageLabel = $derived(groups.flatMap((g) => g.items).find((i) => i.page === page)?.label);
+  $effect(() => {
+    document.title = pageLabel ? `${t(pageLabel)} · ${t("app.name")}` : t("app.name");
+  });
+
+  // After moving to another view, focus goes to its heading (or the content, while it has none), so a screen reader
+  // announces the new view and Tab continues from there. Not on the first load, and without scrolling: the page is
+  // already at the top.
+  let main = $state<HTMLElement>();
+  let firstRoute = true;
+  $effect(() => {
+    void page;
+    void id;
+    if (firstRoute) {
+      firstRoute = false;
+      return;
+    }
+    tick().then(() => focusContent(true));
+  });
+  function focusContent(heading: boolean) {
+    const h = heading ? main?.querySelector<HTMLElement>("h1") : null;
+    const target = h ?? main;
+    if (!target) return;
+    if (h) h.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }
 </script>
+
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "Escape" && menuOpen && !wide) closeMenu();
+  }}
+/>
+
+<button type="button" class="skip-link" onclick={() => focusContent(false)}>{t("nav.skip")}</button>
 
 <div class="flex min-h-screen">
   <!-- Sidebar -->
   <aside
     class="fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-line bg-surface transition-[translate,width] duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 {collapsed ? 'lg:w-16' : ''}"
     class:-translate-x-full={!menuOpen}
+    inert={!menuOpen && !wide}
   >
     <div class="flex h-14 items-center gap-2.5 px-4 {collapsed ? 'lg:justify-center lg:px-0' : ''}">
       <img src="/favicon.svg" alt="" class="h-7 w-7 shrink-0" />
       <div class="truncate text-[15px] font-semibold tracking-tight" class:lg:hidden={collapsed}>{t("app.name")}</div>
-      <button class="ml-auto lg:hidden" aria-label="Close menu" onclick={() => (menuOpen = false)}><X size={18} /></button>
+      <button bind:this={closeButton} class="ml-auto lg:hidden" aria-label={t("nav.closeMenu")} title={t("nav.closeMenu")} onclick={closeMenu}><X size={18} /></button>
     </div>
-    <nav class="flex-1 overflow-y-auto px-2 py-2">
+    <nav class="flex-1 overflow-y-auto px-2 py-2" aria-label={t("nav.label")}>
       {#each groups as g, gi (gi)}
         {#if g.label}
           <div class="mt-3 mb-1 h-4 px-3 text-[11px] leading-4 font-medium tracking-wide text-muted uppercase" class:lg:hidden={collapsed}>{t(g.label)}</div>
@@ -187,7 +245,8 @@
     </div>
   </aside>
   {#if menuOpen}
-    <button class="fixed inset-0 z-30 bg-black/30 lg:hidden" aria-label="Close menu" onclick={() => (menuOpen = false)}></button>
+    <!-- The backdrop is for the pointer: keyboard users have the close button and Escape. -->
+    <button class="fixed inset-0 z-30 bg-black/30 lg:hidden" tabindex="-1" aria-hidden="true" onclick={closeMenu}></button>
   {/if}
 
   <!-- Main -->
@@ -196,7 +255,7 @@
     <header class="sticky top-0 z-20 border-b border-line bg-page/85 backdrop-blur">
       <!-- Top-aligned: when the filters wrap onto more lines, the menu button stays level with the first one. -->
       <div class="mx-auto flex max-w-[1500px] items-start gap-3 px-4 py-2.5 sm:px-6">
-        <button class="btn shrink-0 !px-2 lg:hidden" aria-label="Open menu" onclick={() => (menuOpen = true)}><Menu size={16} /></button>
+        <button bind:this={openButton} class="btn shrink-0 !px-2 lg:hidden" aria-label={t("nav.openMenu")} aria-expanded={menuOpen} title={t("nav.openMenu")} onclick={openMenu}><Menu size={16} /></button>
         {#if showFilters}
           <div class="min-w-0 flex-1"><FilterBar /></div>
         {:else}
@@ -207,7 +266,7 @@
         {/if}
       </div>
     </header>
-    <main class="mx-auto w-full max-w-[1500px] flex-1 px-4 py-6 sm:px-6">
+    <main bind:this={main} tabindex="-1" class="mx-auto w-full max-w-[1500px] flex-1 px-4 py-6 outline-none sm:px-6">
       {#key page + (id ?? "")}
         {#if page === "overview"}<Overview />
         {:else if page === "live"}<Live />

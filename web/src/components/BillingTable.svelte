@@ -21,6 +21,7 @@
 </script>
 
 <script lang="ts">
+  import SortTh from "./SortTh.svelte";
   import { compact, usd } from "../lib/format.ts";
 
   interface Props {
@@ -53,17 +54,17 @@
       asc = k === "label";
     }
   }
-  const arrow = (k: BillingSortKey) => (sortKey === k ? (asc ? " ↑" : " ↓") : "");
+  const dir = (k: BillingSortKey) => (sortKey === k ? (asc ? "ascending" : "descending") : undefined);
 </script>
 
 <table class="data">
   <thead>
     <tr>
-      <th><button onclick={() => sortBy("label")}>{t("col.name")}{arrow("label")}</button></th>
-      <th class="num"><button onclick={() => sortBy("cost")}>{t("col.cost")}{arrow("cost")}</button></th>
-      <th class="num"><button onclick={() => sortBy("tokens")}>{t("col.tokens")}{arrow("tokens")}</button></th>
-      <th class="num"><button onclick={() => sortBy("calls")}>{t("col.calls")}{arrow("calls")}</button></th>
-      {#if premium}<th class="num"><button onclick={() => sortBy("premiumRequests")}>{t("col.premiumRequests")}{arrow("premiumRequests")}</button></th>{/if}
+      <SortTh label={t("col.name")} sort={dir("label")} onclick={() => sortBy("label")} />
+      <SortTh num label={t("col.cost")} sort={dir("cost")} onclick={() => sortBy("cost")} />
+      <SortTh num label={t("col.tokens")} sort={dir("tokens")} onclick={() => sortBy("tokens")} />
+      <SortTh num label={t("col.calls")} sort={dir("calls")} onclick={() => sortBy("calls")} />
+      {#if premium}<SortTh num label={t("col.premiumRequests")} sort={dir("premiumRequests")} onclick={() => sortBy("premiumRequests")} />{/if}
     </tr>
   </thead>
   <tbody>

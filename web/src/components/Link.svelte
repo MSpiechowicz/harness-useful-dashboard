@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { withQuery } from "../lib/state.svelte.ts";
 
   /**
    * A link to a view of this app (a "#/…" route). It is not an <a href>: Chrome shows the URL of every real link the
@@ -18,7 +19,7 @@
 
   function go() {
     onclick?.();
-    location.hash = to.replace(/^#/, "");
+    location.hash = withQuery(to).replace(/^#/, "");
   }
 </script>
 

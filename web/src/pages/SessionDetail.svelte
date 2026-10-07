@@ -147,7 +147,7 @@
                       <td class="w-10 text-muted tabular">{promptNo.get(p.id)}</td>
                       <td class="w-16 text-ink-2 tabular">{time(p.ts)}</td>
                       <td class="max-w-md">
-                        <div class="line-clamp-2">{p.text ?? t("prompts.noText")}</div>
+                        <Link to="#/prompts/{encodeURIComponent(p.id)}" class="line-clamp-2">{p.text ?? t("prompts.noText")}</Link>
                       </td>
                       {#if hasSkills}
                         <td class="text-ink-2">

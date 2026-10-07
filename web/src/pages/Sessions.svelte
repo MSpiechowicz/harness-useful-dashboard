@@ -4,13 +4,14 @@
   import { GitBranch } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
+  import Link from "../components/Link.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
   import { sessionScatter, type SessionPoint } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
-  import { navigate, store } from "../lib/state.svelte.ts";
+  import { navigate, store, keeper } from "../lib/state.svelte.ts";
 
   interface SessionRow {
     id: string;
@@ -29,16 +30,20 @@
     lastTs: number;
   }
 
+  const keep = keeper();
   type Sort = "recent" | "cost" | "tokens" | "messages";
-  let sort = $state<Sort>("recent");
+  let sort = $state<Sort>(keep.recall("sort", "recent"));
   const SORTS = $derived((["recent", "cost", "tokens", "messages"] as const).map((value) => ({ value: value as Sort, label: t(`sort.${value}`) })));
-  let query = $state("");
-  let debounced = $state("");
+  let query = $state(keep.recall("query", ""));
+  let debounced = $state(keep.recall("query", ""));
   // The table pages 10 rows at a time (the table card starts again on page 1 after a new search or sort).
   const PAGE = 10;
-  let page = $state(1);
+  let page = $state(keep.recall("page", 1));
+  $effect(() => keep.remember({ sort, query, page }));
   $effect(() => {
     const q = query;
+    // A search brought back with the view is already applied: it keeps its page.
+    if (q === debounced) return;
     const h = setTimeout(() => {
       debounced = q;
       page = 1;
@@ -126,7 +131,7 @@
                 <td class="max-w-md">
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
-                    <span class="truncate font-medium">{titleOf(r)}</span>
+                    <Link to="#/sessions/{encodeURIComponent(r.id)}" class="truncate font-medium">{titleOf(r)}</Link>
                     {#if r.sessionAgent}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{r.sessionAgent}</span>{/if}
                   </div>
                 </td>

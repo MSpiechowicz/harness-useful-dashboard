@@ -12,7 +12,7 @@
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
   import { compact, entityLabel, percent, relative } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
-  import { store } from "../lib/state.svelte.ts";
+  import { store, keeper } from "../lib/state.svelte.ts";
 
   interface FileRow {
     key: string;
@@ -40,16 +40,20 @@
   const project = $derived(store.project || (picked ?? overview.data?.projects[0]?.key ?? null));
   const hot = useFetch<Hotspots>(() => (project ? apiUrl("/api/files/hotspots", { project }) : null));
 
-  let query = $state("");
-  let debounced = $state("");
+  const keep = keeper();
+  let query = $state(keep.recall("query", ""));
+  let debounced = $state(keep.recall("query", ""));
   type Sort = "calls" | "edits" | "reads" | "recent";
-  let sort = $state<Sort>("calls");
+  let sort = $state<Sort>(keep.recall("sort", "calls"));
   const SORTS = $derived((["calls", "edits", "reads", "recent"] as const).map((value) => ({ value: value as Sort, label: t(`files.sort.${value}`) })));
   // The table pages 10 rows at a time (the table card starts again on page 1 after a new search or sort).
   const PAGE = 10;
-  let page = $state(1);
+  let page = $state(keep.recall("page", 1));
+  $effect(() => keep.remember({ sort, query, page }));
   $effect(() => {
     const q = query;
+    // A search brought back with the view is already applied: it keeps its page.
+    if (q === debounced) return;
     const h = setTimeout(() => {
       debounced = q;
       page = 1;

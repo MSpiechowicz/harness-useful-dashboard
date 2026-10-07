@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { getContext, onMount, untrack } from "svelte";
   import { echarts, type EChartsOption } from "../lib/echarts.ts";
 
   interface Props {
@@ -15,8 +15,15 @@
      */
     legendOff?: string[];
     onlegend?: (name: string) => void;
+    /**
+     * The text alternative, read by screen readers. Defaults to the title of the card the chart is in. Not ECharts'
+     * own aria description: its generated text isn't localized.
+     */
+    label?: string;
   }
-  let { option, height = 280, fill = false, dim = false, onclick, legendOff, onlegend }: Props = $props();
+  let { option, height = 280, fill = false, dim = false, onclick, legendOff, onlegend, label }: Props = $props();
+  const cardTitle = getContext<(() => string | undefined) | undefined>("card-title");
+  const name = $derived(label ?? cardTitle?.());
   /** Highlight-one charts mark their highlighted entry (see htmlLegend); the others read as selectable. */
   const active = $derived((option.legend as { active?: string } | undefined)?.active);
 
@@ -121,9 +128,9 @@
     <!-- The chart is drawn in a layer that takes the space the card gives it but adds none: otherwise its canvas
          would push the card taller, which would grow the canvas again. -->
     <div class="relative min-h-0 w-full flex-1" style:min-height={typeof height === "number" ? `${height}px` : height}>
-      <div bind:this={el} class="absolute inset-0" class:cursor-pointer={!!onclick}></div>
+      <div bind:this={el} class="absolute inset-0" class:cursor-pointer={!!onclick} role={name ? "img" : undefined} aria-label={name}></div>
     </div>
   {:else}
-    <div bind:this={el} class="w-full" class:cursor-pointer={!!onclick} style:height={typeof height === "number" ? `${height}px` : height}></div>
+    <div bind:this={el} class="w-full" class:cursor-pointer={!!onclick} role={name ? "img" : undefined} aria-label={name} style:height={typeof height === "number" ? `${height}px` : height}></div>
   {/if}
 </div>

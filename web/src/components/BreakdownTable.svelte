@@ -3,6 +3,7 @@
 </script>
 
 <script lang="ts">
+  import SortTh from "./SortTh.svelte";
   import ValueBar from "./ValueBar.svelte";
   import type { BreakdownRow } from "../lib/api.svelte.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
@@ -44,23 +45,21 @@
     }
   }
 
-  function arrow(k: BreakdownSortKey) {
-    return sortKey === k ? (asc ? " ↑" : " ↓") : "";
-  }
+  const dir = (k: BreakdownSortKey) => (sortKey === k ? (asc ? "ascending" : "descending") : undefined);
 </script>
 
 <table class="data">
   <thead>
     <tr>
-      <th><button onclick={() => sortBy("label")}>{t("col.name")}{arrow("label")}</button></th>
-      <th class="num"><button onclick={() => sortBy("cost")}>{t("col.cost")}{arrow("cost")}</button></th>
-      <th class="num"><button onclick={() => sortBy("tokens")}>{t("col.tokens")}{arrow("tokens")}</button></th>
+      <SortTh label={t("col.name")} sort={dir("label")} onclick={() => sortBy("label")} />
+      <SortTh num label={t("col.cost")} sort={dir("cost")} onclick={() => sortBy("cost")} />
+      <SortTh num label={t("col.tokens")} sort={dir("tokens")} onclick={() => sortBy("tokens")} />
       <th class="num">{t("col.share")}</th>
       {#if !compactCols}
-        <th class="num"><button onclick={() => sortBy("sessions")}>{t("col.sessions")}{arrow("sessions")}</button></th>
-        <th class="num"><button onclick={() => sortBy("prompts")}>{t("col.prompts")}{arrow("prompts")}</button></th>
-        <th class="num"><button onclick={() => sortBy("cacheHitRate")}>{t("col.cacheHit")}{arrow("cacheHitRate")}</button></th>
-        <th class="num"><button onclick={() => sortBy("lastTs")}>{t("col.lastSeen")}{arrow("lastTs")}</button></th>
+        <SortTh num label={t("col.sessions")} sort={dir("sessions")} onclick={() => sortBy("sessions")} />
+        <SortTh num label={t("col.prompts")} sort={dir("prompts")} onclick={() => sortBy("prompts")} />
+        <SortTh num label={t("col.cacheHit")} sort={dir("cacheHitRate")} onclick={() => sortBy("cacheHitRate")} />
+        <SortTh num label={t("col.lastSeen")} sort={dir("lastTs")} onclick={() => sortBy("lastTs")} />
       {/if}
     </tr>
   </thead>
@@ -77,7 +76,12 @@
             {:else}
               <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor(dim, r.key)}></span>
             {/if}
-            <span class="truncate" class:italic={none} class:text-ink-2={none}>{entityLabel(dim, r.key, r.label)}</span>
+            <!-- Filterable, the name is a button for the keyboard. It has no handler: its click reaches the row's. -->
+            {#if filterKey}
+              <button type="button" class="truncate text-left" class:italic={none} class:text-ink-2={none}>{entityLabel(dim, r.key, r.label)}</button>
+            {:else}
+              <span class="truncate" class:italic={none} class:text-ink-2={none}>{entityLabel(dim, r.key, r.label)}</span>
+            {/if}
             {#if r.estimated}<span class="rounded bg-surface-2 px-1.5 text-[10px] text-muted" title={t("common.estimatedHint")}>{t("common.estimated")}</span>{/if}
           </div>
         </td>

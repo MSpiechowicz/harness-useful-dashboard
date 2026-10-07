@@ -94,7 +94,7 @@
                     <td class="max-w-md">
                       <div class="flex items-center gap-2">
                         <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", s.provider)} title={s.provider}></span>
-                        <span class="truncate">{titleOf(s)}</span>
+                        <Link to="#/sessions/{encodeURIComponent(s.id)}" class="truncate">{titleOf(s)}</Link>
                         {#if s.subagents}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{t("live.subagents", { n: s.subagents })}</span>{/if}
                       </div>
                     </td>

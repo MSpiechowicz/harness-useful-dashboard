@@ -8,6 +8,7 @@
   import MixByWeek from "../components/MixByWeek.svelte";
   import TableCard from "../components/TableCard.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import SortTh from "../components/SortTh.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch, type TimeSeries } from "../lib/api.svelte.ts";
   import { percentLine } from "../lib/charts.ts";
@@ -56,7 +57,7 @@
       modelAsc = k === "key";
     }
   }
-  const arrow = (k: ModelSort) => (modelSort === k ? (modelAsc ? " ↑" : " ↓") : "");
+  const dir = (k: ModelSort) => (modelSort === k ? (modelAsc ? "ascending" : "descending") : undefined);
 
   const hitOption = $derived.by(() => (void store.dark, d.data ? percentLine(d.data.buckets, d.data.series.map((s) => s.hitRate), store.bucket, t("cache.hitRate")) : null));
   // Where prompt tokens came from over the whole range: fresh input, cache writes, or cache reads.
@@ -121,14 +122,14 @@
             </colgroup>
             <thead>
               <tr>
-                <th><button onclick={() => sortModels("key")}>{t("col.model")}{arrow("key")}</button></th>
-                <th class="num"><button onclick={() => sortModels("hitRate")}>{t("col.hitRate")}{arrow("hitRate")}</button></th>
-                <th class="num"><button onclick={() => sortModels("input")}>{t("tok.input")}{arrow("input")}</button></th>
-                <th class="num"><button onclick={() => sortModels("cacheRead")}>{t("tok.cacheRead")}{arrow("cacheRead")}</button></th>
-                <th class="num"><button onclick={() => sortModels("cacheWrite")}>{t("tok.cacheWrite")}{arrow("cacheWrite")}</button></th>
-                <th class="num"><button onclick={() => sortModels("savings")}>{t("col.savings")}{arrow("savings")}</button></th>
-                <th class="num"><button onclick={() => sortModels("writeCost")}>{t("col.writeCost")}{arrow("writeCost")}</button></th>
-                <th class="num"><button onclick={() => sortModels("cost")}>{t("col.cost")}{arrow("cost")}</button></th>
+                <SortTh label={t("col.model")} sort={dir("key")} onclick={() => sortModels("key")} />
+                <SortTh num label={t("col.hitRate")} sort={dir("hitRate")} onclick={() => sortModels("hitRate")} />
+                <SortTh num label={t("tok.input")} sort={dir("input")} onclick={() => sortModels("input")} />
+                <SortTh num label={t("tok.cacheRead")} sort={dir("cacheRead")} onclick={() => sortModels("cacheRead")} />
+                <SortTh num label={t("tok.cacheWrite")} sort={dir("cacheWrite")} onclick={() => sortModels("cacheWrite")} />
+                <SortTh num label={t("col.savings")} sort={dir("savings")} onclick={() => sortModels("savings")} />
+                <SortTh num label={t("col.writeCost")} sort={dir("writeCost")} onclick={() => sortModels("writeCost")} />
+                <SortTh num label={t("col.cost")} sort={dir("cost")} onclick={() => sortModels("cost")} />
               </tr>
             </thead>
             <tbody>

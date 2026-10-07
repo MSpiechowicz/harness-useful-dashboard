@@ -245,11 +245,12 @@
               </thead>
               <tbody>
                 {#each history as h (h.key)}
-                  <tr class="cursor-pointer {h.key === selected.key ? 'bg-surface-2' : ''}" aria-selected={h.key === selected.key} onclick={() => (picked = h.key)}>
+                  <tr class="cursor-pointer {h.key === selected.key ? 'bg-surface-2' : ''}" onclick={() => (picked = h.key)}>
                     <td>
                       <div class="flex items-center gap-2">
                         <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("limit", h.key)}></span>
-                        <span class="truncate" class:font-medium={h.key === selected.key}>{historyName(h)}</span>
+                        <!-- A button for the keyboard, without a handler of its own: its click reaches the row's. -->
+                        <button type="button" class="truncate text-left" class:font-medium={h.key === selected.key} aria-pressed={h.key === selected.key}>{historyName(h)}</button>
                       </div>
                     </td>
                     <td class="num text-ink-2">{dayWithYear(h.points[0]![0])}</td>

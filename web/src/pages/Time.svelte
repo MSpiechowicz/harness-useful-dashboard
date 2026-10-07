@@ -5,6 +5,7 @@
   import Empty from "../components/Empty.svelte";
   import Kpi from "../components/Kpi.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import SortTh from "../components/SortTh.svelte";
   import TableCard from "../components/TableCard.svelte";
   import ValueBar from "../components/ValueBar.svelte";
   import ViewGate from "../components/ViewGate.svelte";
@@ -70,7 +71,7 @@
       modelAsc = k === "key";
     }
   }
-  const modelArrow = (k: ModelSort) => (modelSort === k ? (modelAsc ? " ↑" : " ↓") : "");
+  const modelDir = (k: ModelSort) => (modelSort === k ? (modelAsc ? "ascending" : "descending") : undefined);
 
   type ProjectSort = "activeMs" | "sessions" | "cost" | "perHour";
   let projectSort = $state<ProjectSort>("activeMs");
@@ -131,12 +132,12 @@
             </colgroup>
             <thead>
               <tr>
-                <th><button onclick={() => sortModels("key")}>{t("col.model")}{modelArrow("key")}</button></th>
-                <th class="num"><button onclick={() => sortModels("responses")}>{t("drift.responses")}{modelArrow("responses")}</button></th>
-                <th class="num"><button onclick={() => sortModels("modelMs")}>{t("time.answering")}{modelArrow("modelMs")}</button></th>
-                <th class="num"><button onclick={() => sortModels("medianMs")}>{t("time.medianResponse")}{modelArrow("medianMs")}</button></th>
-                <th class="num"><button onclick={() => sortModels("medianTtftMs")}>{t("time.medianTtft")}{modelArrow("medianTtftMs")}</button></th>
-                <th class="num"><button onclick={() => sortModels("cost")}>{t("col.cost")}{modelArrow("cost")}</button></th>
+                <SortTh label={t("col.model")} sort={modelDir("key")} onclick={() => sortModels("key")} />
+                <SortTh num label={t("drift.responses")} sort={modelDir("responses")} onclick={() => sortModels("responses")} />
+                <SortTh num label={t("time.answering")} sort={modelDir("modelMs")} onclick={() => sortModels("modelMs")} />
+                <SortTh num label={t("time.medianResponse")} sort={modelDir("medianMs")} onclick={() => sortModels("medianMs")} />
+                <SortTh num label={t("time.medianTtft")} sort={modelDir("medianTtftMs")} onclick={() => sortModels("medianTtftMs")} />
+                <SortTh num label={t("col.cost")} sort={modelDir("cost")} onclick={() => sortModels("cost")} />
               </tr>
             </thead>
             <tbody>
@@ -177,7 +178,8 @@
             <tbody>
               {#each view.rows.slice(view.offset, view.offset + (view.limit ?? view.rows.length)) as p (p.key)}
                 <tr class="cursor-pointer" onclick={() => store.setFilter("project", p.key)}>
-                  <td class="truncate text-ink" title={p.key}>{entityLabel("project", p.key, p.label)}</td>
+                  <!-- A button for the keyboard, without a handler of its own: its click reaches the row's. -->
+                  <td class="text-ink" title={p.key}><button type="button" class="block w-full truncate text-left">{entityLabel("project", p.key, p.label)}</button></td>
                   <td class="num"><ValueBar label={duration(p.activeMs)} fraction={p.activeMs / maxProjectMs} /></td>
                   <td class="num text-ink-2">{compact(p.sessions)}</td>
                   <td class="num font-medium">{usd(p.cost)}</td>

@@ -5,13 +5,14 @@
   import { Sparkles } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
+  import Link from "../components/Link.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
   import { paretoChart, percentile, promptHistogram, topShare, type PromptCost } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, dateTime, entityLabel, metricValue, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
-  import { navigate, store } from "../lib/state.svelte.ts";
+  import { navigate, store, keeper } from "../lib/state.svelte.ts";
 
   interface PromptRow {
     id: string;
@@ -30,16 +31,20 @@
     models: string | null;
   }
 
+  const keep = keeper();
   type Sort = "cost" | "tokens" | "recent" | "messages";
-  let sort = $state<Sort>("cost");
+  let sort = $state<Sort>(keep.recall("sort", "cost"));
   const SORTS = $derived((["cost", "tokens", "recent", "messages"] as const).map((value) => ({ value: value as Sort, label: t(`sort.${value}`) })));
-  let query = $state("");
-  let debounced = $state("");
+  let query = $state(keep.recall("query", ""));
+  let debounced = $state(keep.recall("query", ""));
   // The table pages 10 rows at a time (the table card starts again on page 1 after a new search or sort).
   const PAGE = 10;
-  let page = $state(1);
+  let page = $state(keep.recall("page", 1));
+  $effect(() => keep.remember({ sort, query, page }));
   $effect(() => {
     const q = query;
+    // A search brought back with the view is already applied: it keeps its page.
+    if (q === debounced) return;
     const h = setTimeout(() => {
       debounced = q;
       page = 1;
@@ -127,7 +132,7 @@
                 <td class="max-w-xl" title={r.text ?? undefined}>
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
-                    <span class="truncate text-ink">{r.text ?? t("prompts.noText")}</span>
+                    <Link to="#/prompts/{encodeURIComponent(r.id)}" class="truncate text-ink">{r.text ?? t("prompts.noText")}</Link>
                   </div>
                 </td>
                 <td class="max-w-40 text-xs" title={r.skill ?? undefined}>

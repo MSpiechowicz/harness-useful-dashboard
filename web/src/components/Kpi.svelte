@@ -57,7 +57,7 @@
       {/if}
     </div>
     {#if sparkOption}
-      <div class="w-32 shrink-0"><Chart option={sparkOption} height={48} /></div>
+      <div class="w-32 shrink-0"><Chart option={sparkOption} height={48} {label} /></div>
     {/if}
   </div>
 </div>

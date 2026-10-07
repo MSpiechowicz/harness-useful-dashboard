@@ -31,9 +31,9 @@
 
 <div class="flex flex-wrap items-center gap-2">
   <RangePicker />
-  <button class="btn sm:hidden" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+  <button class="btn sm:hidden" aria-expanded={expanded} aria-label={t("filter.toggle")} title={t("filter.toggle")} onclick={() => (expanded = !expanded)}>
     <SlidersHorizontal size={14} />
-    {#if store.activeFilterCount}<span class="rounded-full bg-accent px-1.5 text-[10px] text-white">{store.activeFilterCount}</span>{/if}
+    {#if store.activeFilterCount}<span class="rounded-full bg-accent-fill px-1.5 text-[10px] text-white">{store.activeFilterCount}</span>{/if}
   </button>
   <div class="w-full flex-wrap gap-2 sm:contents {expanded ? 'flex' : 'hidden'}">
   {#each visible as k (k)}

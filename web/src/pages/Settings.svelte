@@ -303,7 +303,7 @@
                   aria-hidden="true"
                 ></span>
               {/if}
-              <span class="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-white shadow-sm ring-4 ring-accent-wash tabular">{n}</span>
+              <span class="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-fill text-[11px] font-semibold text-white shadow-sm ring-4 ring-accent-wash tabular">{n}</span>
               <div class="min-w-0 sm:mt-3 sm:pr-8">
                 <div class="text-[13px] font-medium text-ink">{t(`settings.share.step${n}Title`)}</div>
                 <div class="mt-0.5 text-xs leading-relaxed text-muted">{t(`settings.share.step${n}`)}</div>

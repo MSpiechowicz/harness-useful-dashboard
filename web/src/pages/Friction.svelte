@@ -2,8 +2,10 @@
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Empty from "../components/Empty.svelte";
+  import Link from "../components/Link.svelte";
   import Kpi from "../components/Kpi.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import SortTh from "../components/SortTh.svelte";
   import TableCard from "../components/TableCard.svelte";
   import ValueBar from "../components/ValueBar.svelte";
   import ViewGate from "../components/ViewGate.svelte";
@@ -70,7 +72,7 @@
       toolAsc = k === "key";
     }
   }
-  const toolArrow = (k: ToolSort) => (toolSort === k ? (toolAsc ? " ↑" : " ↓") : "");
+  const toolDir = (k: ToolSort) => (toolSort === k ? (toolAsc ? "ascending" : "descending") : undefined);
 
   type SessionSort = "total" | "errors" | "rejected" | "interrupts" | "recent";
   let sessionSort = $state<SessionSort>("total");
@@ -139,11 +141,11 @@
             </colgroup>
             <thead>
               <tr>
-                <th><button onclick={() => sortTools("key")}>{t("col.tool")}{toolArrow("key")}</button></th>
-                <th class="num"><button onclick={() => sortTools("calls")}>{t("col.calls")}{toolArrow("calls")}</button></th>
-                <th class="num"><button onclick={() => sortTools("errors")}>{t("friction.errors")}{toolArrow("errors")}</button></th>
-                <th class="num"><button onclick={() => sortTools("errorRate")}>{t("friction.errorRate")}{toolArrow("errorRate")}</button></th>
-                <th class="num"><button onclick={() => sortTools("rejected")}>{t("friction.rejected")}{toolArrow("rejected")}</button></th>
+                <SortTh label={t("col.tool")} sort={toolDir("key")} onclick={() => sortTools("key")} />
+                <SortTh num label={t("col.calls")} sort={toolDir("calls")} onclick={() => sortTools("calls")} />
+                <SortTh num label={t("friction.errors")} sort={toolDir("errors")} onclick={() => sortTools("errors")} />
+                <SortTh num label={t("friction.errorRate")} sort={toolDir("errorRate")} onclick={() => sortTools("errorRate")} />
+                <SortTh num label={t("friction.rejected")} sort={toolDir("rejected")} onclick={() => sortTools("rejected")} />
               </tr>
             </thead>
             <tbody>
@@ -188,7 +190,7 @@
                   <td>
                     <div class="flex items-center gap-2">
                       <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", s.provider)} title={s.provider}></span>
-                      <span class="truncate">{titleOf(s)}</span>
+                      <Link to="#/sessions/{encodeURIComponent(s.id)}" class="truncate">{titleOf(s)}</Link>
                     </div>
                   </td>
                   <td class="truncate text-ink-2" title={s.project ?? ""}>{entityLabel("project", s.project, s.projectLabel)}</td>

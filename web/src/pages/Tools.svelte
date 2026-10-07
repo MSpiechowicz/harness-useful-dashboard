@@ -6,6 +6,7 @@
   import Empty from "../components/Empty.svelte";
   import Kpi from "../components/Kpi.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import SortTh from "../components/SortTh.svelte";
   import TableCard from "../components/TableCard.svelte";
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
   import { colorFor, isColored, rankKeys } from "../lib/colors.svelte.ts";
@@ -96,7 +97,7 @@
       toolAsc = k === "name" || k === "kind";
     }
   }
-  const arrow = (k: ToolSort) => (toolSort === k ? (toolAsc ? " ↑" : " ↓") : "");
+  const dir = (k: ToolSort) => (toolSort === k ? (toolAsc ? "ascending" : "descending") : undefined);
   const max = $derived(Math.max(1, ...topTools.map((x) => x.calls)));
   // Bar segments, in a fixed order so each project keeps its place (and color) on every bar. Projects
   // without a hue of their own join "Other" rather than showing up as a second, identical gray.
@@ -238,12 +239,12 @@
             </colgroup>
             <thead>
               <tr>
-                <th><button onclick={() => sortTools("name")}>{t("col.tool")}{arrow("name")}</button></th>
-                <th><button onclick={() => sortTools("kind")}>{t("tools.kind")}{arrow("kind")}</button></th>
+                <SortTh label={t("col.tool")} sort={dir("name")} onclick={() => sortTools("name")} />
+                <SortTh label={t("tools.kind")} sort={dir("kind")} onclick={() => sortTools("kind")} />
                 <th>{t("tools.source")}</th>
-                <th class="num"><button onclick={() => sortTools("calls")}>{t("col.calls")}{arrow("calls")}</button></th>
+                <SortTh num label={t("col.calls")} sort={dir("calls")} onclick={() => sortTools("calls")} />
                 <th class="num">{t("col.share")}</th>
-                <th class="num"><button onclick={() => sortTools("sessions")}>{t("col.sessions")}{arrow("sessions")}</button></th>
+                <SortTh num label={t("col.sessions")} sort={dir("sessions")} onclick={() => sortTools("sessions")} />
               </tr>
             </thead>
             <tbody>

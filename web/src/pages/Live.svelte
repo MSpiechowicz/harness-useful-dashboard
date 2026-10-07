@@ -2,6 +2,7 @@
   import { Ban, CircleStop, CircleX, Gauge, MessageSquareText } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
+  import Link from "../components/Link.svelte";
   import Kpi from "../components/Kpi.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import PlanLimits, { type LimitsResult } from "../components/PlanLimits.svelte";
@@ -317,7 +318,7 @@
                 <td>
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", s.provider)} title={s.provider}></span>
-                    <span class="truncate font-medium">{titleOf(s)}</span>
+                    <Link to="#/sessions/{encodeURIComponent(s.id)}" class="truncate font-medium">{titleOf(s)}</Link>
                     {#if s.activeSubagents}
                       <span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-ink-2">{t("live.subagentsWorking", { n: s.activeSubagents })}</span>
                     {:else if s.subagents}
@@ -376,7 +377,7 @@
                 <td>
                   <span class="flex min-w-0 items-center gap-2.5">
                     <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' ? 'text-bad' : 'text-warn'}" />
-                    <span class="truncate {e.kind === 'prompt' ? 'text-ink' : 'text-ink-2'}" title={feedText(e)}>{feedText(e)}</span>
+                    <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class="truncate {e.kind === 'prompt' ? 'text-ink' : 'text-ink-2'}" title={feedText(e)}>{feedText(e)}</Link>
                   </span>
                 </td>
                 <td>

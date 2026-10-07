@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { setContext, type Snippet } from "svelte";
   import { Table2, ChartColumn } from "@lucide/svelte";
   import { t } from "../lib/i18n.svelte.ts";
 
@@ -19,6 +19,8 @@
   }
   let { title, subtitle, actions, children, table, class: cls = "", pad = true, divided = false, footer }: Props = $props();
   let showTable = $state(false);
+  // A chart in the card is named after it (see Chart's label).
+  setContext("card-title", () => title);
   const hasHeader = $derived(!!(title || actions || table));
 </script>
 
