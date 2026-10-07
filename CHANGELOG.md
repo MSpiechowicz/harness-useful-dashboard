@@ -1,3 +1,10 @@
+# [1.18.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.17.1...v1.18.0) (2026-10-07)
+
+
+### Features
+
+* pick folders with the system's own dialog in Settings ([c987c0e](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/c987c0e7e32d2b115c0cb1a44ae22171fcb5802d))
+
 ## [1.17.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.17.0...v1.17.1) (2026-10-07)
 
 
