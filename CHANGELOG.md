@@ -1,3 +1,10 @@
+## [1.18.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.0...v1.18.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* Codex limit windows logged a minute short read as 5h and Week, not primary and secondary ([6a0c97d](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/6a0c97d69df7d3fde51309b68ff9b218f7add3d6))
+
 # [1.18.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.17.1...v1.18.0) (2026-10-07)
 
 
