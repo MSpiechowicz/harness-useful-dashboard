@@ -1,3 +1,11 @@
+## [1.13.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.3...v1.13.4) (2026-10-07)
+
+
+### Bug Fixes
+
+* Friction's recent failures show the cause as a pill, without the red dot ([0fbc01a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/0fbc01a23f224c520a4e176007d1b6cc107e5f2c))
+* the causes in Friction's "Why calls failed" use the data color, not red ([b6cb635](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b6cb635fe71d9dca30a6c05bd5f317359ad3dbf9))
+
 ## [1.13.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.2...v1.13.3) (2026-10-07)
 
 
