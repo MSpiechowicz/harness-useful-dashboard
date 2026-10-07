@@ -1,0 +1,77 @@
+name: Prices
+
+# Every Monday: compare the built-in model prices with LiteLLM's price list (scripts/update-prices.ts). When something
+# differs, check + test, then open or update ONE pull request on chore/update-prices for a human to review.
+# Merging it releases a patch (fix:) and the app re-prices history once. Nothing is ever merged automatically.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write # push the chore/update-prices branch
+  pull-requests: write # open and update the pull request
+
+concurrency:
+  group: prices
+  cancel-in-progress: false
+
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    env:
+      REPORT: ${{ runner.temp }}/prices-report.md
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: Check prices
+        id: prices
+        run: bun scripts/update-prices.ts --report "$REPORT"
+      # The report also explains a refusal (a price moving 10x or more), so show it whatever happened.
+      - name: Show the report
+        if: always()
+        run: '[ -f "$REPORT" ] && cat "$REPORT" >> "$GITHUB_STEP_SUMMARY" || true'
+      - name: Verify the change
+        if: steps.prices.outputs.changed == 'true'
+        run: |
+          bun run check
+          bun test
+      - name: Open or update the pull request
+        if: steps.prices.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          BRANCH=chore/update-prices
+          TITLE="fix: update built-in model prices"
+          {
+            cat "$REPORT"
+            echo
+            echo "---"
+            echo
+            echo "This pull request was opened by the weekly price check. It is not merged automatically."
+            echo "CI does not run on pull requests opened with the GITHUB_TOKEN. The job already ran \`bun run check\` and \`bun test\` on this change. To run CI as well, re-run it or push an empty commit."
+          } > "$RUNNER_TEMP/pr-body.md"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add src/core/pricing.ts
+          git commit -m "$TITLE"
+          git push --force origin "$BRANCH"
+
+          NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$NUMBER" ]; then
+            gh pr edit "$NUMBER" --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md"
+            # Assign and request review so the owner is notified. A failed review request is not fatal.
+            gh pr edit "$NUMBER" --add-assignee "$OWNER"
+            gh pr edit "$NUMBER" --add-reviewer "$OWNER" || echo "::warning::Could not request a review from $OWNER, assigned only"
+          else
+            if ! gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md" --assignee "$OWNER" --reviewer "$OWNER"; then
+              echo "::warning::Could not request a review from $OWNER, assigning only"
+              gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md" --assignee "$OWNER"
+            fi
+          fi

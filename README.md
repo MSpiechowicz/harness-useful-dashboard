@@ -543,6 +543,9 @@ databases, and older ones after one Compact, give the space that trimming frees 
   under **Providers → Billed via**.
   Models without a known list price get a fallback rate and are marked **estimated**. Add their prices under
   **Settings → Pricing**, which re-prices your whole history.
+- **Prices.** The built-in prices ship with the app, which never fetches prices itself. A weekly GitHub Action compares
+  them with LiteLLM's public price list and opens a pull request when something changed, which is reviewed before it
+  is merged. Rules you set under **Settings → Pricing** always win over the built-in ones.
 - **Projects.** A session counts toward the git repository it ran in, even when it started in a subfolder. Linked
   worktrees count toward their main repository, and folders outside git are their own project. Temp folders, Codex app
   chats (`~/Documents/Codex/<date>/…`) and Claude desktop scratch workspaces are grouped as **No project**.
