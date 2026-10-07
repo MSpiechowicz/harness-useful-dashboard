@@ -504,12 +504,43 @@ table.data th.num {
   }
 }
 
-/* Plan limits: the time left in the window, a still tick on the bar with a ring in the card colour so it reads on any fill,
-   and a soft glow in its own colour. */
+/* Plan limits: the time left in the window, a tick on the bar with a ring in the card colour so it reads on any fill,
+   and a soft glow in its own colour. A thin outline in the tick's shape grows out of it and fades, mostly sideways so it
+   stays clear of the text above. Only transform and opacity move. */
 .pace-mark {
   box-shadow:
     0 0 0 1.5px var(--surface),
     0 0 6px 1px color-mix(in srgb, currentColor 55%, transparent);
+}
+.pace-mark::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 1px solid currentColor;
+  opacity: 0;
+  pointer-events: none;
+  animation: pace-ripple 3s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+@keyframes pace-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  75%,
+  100% {
+    transform: scale(2.4, 1.3);
+    opacity: 0;
+  }
+}
+/* The stretch a limit falls short of the time left, hatched in the warning colour. */
+.pace-gap {
+  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--warn-ink) 45%, transparent) 0 2px, transparent 2px 5px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pace-mark::after {
+    animation: none;
+  }
 }
 
 ::-webkit-scrollbar {

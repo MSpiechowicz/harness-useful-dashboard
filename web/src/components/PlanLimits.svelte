@@ -54,6 +54,7 @@
 </script>
 
 <script lang="ts">
+  import { Check, TrendingDown } from "@lucide/svelte";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, relative, until } from "../lib/format.ts";
 
@@ -99,6 +100,7 @@
       {#each r.windows as w (w.id)}
         {@const l = left(w)}
         {@const p = pace(w)}
+        {@const short = p != null && l < p.timeLeft}
         <div class="flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between gap-3 text-xs">
             <span class="truncate text-ink-2">{windowName(w)}</span>
@@ -108,26 +110,27 @@
               <span class="text-muted"> · {@render reset(w)}</span>
             </span>
           </div>
+          <!-- What's left ending short of the time left means the limit runs out before the window does: the gap between
+               them is hatched, and the tick and the note share the warning colour. -->
           <div class="relative">
-            <div class="h-2 overflow-hidden rounded-full bg-surface-3">
+            <div class="relative h-2 overflow-hidden rounded-full bg-surface-3">
               <div class="h-full rounded-full transition-[width] duration-500" style:width={l > 0 ? `max(${l * 100}%, 4px)` : "0"} style:background={fill(l, r.provider)}></div>
+              {#if p && short}
+                <span class="pace-gap absolute inset-y-0" style:left="{l * 100}%" style:width="{(p.timeLeft - l) * 100}%"></span>
+              {/if}
             </div>
-            <!-- The time left in the window as a still tick. A bar that ends short of it runs out before the window does: the
-                 tick turns red. -->
+            <!-- The time left in the window as a tick with a small ripple. -->
             {#if p}
-              <span
-                class="absolute top-1/2 h-0 w-0"
-                style:left="{p.timeLeft * 100}%"
-                style:color={l < p.timeLeft ? "var(--status-critical)" : "var(--ink)"}
-                title={t("live.pace.marker")}
-              >
+              <span class="absolute top-1/2 h-0 w-0" style:left="{p.timeLeft * 100}%" style:color={short ? "var(--warn-ink)" : "var(--ink)"} title={t("live.pace.marker")}>
                 <span class="pace-mark absolute h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current"></span>
               </span>
             {/if}
           </div>
           {#if p?.outAt != null}
-            <div class="text-[11px] {p.outAt < (w.resetsAt ?? 0) ? 'text-warn' : 'text-muted'}">
-              {p.outAt < (w.resetsAt ?? 0) ? t("live.pace.out", { time: clock(p.outAt) }) : t("live.pace.lasts")}
+            {@const out = p.outAt < (w.resetsAt ?? 0)}
+            <div class="flex items-center gap-1.5 text-[11px] {out ? 'text-warn' : 'text-muted'}">
+              {#if out}<TrendingDown class="size-3.5 shrink-0" aria-hidden="true" />{:else}<Check class="size-3.5 shrink-0" aria-hidden="true" />{/if}
+              <span>{out ? t("live.pace.out", { time: clock(p.outAt) }) : t("live.pace.lasts")}</span>
             </div>
           {/if}
         </div>
