@@ -12,7 +12,8 @@ import {
   budgetRows, filtersOf, filtersOut, InputError, iso, limitWindows, openReadOnly, RANGES, type Range, rangeOut, ratio, resolveRange, usd,
 } from "../core/reports.ts";
 import { sessionCost } from "../core/statusline.ts";
-import { tagUsage } from "../core/tagUsage.ts";
+import { KINDS } from "../core/labels.ts";
+import { kindUsage, tagUsage } from "../core/tagUsage.ts";
 import { generateTips } from "../core/tips.ts";
 import { type Schema, type Tool, ToolError } from "./server.ts";
 
@@ -92,6 +93,7 @@ const FILTER_PROPS: Record<string, Schema> = {
   model: { type: "string", maxLength: 200, description: "Only this model id, e.g. claude-opus-5-5." },
   user: { type: "string", maxLength: 200, description: "Only this user (on a database shared by several people)." },
   tag: { type: "string", maxLength: 100, description: "Only sessions with this tag (set in the dashboard), their subagents included." },
+  kind: { type: "string", enum: KINDS, description: "Only sessions of this kind of work (AI session labels, when the user turned them on), their subagents included." },
 };
 
 const limitProp = (fallback: number, max: number, what: string): Schema => ({ type: "integer", minimum: 1, maximum: max, description: `How many ${what} to return, ${fallback} by default, at most ${max}.` });
@@ -225,11 +227,11 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
     },
   };
 
-  const DIMENSIONS = ["project", "model", "provider", "user", "skill", "agent", "tag"] as const;
+  const DIMENSIONS = ["project", "model", "provider", "user", "skill", "agent", "tag", "kind"] as const;
   const breakdown: Tool = {
     name: "breakdown",
     title: "Usage breakdown",
-    description: "Cost and tokens split by project, model, provider (harness), user, skill, agent or session tag for a time range, most expensive first, with each one's share of the total. A session with several tags counts under each.",
+    description: "Cost and tokens split by project, model, provider (harness), user, skill, agent, session tag or kind of work (feature, bugfix, … written by AI session labels, when the user turned them on) for a time range, most expensive first, with each one's share of the total. A session with several tags counts under each.",
     inputSchema: {
       type: "object",
       properties: {
@@ -247,7 +249,7 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
       const range = resolveRange(args, "30d", t);
       const f = filtersOf(q, args, range);
       const limit = limitOf(args, 10);
-      const b = args.dimension === "tag" ? tagUsage(store.get().db, f) : q.breakdown(f, args.dimension as Dimension, limit + 1);
+      const b = args.dimension === "tag" ? tagUsage(store.get().db, f) : args.dimension === "kind" ? kindUsage(store.get().db, f) : q.breakdown(f, args.dimension as Dimension, limit + 1);
       return {
         dimension: args.dimension,
         range: rangeOut(range, t),

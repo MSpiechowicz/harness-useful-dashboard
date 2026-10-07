@@ -167,10 +167,16 @@ export function shortPath(p: string | null | undefined, keep = 2): string {
   return parts.length <= keep ? p : "…/" + parts.slice(-keep).join("/");
 }
 
+/** A kind of work in the UI's language ("bugfix" is "Bugfix"). Anything unknown is shown as it is. */
+export function kindName(kind: string): string {
+  return KINDS.includes(kind) ? t(`kind.${kind}` as "kind.bugfix") : kind;
+}
+const KINDS = ["feature", "bugfix", "refactor", "tests", "docs", "research", "ops", "other"];
+
 /** Display name for a dimension value: localizes the "other" bucket, token types and missing values. */
 export function entityLabel(dim: string, key: string | null, label: string): string {
   if (key === "__other__") return t("chart.other");
   if (dim === "type") return t(`tok.${key}` as "tok.input");
-  if (key == null || key === "(none)") return dim === "project" ? t("common.noProject") : dim === "tag" ? t("tags.untagged") : t("common.none");
-  return label;
+  if (key == null || key === "(none)") return dim === "project" ? t("common.noProject") : dim === "tag" ? t("tags.untagged") : dim === "kind" ? t("kinds.unlabelled") : t("common.none");
+  return dim === "kind" ? kindName(key) : label;
 }

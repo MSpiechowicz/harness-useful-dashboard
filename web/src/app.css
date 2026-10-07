@@ -504,42 +504,12 @@ table.data th.num {
   }
 }
 
-/* Plan limits: the time left as sand running out. A bright mark, and grains slipping from it toward the start of the bar,
-   fading as they go. */
-.sand-mark {
+/* Plan limits: the time left in the window, a still tick on the bar with a ring in the card colour so it reads on any fill,
+   and a soft glow in its own colour. */
+.pace-mark {
   box-shadow:
     0 0 0 1.5px var(--surface),
-    0 0 6px currentColor;
-}
-.sand-grain {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 3px;
-  height: 3px;
-  border-radius: 9999px;
-  background: currentColor;
-  box-shadow: 0 0 4px currentColor;
-  opacity: 0;
-  animation: sand-slip 1.8s linear infinite;
-}
-@keyframes sand-slip {
-  0% {
-    transform: translate(-2px, -50%);
-    opacity: 0;
-  }
-  15% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate(-40px, -50%);
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sand-grain {
-    display: none;
-  }
+    0 0 6px 1px color-mix(in srgb, currentColor 55%, transparent);
 }
 
 ::-webkit-scrollbar {

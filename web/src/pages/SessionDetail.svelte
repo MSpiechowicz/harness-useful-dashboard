@@ -7,6 +7,7 @@
   import Empty from "../components/Empty.svelte";
   import ListCard from "../components/ListCard.svelte";
   import Pager from "../components/Pager.svelte";
+  import SessionLabel from "../components/SessionLabel.svelte";
   import TagEditor from "../components/TagEditor.svelte";
   import ValueBar from "../components/ValueBar.svelte";
   import Kpi from "../components/Kpi.svelte";
@@ -36,6 +37,7 @@
     inherited: string[];
     rule: string | null;
     note: { note: string; updatedAt: number } | null;
+    label: { title: string; kind: string; model: string; shown: boolean } | null;
   }
 
   const d = useFetch<Detail>(() => `/api/session${qs({ id })}`);
@@ -74,7 +76,10 @@
       <div class="card"><Empty title={t("sessions.notFound")} compact /></div>
     {:else if d.data}
       <div>
-        <h1 class="text-xl font-semibold tracking-tight" class:text-ink-2={!s?.title}>{s?.title ?? t("sessions.untitled")}</h1>
+        <div class="flex items-center gap-2.5">
+          <h1 class="text-xl font-semibold tracking-tight" class:text-ink-2={!s?.title}>{s?.title ?? t("sessions.untitled")}</h1>
+          {#if d.data.label?.shown}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted" title={t("label.aiHint")}>{t("label.ai")}</span>{/if}
+        </div>
         <!-- Each fact with its own icon, so the line reads as separate items rather than one run of text. Icons sit 1px up:
              centred on the box they'd be low against the letters, and one font keeps every item on the same baseline. -->
         <div class="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-ink-2">
@@ -100,6 +105,7 @@
           <span class="inline-flex items-center gap-1.5 text-muted" title={id}><Hash size={13} class="-translate-y-px" />{id.split(":").pop()?.slice(0, 8)}</span>
           {#if s?.parent_session_id}<Link class="text-accent-ink hover:underline" to="#/sessions/{encodeURIComponent(s.parent_session_id)}">↖ {t("sessions.parent")}</Link>{/if}
         </div>
+        <SessionLabel {id} label={d.data.label} />
       </div>
 
       <!-- Five tiles: the last one two columns wide on small screens, so both rows are full. -->

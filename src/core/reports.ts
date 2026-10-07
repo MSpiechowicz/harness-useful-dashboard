@@ -5,7 +5,8 @@ import { openDb } from "./db.ts";
 import { codexLimits } from "./limits.ts";
 import { PriceBook } from "./pricing.ts";
 import { type Dimension, type Filters, Queries } from "./queries.ts";
-import { tagUsage } from "./tagUsage.ts";
+import { kindUsage, tagUsage } from "./tagUsage.ts";
+import { isKind, KINDS } from "./labels.ts";
 import { LIMIT_FRESH_MS, type LimitInfo, storedFiveHour } from "./statusline.ts";
 
 /**
@@ -116,12 +117,17 @@ export function filtersOf(q: Queries, args: Record<string, unknown>, range: Reso
   if (typeof args.user === "string" && args.user) f.user = args.user;
   if (typeof args.project === "string" && args.project) f.project = resolveProject(q, args.project);
   if (typeof args.tag === "string" && args.tag.trim()) f.tag = args.tag.trim().toLowerCase();
+  if (typeof args.kind === "string" && args.kind.trim()) {
+    const kind = args.kind.trim().toLowerCase();
+    if (!isKind(kind)) throw new InputError(`kind must be one of ${KINDS.join(", ")}, got "${args.kind}"`);
+    f.kind = kind;
+  }
   return f;
 }
 
 export const filtersOut = (f: Filters) => {
   const out: Record<string, string> = {};
-  for (const k of ["provider", "project", "model", "user", "tag"] as const) if (f[k]) out[k] = f[k]!;
+  for (const k of ["provider", "project", "model", "user", "tag", "kind"] as const) if (f[k]) out[k] = f[k]!;
   return Object.keys(out).length ? out : undefined;
 };
 
@@ -272,11 +278,11 @@ export function todayReport(c: ReportContext, args: Record<string, unknown> = {}
 
 export type TodayReport = ReturnType<typeof todayReport>;
 
-export const REPORT_BY = ["project", "model", "provider", "user", "tag", "day", "week", "month"] as const;
+export const REPORT_BY = ["project", "model", "provider", "user", "tag", "kind", "day", "week", "month"] as const;
 export type ReportBy = (typeof REPORT_BY)[number];
 
 /**
- * `report`: a breakdown (project, model, provider, user, tag) or a time series (day, week, month) for a range. Rows keep
+ * `report`: a breakdown (project, model, provider, user, tag, kind of work) or a time series (day, week, month) for a range. Rows keep
  * the dashboard's own field names, as its table export does.
  */
 export function usageReport(c: ReportContext, args: Record<string, unknown>) {
@@ -292,6 +298,9 @@ export function usageReport(c: ReportContext, args: Record<string, unknown>) {
   } else if (by === "tag") {
     // A session with several tags is in each row: the rows can add up to more than the total.
     rows = tagUsage(c.db, f).rows.map((r) => ({ ...r }));
+  } else if (by === "kind") {
+    // Sessions without an AI label are the "(none)" row: kinds exist only once labels are turned on.
+    rows = kindUsage(c.db, f).rows.map((r) => ({ ...r }));
   } else {
     // Every row: the human table shortens the list itself, files and scripts get all of it.
     rows = c.queries.breakdown(f, by, 100_000).rows;

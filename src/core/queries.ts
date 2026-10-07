@@ -5,6 +5,7 @@ import { storedApiClass } from "./apiErrors.ts";
 import { storedReason } from "./failures.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
 import { type PromptMetric, promptStats } from "./promptStats.ts";
+import { KINDS, labelsForSessions } from "./labels.ts";
 import { allTags, tagsForSessions } from "./tags.ts";
 
 export interface Filters {
@@ -18,6 +19,8 @@ export interface Filters {
   agent?: string;
   /** A session tag: its sessions, their subagents' sessions, and the projects with that tag as their default. */
   tag?: string;
+  /** A kind of work (labels.ts): the sessions labelled with it, and their subagents' sessions. */
+  kind?: string;
 }
 
 export type Dimension = "provider" | "project" | "user" | "model" | "skill" | "agent" | "session" | "prompt" | "host";
@@ -38,6 +41,12 @@ function tagCondition(alias: string): string {
   return `(${alias}.session_id IN (SELECT session_id FROM session_tags WHERE tag = $tag
             UNION SELECT s.id FROM sessions s JOIN session_tags g ON g.session_id = s.parent_session_id WHERE g.tag = $tag)
           OR ${alias}.project IN (SELECT project FROM project_tags WHERE tag = $tag))`;
+}
+
+/** Rows of the sessions a kind of work reaches, resolved like a tag: the labelled session and its subagents' sessions. */
+function kindCondition(alias: string): string {
+  return `${alias}.session_id IN (SELECT session_id FROM session_labels WHERE kind = $kind
+            UNION SELECT s.id FROM sessions s JOIN session_labels l ON l.session_id = s.parent_session_id WHERE l.kind = $kind)`;
 }
 
 /** Builds a WHERE clause over the `usage` table (alias `u`). */
@@ -64,6 +73,10 @@ export function whereClause(f: Filters, alias = "u"): { sql: string; params: Par
   if (f.tag) {
     parts.push(tagCondition(alias));
     params.tag = f.tag;
+  }
+  if (f.kind) {
+    parts.push(kindCondition(alias));
+    params.kind = f.kind;
   }
   return { sql: parts.length ? `WHERE ${parts.join(" AND ")}` : "", params };
 }
@@ -114,16 +127,17 @@ export function relativeTo(file: string, project: string | null, home = homedir(
 }
 
 /**
- * A session's title as SQL: the one its harness gave it, else its first prompt on one line, else, for a subagent, its
- * name. Many sessions never get a title (omp leaves it empty until it names the session, Codex often has none), and
- * the first prompt says what they were about. Subagents have no prompts of their own (their brief comes from the
+ * A session's title as SQL: the one its harness gave it, else the AI's (labels.ts, only when the user turned labels on),
+ * else its first prompt on one line, else, for a subagent, its name. Many sessions never get a title (omp leaves it
+ * empty until it names the session, Codex often has none), and the first prompt says what they were about. Subagents have no prompts of their own (their brief comes from the
  * parent), but harnesses name them after their task ("TriggerDurability"). `alias` is the sessions table's alias.
  */
 export function sessionTitle(alias: string): string {
   // A pasted image is logged as "[Image #1, 1481x890]" ahead of the words: up to two of them are left out of the title.
   const noImage = (x: string) => `ltrim(CASE WHEN ${x} LIKE '[Image #%]%' THEN substr(${x}, instr(${x}, ']') + 1) ELSE ${x} END)`;
   const text = noImage(noImage("trim(fp.text)"));
-  return `COALESCE(NULLIF(${alias}.title, ''), (SELECT NULLIF(trim(replace(replace(substr(${text}, 1, 160), char(10), ' '), char(13), ' ')), '')
+  return `COALESCE(NULLIF(${alias}.title, ''), (SELECT NULLIF(l.title, '') FROM session_labels l WHERE l.session_id = ${alias}.id),
+    (SELECT NULLIF(trim(replace(replace(substr(${text}, 1, 160), char(10), ' '), char(13), ' ')), '')
     FROM prompts fp WHERE fp.session_id = ${alias}.id AND fp.text IS NOT NULL AND trim(fp.text) <> '' ORDER BY fp.ts LIMIT 1),
     NULLIF(${alias}.agent, ''))`;
 }
@@ -676,7 +690,11 @@ export class Queries {
       opts.q ? { ...w.params, q: params.q! } : w.params,
     )!.n;
     const tags = tagsForSessions(this.db, rows.map((r) => r.id));
-    return { total: count, rows: rows.map((r) => ({ ...r, projectLabel: projectLabel(r.project as string | null), tags: tags.get(r.id) ?? [] })) };
+    const labels = labelsForSessions(this.db, rows.map((r) => r.id));
+    return {
+      total: count,
+      rows: rows.map((r) => ({ ...r, projectLabel: projectLabel(r.project as string | null), tags: tags.get(r.id) ?? [], kind: labels.get(r.id)?.kind ?? null, aiTitle: labels.get(r.id)?.aiTitle ?? false })),
+    };
   }
 
   sessionDetail(id: string) {
@@ -1022,6 +1040,10 @@ export class Queries {
         agent: values("agent"),
         // Every tag in use, whatever the range: a tag is the user's own label, and picking one never comes up empty-handed.
         tag: allTags(this.db).map((t) => ({ value: t.tag, label: t.tag, n: t.sessions })),
+        // The kinds of work in use, whatever the range, like tags: only once labels exist.
+        kind: this.all<{ kind: string; n: number }>("SELECT kind, COUNT(*) AS n FROM session_labels GROUP BY kind")
+          .sort((a, b) => KINDS.indexOf(a.kind as (typeof KINDS)[number]) - KINDS.indexOf(b.kind as (typeof KINDS)[number]))
+          .map((k) => ({ value: k.kind, label: k.kind, n: k.n })),
         range,
       };
     });

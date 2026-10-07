@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bell, Check, Cloud, Download, FileText, FileUp, Info, Loader, Plus, Power, RefreshCw, Shrink, Trash2, TriangleAlert, Users } from "@lucide/svelte";
+  import { Bell, Check, Cloud, Copy, Download, ExternalLink, FileText, FileUp, Info, Loader, Plus, Power, RefreshCw, Shrink, Tags, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import FolderField from "../components/FolderField.svelte";
@@ -35,6 +35,8 @@
     budgets?: { daily: number | null; monthly: number | null; projects: Record<string, number>; notify: boolean; limitAlerts: boolean };
     cursorSync?: boolean;
     digest?: { enabled: boolean; day: number; hour: number; dir: string };
+    labels?: { enabled: boolean; cli: "claude" | "codex"; model: string; dailyCap: number };
+    metrics?: { enabled: boolean; token: string; projectLabels: boolean };
   }
   interface Settings {
     config: Config;
@@ -172,6 +174,84 @@
     digestDir = g?.dir ?? "";
   }
 
+  // The Prometheus endpoint: a change saves at once. The token is made by the server, a new one is only asked for.
+  const metricsUrl = `http://127.0.0.1:${location.port || 80}/metrics`;
+  const METRICS_DOCS = "https://github.com/MSpiechowicz/harness-useful-dashboard#prometheus-metrics";
+  let tokenCopied = $state(false);
+  async function saveMetrics(change: { enabled?: boolean; projectLabels?: boolean; regenerateToken?: boolean }) {
+    busy = true;
+    errorMsg = null;
+    try {
+      apply(await send<Settings>("/api/settings", { metrics: change }));
+      flash(t("settings.saved"));
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+  async function copyToken() {
+    try {
+      await navigator.clipboard.writeText(cfg?.metrics?.token ?? "");
+      tokenCopied = true;
+      setTimeout(() => (tokenCopied = false), 2000);
+    } catch {
+      /* the field's text can still be selected by hand */
+    }
+  }
+
+  // AI session labels: switch and program save at once, the model and the cap with Save. The status is the server's.
+  type LabelCode = "not-installed" | "not-signed-in" | "timeout" | "bad-output" | "failed";
+  interface LabelStatus {
+    available: { claude: boolean; codex: boolean };
+    textLimit: number;
+    state: { ranAt: number | null; labelled: number; failed: number; code: LabelCode | null; nextAt: number | null; sent: number };
+  }
+  let labelStatus = $state<LabelStatus | null>(null);
+  let labelsRunning = $state(false);
+  const CLI_NAMES = { claude: "Claude Code", codex: "Codex" } as const;
+  const labelClis = $derived.by(() => {
+    const have = labelStatus?.available;
+    return (["claude", "codex"] as const).map((v) => ({ value: v, label: have && !have[v] ? t("settings.labelsCliMissing", { name: CLI_NAMES[v] }) : CLI_NAMES[v] }));
+  });
+  const labelLine = $derived.by(() => {
+    const s = labelStatus;
+    const l = cfg?.labels;
+    if (!s || !l?.enabled) return null;
+    if (s.textLimit <= 0) return { bad: true, text: t("settings.labelsStatus.noPrompts") };
+    if (!s.available.claude && !s.available.codex) return { bad: true, text: t("settings.labelsNoCli") };
+    if (s.state.code) return { bad: true, text: t(`settings.labelsCode.${s.state.code}`, { when: relative(s.state.nextAt) }) };
+    if (s.state.sent >= l.dailyCap) return { bad: false, text: t("settings.labelsStatus.cap") };
+    if (s.state.ranAt) return { bad: false, text: t("settings.labelsStatus.ok", { when: relative(s.state.ranAt), n: s.state.labelled, failed: s.state.failed, sent: s.state.sent, cap: l.dailyCap }) };
+    return { bad: false, text: t("settings.labelsStatus.never") };
+  });
+  async function saveLabels() {
+    if (!cfg?.labels) return;
+    busy = true;
+    errorMsg = null;
+    try {
+      const { enabled, cli, model, dailyCap } = cfg.labels;
+      apply(await send<Settings>("/api/settings", { labels: { enabled, cli, model: model.trim(), dailyCap: Math.round(Number(dailyCap)) } }));
+      labelStatus = await getJson<LabelStatus>("/api/labels");
+      flash(t("settings.saved"));
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+  async function labelNow() {
+    labelsRunning = true;
+    errorMsg = null;
+    try {
+      labelStatus = await send<LabelStatus>("/api/labels/run");
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      labelsRunning = false;
+    }
+  }
+
   async function saveBudgets() {
     if (!cfg?.budgets) return;
     busy = true;
@@ -252,6 +332,9 @@
       .then((f) => (projectOptions = f.project.map((o) => ({ value: o.value, label: o.label }))))
       .catch(() => {});
     loadDigest().catch(() => {});
+    getJson<LabelStatus>("/api/labels")
+      .then((s) => (labelStatus = s))
+      .catch(() => {});
     getJson<CursorSync>("/api/cursor/sync")
       .then((s) => (cursorSync = s))
       .catch(() => {});
@@ -665,6 +748,60 @@
         {/if}
         {#snippet footer()}
           <button class="btn btn-primary" onclick={saveDigest} disabled={busy}>{t("settings.save")}</button>
+        {/snippet}
+      </Card>
+    {/if}
+
+    {#if cfg.metrics}
+      <Card title={t("settings.metrics")} subtitle={t("settings.metricsHint")} divided>
+        <SettingRow label={t("settings.metricsEnable")} hint={t("settings.metricsEnableHint")}>
+          <Switch bind:checked={cfg.metrics.enabled} label={t("settings.metricsEnable")} onchange={() => saveMetrics({ enabled: cfg!.metrics!.enabled })} />
+        </SettingRow>
+        {#if cfg.metrics.enabled}
+          <SettingRow label={t("settings.metricsUrl")} hint={t("settings.metricsUrlHint")} wide>
+            <input class="input w-full font-mono text-xs" readonly value={metricsUrl} aria-label={t("settings.metricsUrl")} onfocus={(e) => e.currentTarget.select()} />
+          </SettingRow>
+          <SettingRow label={t("settings.metricsToken")} hint={t("settings.metricsTokenHint")} wide>
+            <!-- The server makes the token as metrics are turned on: until its answer arrives the field says so. -->
+            <input class="input min-w-0 flex-1 font-mono text-xs" readonly value={cfg.metrics.token} placeholder={t("common.loading")} aria-label={t("settings.metricsToken")} aria-busy={!cfg.metrics.token} onfocus={(e) => e.currentTarget.select()} />
+            <button class="btn shrink-0" onclick={copyToken}>
+              {#if tokenCopied}<Check size={14} />{t("settings.metricsCopied")}{:else}<Copy size={14} />{t("settings.metricsCopy")}{/if}
+            </button>
+            <button class="btn shrink-0" onclick={() => saveMetrics({ regenerateToken: true })} disabled={busy}><RefreshCw size={14} />{t("settings.metricsRegenerate")}</button>
+          </SettingRow>
+          <SettingRow label={t("settings.metricsProjects")} hint={t("settings.metricsProjectsHint")}>
+            <Switch bind:checked={cfg.metrics.projectLabels} label={t("settings.metricsProjects")} onchange={() => saveMetrics({ projectLabels: cfg!.metrics!.projectLabels })} />
+          </SettingRow>
+          <SettingRow label={t("settings.metricsExample")} hint={t("settings.metricsExampleHint")}>
+            <a class="btn" href={METRICS_DOCS} target="_blank" rel="noreferrer"><ExternalLink size={14} />{t("settings.metricsExampleButton")}</a>
+          </SettingRow>
+        {/if}
+      </Card>
+    {/if}
+
+    {#if cfg.labels}
+      <Card title={t("settings.labels")} subtitle={t("settings.labelsHint")} divided>
+        <SettingRow label={t("settings.labelsEnable")} hint={t("settings.labelsEnableHint")}>
+          <Switch bind:checked={cfg.labels.enabled} label={t("settings.labelsEnable")} onchange={() => saveLabels()} />
+        </SettingRow>
+        {#if cfg.labels.enabled}
+          <SettingRow label={t("settings.labelsCli")} hint={t("settings.labelsCliHint")}>
+            <Dropdown full label={t("settings.labelsCli")} bind:value={cfg.labels.cli} options={labelClis} onchange={() => saveLabels()} />
+          </SettingRow>
+          <SettingRow label={t("settings.labelsModel")} hint={t("settings.labelsModelHint")}>
+            <input class="input w-full font-mono text-xs" bind:value={cfg.labels.model} maxlength="64" autocomplete="off" spellcheck="false" aria-label={t("settings.labelsModel")} />
+          </SettingRow>
+          <SettingRow label={t("settings.labelsCap")} hint={t("settings.labelsCapHint")}>
+            <NumberField bind:value={cfg.labels.dailyCap} unit={t("settings.unit.sessions")} label={t("settings.labelsCap")} min={1} />
+          </SettingRow>
+          <SettingRow label={t("settings.labelsNow")} hint={labelLine?.text}>
+            <button class="btn" onclick={labelNow} disabled={labelsRunning || busy || (labelStatus?.textLimit ?? 1) <= 0}>
+              {#if labelsRunning}<Loader size={14} class="animate-spin" />{t("settings.labelsNowRunning")}{:else}<Tags size={14} />{t("settings.labelsNowButton")}{/if}
+            </button>
+          </SettingRow>
+        {/if}
+        {#snippet footer()}
+          <button class="btn btn-primary" onclick={saveLabels} disabled={busy}>{t("settings.save")}</button>
         {/snippet}
       </Card>
     {/if}

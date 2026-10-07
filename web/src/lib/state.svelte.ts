@@ -3,8 +3,8 @@ import { flushSync, tick } from "svelte";
 export type RangePreset = "today" | "7d" | "30d" | "90d" | "month" | "all" | "custom";
 export type Metric = "tokens" | "cost";
 export type ThemePref = "system" | "light" | "dark";
-export type FilterKey = "provider" | "project" | "user" | "model" | "skill" | "agent" | "tag";
-export const FILTER_KEYS: FilterKey[] = ["provider", "project", "user", "model", "skill", "agent", "tag"];
+export type FilterKey = "provider" | "project" | "user" | "model" | "skill" | "agent" | "tag" | "kind";
+export const FILTER_KEYS: FilterKey[] = ["provider", "project", "user", "model", "skill", "agent", "tag", "kind"];
 
 export interface Filters {
   from?: number;
@@ -16,6 +16,7 @@ export interface Filters {
   skill?: string;
   agent?: string;
   tag?: string;
+  kind?: string;
 }
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -84,6 +85,7 @@ class Store {
   skill = $state("");
   agent = $state("");
   tag = $state("");
+  kind = $state("");
   metric = $state<Metric>(load("hd.metric", ["tokens", "cost"] as const, "cost"));
   /** Whether project views list the work done outside any project ("No project"). */
   showNoProject = $state<boolean>(load("hd.showNoProject", ["true", "false"] as const, "true") === "true");

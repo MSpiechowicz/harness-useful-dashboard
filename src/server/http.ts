@@ -17,8 +17,10 @@ import { limitHistory, planValue } from "../core/plans.ts";
 import { budgetStatus, message } from "../core/budgets.ts";
 import { generateTips } from "../core/tips.ts";
 import { addTag, allTags, projectRules, removeTag, sessionTags, setNote, setProjectRules } from "../core/tags.ts";
-import { tagUsage } from "../core/tagUsage.ts";
+import { clearLabel, isKind, sessionLabel, setKind } from "../core/labels.ts";
+import { kindUsage, tagUsage } from "../core/tagUsage.ts";
 import { timing } from "../core/timing.ts";
+import { CONTENT_TYPE, metricsText } from "../core/metrics.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
 import { cookieName, cookieValue, sameToken } from "./auth.ts";
@@ -38,7 +40,7 @@ export function parseFilters(sp: URLSearchParams): Filters {
     return Number.isFinite(x) ? x : undefined;
   };
   const s = (k: string) => sp.get(k) || undefined;
-  return { from: n("from"), to: n("to"), provider: s("provider"), project: s("project"), user: s("user"), model: s("model"), skill: s("skill"), agent: s("agent"), tag: s("tag")?.trim().toLowerCase().slice(0, 100) };
+  return { from: n("from"), to: n("to"), provider: s("provider"), project: s("project"), user: s("user"), model: s("model"), skill: s("skill"), agent: s("agent"), tag: s("tag")?.trim().toLowerCase().slice(0, 100), kind: isKind(sp.get("kind")) ? sp.get("kind")! : undefined };
 }
 
 function pick<T extends string>(v: string | null, allowed: readonly T[], fallback: T): T {
@@ -132,14 +134,15 @@ export const SIGNED_OUT = "signed-out";
  * Guards against DNS-rebinding and cross-site requests: the Host header must be a loopback name, and state-changing
  * requests must carry a custom header (which forces a CORS preflight we never allow). The API also refuses requests a
  * browser marks as coming from another site: they can't read the answer, but even a GET has effects here (a scan, a
- * signed-in plan-limit check, an update check).
+ * signed-in plan-limit check, an update check). The metrics endpoint is held to the same rules: a page has no business
+ * reading it either.
  */
 function isAllowed(req: Request, url: URL): boolean {
   const host = (req.headers.get("host") ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
   if (!LOOPBACK.includes(host)) return false;
   // The sign-in link may come from anywhere (a terminal, a launcher, a bookmark): it only sets the cookie for the
   // right token, which no other site knows.
-  if (!url.pathname.startsWith("/api/") || url.pathname === "/api/auth") return true;
+  if ((!url.pathname.startsWith("/api/") && url.pathname !== "/metrics") || url.pathname === "/api/auth") return true;
   const site = req.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") return false;
   const origin = req.headers.get("origin");
@@ -213,6 +216,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         headers: { Location: "/", "Cache-Control": "no-store", "Set-Cookie": `${cookie}=${auth.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000` },
       });
     }
+    if (path === "/metrics") return metrics(req);
     if (path === "/api/events" && !signedIn(req)) return signedOutEvents();
     if (path.startsWith("/api/") && !signedIn(req)) return error("unauthorized", 401);
 
@@ -224,6 +228,21 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
       console.error("[http]", err);
       return error((err as Error).message, 500);
     }
+  }
+
+  /**
+   * The Prometheus endpoint: not there unless turned on in Settings, then only for the metrics token as a bearer token.
+   * That token is not the app's: a scraper that holds it can read these numbers and nothing else.
+   */
+  function metrics(req: Request): Response {
+    const cfg = app.cfg.metrics;
+    if (!cfg.enabled) return error("no route for GET /metrics", 404);
+    if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+    const given = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
+    if (!cfg.token || !sameToken(given, cfg.token)) return new Response("unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer", "Cache-Control": "no-store" } });
+    const { user, host } = app.identity;
+    const body = metricsText({ db: app.db, queries: app.queries, budgets: app.cfg.budgets, projectLabels: cfg.projectLabels, user, host, version: VERSION, lastScanAt: app.lastScanAt });
+    return new Response(req.method === "HEAD" ? null : body, { headers: { "Content-Type": CONTENT_TYPE, "Cache-Control": "no-store" } });
   }
 
   /** A page of a server-paged list: at most 200 rows, or 10000 for an export of the whole list (`export=1`). */
@@ -269,8 +288,12 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/session": {
           const id = sp.get("id") ?? "";
           const detail = q.sessionDetail(id);
-          return json({ ...detail, lines: sessionLines(app.db, id, detail.totals?.cost ?? 0), ...sessionTags(app.db, id) });
+          return json({ ...detail, lines: sessionLines(app.db, id, detail.totals?.cost ?? 0), ...sessionTags(app.db, id), label: sessionLabel(app.db, id) });
         }
+        case "/api/kinds":
+          return json(kindUsage(app.db, f));
+        case "/api/labels":
+          return json(app.labelStatus());
         case "/api/tags":
           return json(tagUsage(app.db, f));
         case "/api/tags/all":
@@ -358,7 +381,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
     }
 
     if (method === "POST" || method === "PUT" || method === "DELETE") {
-      if (method === "DELETE" && path !== "/api/tags") return error(`no route for ${method} ${url.pathname}`, 404);
+      if (method === "DELETE" && path !== "/api/tags" && path !== "/api/session/label") return error(`no route for ${method} ${url.pathname}`, 404);
       switch (path) {
         // Tags and notes are the user's own data: written here, never by a scan. { session, tag } and { session, note }.
         case "/api/tags":
@@ -374,6 +397,27 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           else return error(`no route for ${method} ${url.pathname}`, 404);
           if ("error" in result) return error(result.error);
           return json(result.ok);
+        }
+        // AI labels: the user's own opt-in. Label now, a regenerate for one session, a kind set by hand, a label cleared.
+        case "/api/labels/run":
+          return json({ ...(await app.labelSessions({ force: true })), ...app.labelStatus() });
+        case "/api/session/label": {
+          const body = (await jsonBody(req)) as Record<string, unknown> | undefined;
+          if (!body || typeof body !== "object") return error("expected a JSON object");
+          const id = body.session;
+          if (method === "PUT") {
+            const result = setKind(app.db, id, body.kind);
+            if ("error" in result) return error(result.error);
+            return json(result.ok);
+          }
+          if (method === "DELETE") {
+            const result = clearLabel(app.db, id);
+            return "error" in result ? error(result.error) : json(null);
+          }
+          if (typeof id !== "string" || !id || id.length > 500) return error("invalid value for session");
+          if (!app.cfg.labels.enabled) return error("labels are off");
+          const run = await app.labelSessions({ ids: [id] });
+          return json({ run, label: sessionLabel(app.db, id) });
         }
         case "/api/scan": {
           const result = await app.scanNow(sp.get("full") === "1");

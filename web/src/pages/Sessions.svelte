@@ -6,6 +6,7 @@
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import KindPill from "../components/KindPill.svelte";
   import TagPills from "../components/TagPills.svelte";
   import { apiUrl, getJson, settled, useFetch } from "../lib/api.svelte.ts";
   import { sessionScatter, type SessionPoint } from "../lib/charts.ts";
@@ -30,6 +31,9 @@
     subagentMessages: number;
     lastTs: number;
     tags: string[];
+    kind: string | null;
+    /** The title shown is the AI's (session labels, Settings). */
+    aiTitle: boolean;
   }
 
   const keep = keeper();
@@ -136,7 +140,9 @@
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
                     <Link to="#/sessions/{encodeURIComponent(r.id)}" class="truncate font-medium">{titleOf(r)}</Link>
+                    {#if r.aiTitle}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted" title={t("label.aiHint")}>{t("label.ai")}</span>{/if}
                     {#if r.sessionAgent}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{r.sessionAgent}</span>{/if}
+                    {#if r.kind}<KindPill kind={r.kind} />{/if}
                     <TagPills tags={r.tags} />
                   </div>
                 </td>

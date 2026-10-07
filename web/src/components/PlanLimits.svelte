@@ -112,8 +112,8 @@
             <div class="h-2 overflow-hidden rounded-full bg-surface-3">
               <div class="h-full rounded-full transition-[width] duration-500" style:width={l > 0 ? `max(${l * 100}%, 4px)` : "0"} style:background={fill(l, r.provider)}></div>
             </div>
-            <!-- The time left in the window as sand running out: a bright mark, grains slipping from it toward the start of
-                 the bar. A bar that ends short of the mark runs out before the window does: the sand turns red. -->
+            <!-- The time left in the window as a still tick. A bar that ends short of it runs out before the window does: the
+                 tick turns red. -->
             {#if p}
               <span
                 class="absolute top-1/2 h-0 w-0"
@@ -121,8 +121,7 @@
                 style:color={l < p.timeLeft ? "var(--status-critical)" : "var(--ink)"}
                 title={t("live.pace.marker")}
               >
-                {#each [0, 1, 2] as g (g)}<span class="sand-grain" style:animation-delay="{g * 0.6}s"></span>{/each}
-                <span class="sand-mark absolute h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current"></span>
+                <span class="pace-mark absolute h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current"></span>
               </span>
             {/if}
           </div>

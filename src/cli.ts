@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { readFileSync } from "node:fs";
 import { configPath, ensureAppDataDir } from "./core/paths.ts";
-import { loadConfig, resolveDbPath, updateConfig } from "./core/config.ts";
+import { configKeyPatch, loadConfig, resolveDbPath, updateConfig } from "./core/config.ts";
 import { openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
 import { fallbackLine, gather, parseInput, render, useColor } from "./core/statusline.ts";
@@ -28,7 +28,7 @@ Usage:
   ${BIN_NAME} scan [--full]          Ingest new usage from local logs and exit
   ${BIN_NAME} import-cursor <file>   Import a Cursor usage CSV export
   ${BIN_NAME} today                  Today's cost, tokens and sessions against yesterday
-  ${BIN_NAME} report [options]       Cost by project, model, provider, user, tag, day, week or month
+  ${BIN_NAME} report [options]       Cost by project, model, provider, user, tag, kind, day, week or month
   ${BIN_NAME} limits [--check]       Plan limits and budgets, with exit codes for scripts
   ${BIN_NAME} digest [options]       The last week as a Markdown report: cost, projects, budgets, limits, tips
   ${BIN_NAME} statusline             Print one status line for Claude Code (reads its JSON on stdin)
@@ -57,9 +57,10 @@ Report options (today, report, limits):
   --range <r>       today, 7d, 30d, month or all (report default 30d)
   --from <date>     Start day, YYYY-MM-DD in local time (with --to, instead of --range)
   --to <date>       Last day, included
-  --by <what>       project, model, provider, user, tag, day, week or month (default project)
-  --provider, --project, --model, --user, --tag <value>   Only this harness, project, model, user or session tag
+  --by <what>       project, model, provider, user, tag, kind, day, week or month (default project)
+  --provider, --project, --model, --user, --tag, --kind <value>   Only this harness, project, model, user, session tag or kind of work
                     With --by tag a session with several tags counts in each, so rows can exceed the total
+                    Kinds of work (feature, bugfix, …) exist once AI session labels are on in Settings
   --json, --csv     Machine-readable output (CSV for report only)
   --limit <n>       Rows in the report table (default 25, 0 for all)
   --scan            Scan the local logs first (writes the database)
@@ -344,7 +345,7 @@ async function main(): Promise<void> {
         } catch {
           /* keep as string */
         }
-        updateConfig({ [key]: value });
+        updateConfig(configKeyPatch(loadConfig(), key, value));
         return void console.log(`${key} = ${JSON.stringify(value)}`);
       }
       throw new Error(`unknown config subcommand: ${sub}`);

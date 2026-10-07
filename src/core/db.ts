@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 import { CURSOR_REKEY } from "./ingest/cursor.ts";
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -268,6 +268,23 @@ const MIGRATIONS: Record<number, string> = {
       tag     TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_project_tags_tag ON project_tags(tag);
+  `,
+  // AI-written session labels (labels.ts): a short title and a kind of work per root session, written only with the
+  // user's opt-in. Never ingested, so retention keeps them. `attempts` counts how often a session was sent without
+  // coming back labelled, so one the model can't label is not sent over and over.
+  16: /* sql */ `
+    CREATE TABLE IF NOT EXISTS session_labels (
+      session_id TEXT PRIMARY KEY,
+      title      TEXT NOT NULL,         -- empty when only the kind was set by hand
+      kind       TEXT NOT NULL,         -- one of labels.ts KINDS
+      model      TEXT NOT NULL,         -- the model that wrote it, "manual" for a kind set by hand
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_labels_kind ON session_labels(kind);
+    CREATE TABLE IF NOT EXISTS label_attempts (
+      session_id TEXT PRIMARY KEY,
+      attempts   INTEGER NOT NULL
+    );
   `,
 };
 

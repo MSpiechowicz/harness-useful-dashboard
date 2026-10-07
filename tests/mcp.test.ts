@@ -161,7 +161,7 @@ describe("protocol", () => {
     send(main.s, request("initialize", { protocolVersion: "2025-06-18", capabilities: {} }));
     const bad = (args: unknown) => send(main.s, request("tools/call", { name: "breakdown", arguments: args })).result;
     expect(bad({})).toMatchObject({ isError: true, content: [{ type: "text", text: "arguments.dimension is required" }] });
-    expect(bad({ dimension: "colour" }).content[0].text).toBe("arguments.dimension must be one of: project, model, provider, user, skill, agent, tag");
+    expect(bad({ dimension: "colour" }).content[0].text).toBe("arguments.dimension must be one of: project, model, provider, user, skill, agent, tag, kind");
     expect(bad({ dimension: "model", limit: 0 }).content[0].text).toBe("arguments.limit must be at least 1");
     expect(bad({ dimension: "model", extra: 1 }).content[0].text).toBe("arguments.extra is not a known argument");
     expect(bad({ dimension: "model", range: "custom" }).content[0].text).toBe("range custom needs from, to or both");

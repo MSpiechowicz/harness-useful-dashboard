@@ -36,10 +36,19 @@ export interface TagRow extends Totals {
  * session, and the tags of a session are a handful.
  */
 export function tagUsage(db: Database, f: Filters) {
-  return memo(db, `tagUsage:${JSON.stringify(f)}`, () => compute(db, f));
+  return memo(db, `tagUsage:${JSON.stringify(f)}`, () => compute(db, f, "tag"));
 }
 
-function compute(db: Database, f: Filters) {
+/**
+ * What each kind of work cost (labels.ts): the same per-session sums as tagUsage, grouped by the kind of the session, or
+ * of its parent session for a subagent's. Every session has at most one kind, so the rows add up to `total`, except that
+ * the "(none)" row holds the sessions without a label.
+ */
+export function kindUsage(db: Database, f: Filters) {
+  return memo(db, `kindUsage:${JSON.stringify(f)}`, () => compute(db, f, "kind"));
+}
+
+function compute(db: Database, f: Filters, by: "tag" | "kind") {
   const w = whereClause(f);
   const wt = whereClause(f, "t");
   const sessions = db
@@ -57,11 +66,13 @@ function compute(db: Database, f: Filters) {
     .all(wt.params);
 
   const own = new Map<string, string[]>();
-  for (const r of db.query<{ id: string; tag: string }, []>("SELECT session_id AS id, tag FROM session_tags").all()) {
+  const source = by === "kind" ? "SELECT session_id AS id, kind AS tag FROM session_labels" : "SELECT session_id AS id, tag FROM session_tags";
+  for (const r of db.query<{ id: string; tag: string }, []>(source).all()) {
     (own.get(r.id) ?? own.set(r.id, []).get(r.id)!).push(r.tag);
   }
   const parent = new Map(db.query<{ id: string; parent: string }, []>("SELECT id, parent_session_id AS parent FROM sessions WHERE parent_session_id IS NOT NULL").all().map((r) => [r.id, r.parent]));
-  const rule = new Map(db.query<{ project: string; tag: string }, []>("SELECT project, tag FROM project_tags").all().map((r) => [r.project, r.tag]));
+  // A project's default tag has no counterpart for kinds.
+  const rule = new Map(by === "kind" ? [] : db.query<{ project: string; tag: string }, []>("SELECT project, tag FROM project_tags").all().map((r) => [r.project, r.tag]));
   const tagsOf = (id: string, project: string | null): Set<string> => {
     const tags = new Set([...(own.get(id) ?? []), ...(own.get(parent.get(id) ?? "") ?? [])]);
     const byProject = project ? rule.get(project) : undefined;

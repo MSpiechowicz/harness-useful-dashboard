@@ -41,10 +41,11 @@ Everything runs locally. Your usage is never uploaded anywhere.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/projects.png" alt="Projects: where the tokens go, project by project"><br><sub><b>Projects</b>: where the tokens go, project by project</sub></td>
-    <td width="50%"><img src="docs/screenshots/models.png" alt="Models: which models do the work and what they cost"><br><sub><b>Models</b>: which models do the work and what they cost</sub></td>
+    <td width="50%"><img src="docs/screenshots/branches.png" alt="Branches: what each piece of work cost, with the lines it changed"><br><sub><b>Branches</b>: what each piece of work cost, with the lines it changed</sub></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/screenshots/model-drift.png" alt="Model drift: whether a model got slower or clumsier than it usually is"><br><sub><b>Model drift</b>: whether a model got slower or clumsier than it usually is</sub></td>
+    <td width="50%"><img src="docs/screenshots/models.png" alt="Models: which models do the work and what they cost"><br><sub><b>Models</b>: which models do the work and what they cost</sub></td>
+    <td width="50%"><img src="docs/screenshots/model-drift.png" alt="Model drift: whether a model got slower or clumsier than it usually is"><br><sub><b>Model drift</b>: whether a model got slower or clumsier than it usually is</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/providers.png" alt="Providers: Claude Code, Codex, omp, OpenCode and pi side by side"><br><sub><b>Providers</b>: Claude Code, Codex, omp, OpenCode and pi side by side</sub></td>
@@ -55,20 +56,28 @@ Everything runs locally. Your usage is never uploaded anywhere.
     <td width="50%"><img src="docs/screenshots/agents.png" alt="Agents: main sessions against the subagents they start"><br><sub><b>Agents</b>: main sessions against the subagents they start</sub></td>
   </tr>
   <tr>
+    <td width="50%"><img src="docs/screenshots/tags.png" alt="Tags: what each client, experiment or billing label cost"><br><sub><b>Tags</b>: what each client, experiment or billing label cost</sub></td>
     <td width="50%"><img src="docs/screenshots/sessions.png" alt="Sessions: cost against tokens per session, and every session"><br><sub><b>Sessions</b>: cost against tokens per session, and every session</sub></td>
-    <td width="50%"><img src="docs/screenshots/session-detail.png" alt="Session detail: every model call, prompt and spawned agent of one session"><br><sub><b>Session detail</b>: every model call, prompt and spawned agent of one session</sub></td>
   </tr>
   <tr>
+    <td width="50%"><img src="docs/screenshots/session-detail.png" alt="Session detail: every model call, prompt and spawned agent of one session"><br><sub><b>Session detail</b>: every model call, prompt and spawned agent of one session</sub></td>
     <td width="50%"><img src="docs/screenshots/prompts.png" alt="Prompts: what each request really cost, and where the spend concentrates"><br><sub><b>Prompts</b>: what each request really cost, and where the spend concentrates</sub></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/screenshots/prompt-detail.png" alt="Prompt detail: one prompt call by call, subagents included"><br><sub><b>Prompt detail</b>: one prompt call by call, subagents included</sub></td>
+    <td width="50%"><img src="docs/screenshots/time.png" alt="Time: how long agents worked for you, and how often several ran at once"><br><sub><b>Time</b>: how long agents worked for you, and how often several ran at once</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/tools.png" alt="Tools: most used tools by project, and the kinds of work they do"><br><sub><b>Tools</b>: most used tools by project, and the kinds of work they do</sub></td>
     <td width="50%"><img src="docs/screenshots/files.png" alt="Files: the files that get read and edited most"><br><sub><b>Files</b>: the files that get read and edited most</sub></td>
   </tr>
   <tr>
+    <td width="50%"><img src="docs/screenshots/friction.png" alt="Friction: why calls failed, and where requests and prompts got stuck"><br><sub><b>Friction</b>: why calls failed, and where requests and prompts got stuck</sub></td>
     <td width="50%"><img src="docs/screenshots/cache.png" alt="Cache: hit rate over time and what caching saves"><br><sub><b>Cache</b>: hit rate over time and what caching saves</sub></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/screenshots/tips.png" alt="Tips: rule-based suggestions from your own usage"><br><sub><b>Tips</b>: rule-based suggestions from your own usage</sub></td>
+    <td width="50%"><img src="docs/screenshots/palette.png" alt="Search: jump to any page, session or prompt with Ctrl+K"><br><sub><b>Search</b>: jump to any page, session or prompt with Ctrl+K</sub></td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/screenshots/settings.png" alt="Settings: general options, the shared database, data sources and plan limits"><br><sub><b>Settings</b>: general options, the shared database, data sources and plan limits</sub></td>
@@ -514,6 +523,86 @@ For non-default paths the database uses SQLite's rollback journal instead of WAL
 network or synced filesystems. Sync services don't lock files across machines, so avoid scanning from two machines at the
 exact same moment. The default 30-second rescan interval with a 15-second busy timeout handles normal use.
 
+### Session labels (AI)
+
+Off by default. Turn it on in **Settings → Session labels (AI)** and the dashboard has a model write a short title and a
+kind of work (feature, bugfix, refactor, tests, docs, research, ops or other) for each session. You then get a **Kind**
+filter, a **Kinds of work** table on the Tags page with the cost, tokens and changed lines of each kind, a kind pill in the
+Sessions list, `report --by kind` and `--kind` on the command line, and a `kind` dimension and filter in the MCP tools.
+A title is only shown for a session its harness left without one and carries an **AI** marker. On a session's page you can
+change its kind, label it again or remove the label.
+
+It runs your own `claude` (Claude Code, default model Haiku) or `codex` program with your own login, whichever you choose,
+and only one that is found on your `PATH` is offered. Per session it sends the project folder name, up to the first three
+prompts as stored (secrets removed, paths cut to the file name and shortened), the names of the tools used and the number
+of changed lines. No file contents and no other paths. Sessions go in batches of ten, one call per batch, with the prompt on
+stdin. Claude Code runs without tools, skills or MCP servers and saves no session. Codex cannot run without its shell
+tool, so it gets a read-only sandbox in an empty folder. Both run in the folder `labeler` inside the app data folder with the
+environment variable `HARNESS_DASHBOARD_LABELER=1`, and have two minutes per call.
+
+The answer is checked strictly. Only a title of up to 60 plain characters and one of the fixed kinds are taken from it, and
+anything else is dropped. New sessions are labelled in the background after 15 quiet minutes, at most every 30 minutes and up
+to a daily cap (50 by default). **Label now** works through the waiting sessions at once. Failures show a fixed reason in
+Settings and back off. A session the model leaves out twice is not sent again by itself. Nothing is ever sent while the
+setting is off or when **Stored prompt length** is `0`.
+
+Runs of the labeler leave their own transcripts. They are recognised by their folder and by their prompt, tagged
+`ai-labeling` so their cost stays visible, and never labelled.
+
+### Prometheus metrics
+
+For Grafana, Home Assistant or any Prometheus scraper, the dashboard can serve its totals at `GET /metrics` in the
+Prometheus text format. It is off by default. Turn it on in **Settings → Prometheus metrics**, which makes a token of its
+own (copy it there, or make a new one). The token is not the app's sign-in token: it opens `/metrics` and nothing else.
+Without it the endpoint answers `401`, and while the setting is off there is no such route.
+
+What it exports, all from the local database:
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `harness_tokens_total` | counter | `provider`, `model`, `project`, `user`, `type` (`input`, `output`, `cache_read`, `cache_write`, `reasoning`) |
+| `harness_cost_usd_total`, `harness_requests_total` | counter | `provider`, `model`, `project`, `user` |
+| `harness_sessions_total`, `harness_prompts_total` | counter | `provider`, `project`, `user` |
+| `harness_tool_calls_total` | counter | `provider`, `tool`, `outcome` (`ok`, `error`, `declined`) |
+| `harness_tool_failures_total` | counter | `provider`, `tool`, `reason` |
+| `harness_api_errors_total` | counter | `provider`, `model`, `class` |
+| `harness_lines_added_total`, `harness_lines_removed_total` | counter | `provider`, `model`, `project` |
+| `harness_tag_cost_usd_total` | counter | `tag` |
+| `harness_plan_limit_used_ratio`, `harness_plan_limit_resets_at_seconds` | gauge | `provider`, `plan`, `window` |
+| `harness_budget_spent_usd`, `harness_budget_cap_usd` | gauge | `scope` (`daily`, `monthly`, `project`), `project` |
+| `harness_live_sessions` | gauge | `status` (`working`, `idle`, `error`) |
+| `harness_last_scan_timestamp_seconds`, `harness_build_info` | gauge | `version` on the build info |
+
+Counters are totals since the first row in the database. A re-pricing (new prices, a changed price rule) or trimmed
+history can lower them, so prefer `rate()` and `increase()` over raw values: Prometheus treats the drop as a counter
+reset. Projects are labelled with their folder name, never the full path, and **Project labels** in Settings turns even
+that off. Plan limits come from the readings the app stored, so `/metrics` never asks a provider. They fill in while
+the dashboard runs with the limit checks on. Answers are kept until new data arrives, so a scrape every 15 to 60 seconds
+costs next to nothing.
+
+Add the endpoint to `prometheus.yml`, with the token from Settings:
+
+```yaml
+scrape_configs:
+  - job_name: harness-dashboard
+    scrape_interval: 60s
+    authorization: { type: Bearer, credentials: "<token from Settings>" }
+    static_configs: [{ targets: ["127.0.0.1:4317"] }]
+```
+
+A few queries to start from:
+
+```promql
+sum by (model) (increase(harness_cost_usd_total[1h]))
+sum(rate(harness_tool_calls_total{outcome="error"}[1h])) / sum(rate(harness_tool_calls_total[1h]))
+harness_plan_limit_used_ratio{provider="claude", window="5h"}
+sum(increase(harness_lines_added_total[1d])) + sum(increase(harness_lines_removed_total[1d]))
+```
+
+The server listens on `127.0.0.1` only, so a Prometheus on another machine needs a reverse proxy in front of it or an SSH
+tunnel (`ssh -L 4317:127.0.0.1:4317 your-machine`). In Home Assistant, the Prometheus integration is for exporting its
+own data, so read this endpoint with a REST sensor instead, sending the token in an `Authorization: Bearer` header.
+
 ### Database size
 
 Two months of heavy use come to about 250 MB, mostly one row per tool call and per tool result with its indexes. In
@@ -609,7 +698,10 @@ the GitHub releases API, while the Live view is open the plan-limit checks: with
 each with the login Claude Code, OpenCode or pi keeps for it and sent to that provider only, and through `omp usage`,
 and, only once you turn on **Sync Cursor usage**, a request to cursor.com every 6 hours for your Cursor usage, with the
 login the Cursor editor keeps on this machine. That login stays in Cursor: it is read when needed and sent to cursor.com
-only. Every plan-limit source and the Cursor sync can be switched off in **Settings**.
+only. Opt-in: session labels, sent to the model of the CLI you choose, with your own login (see Session labels (AI)). Every plan-limit source, the Cursor sync and the session labels can be switched off in **Settings**.
+
+The Prometheus endpoint sends nothing: it is off by default, and once on it only answers a request that carries its own
+token. Nothing leaves the machine unless something scrapes it.
 
 ## Development
 
@@ -623,6 +715,7 @@ bun run check      # TypeScript + svelte-check
 bun run build      # standalone binary for this platform → dist/
 bun run build:all  # all platforms + dist/checksums.txt
 bun scripts/demo-data.ts /tmp/demo.db   # made-up usage for screenshots: run with --db /tmp/demo.db
+bun run screenshots                     # retake docs/screenshots from demo data (needs build:web and Chrome or Chromium)
 bun scripts/icons.ts                    # app icons for the installers, from web/public/favicon.svg
 ```
 

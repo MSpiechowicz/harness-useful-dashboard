@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { type AppConfig, loadConfig, resolveDbPath, retentionMonths, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
+import { type AppConfig, applyMetrics, loadConfig, resolveDbPath, retentionMonths, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
 import { getMeta, openDb, setMeta } from "../core/db.ts";
 import { type ScanResult, scan } from "../core/ingest/index.ts";
 import { budgetAlerts, budgetStatus, limitAlerts, takeNew } from "../core/budgets.ts";
@@ -15,11 +15,15 @@ import { compact, type DbSize, dbSize, trimDetail, trimDue } from "../core/reten
 import { buildDigest, type Digest, type DigestContext, type DigestWeek, digestDir, dueSlot, latestSlot, markSlot, notificationText, rememberDigest, writeDigestFile } from "../core/digest.ts";
 import { notify } from "./notify.ts";
 import { type CursorSyncState, syncCursor, syncState } from "../core/cursorSync.ts";
+import { type LabelerDeps, type LabelRun, labelerDir, labelSessions, labelState } from "../core/labeler.ts";
+import { tagLabelerSessions } from "../core/labels.ts";
 
 /** How often plan limits are read in the background, for the history on the plans view. */
 const LIMIT_POLL_MS = 5 * 60_000;
 /** How often the Cursor sync looks whether it's due (every 6 hours, or after a backoff, see cursorSync.ts). */
 const CURSOR_CHECK_MS = 10 * 60_000;
+/** How often the labeler looks whether it is due (it runs at most every 30 minutes, see labeler.ts). */
+const LABEL_CHECK_MS = 5 * 60_000;
 /** How often the weekly digest looks whether it is due. */
 const DIGEST_CHECK_MS = 10 * 60_000;
 /** Only the plans used this recently are asked about: a quiet machine asks nobody. */
@@ -46,6 +50,11 @@ export class App {
   /** Shows the digest's notification. A field so tests can stand in for the desktop. */
   notifier: typeof notify = notify;
   private digestTimer: ReturnType<typeof setInterval> | null = null;
+  private labelTimer: ReturnType<typeof setInterval> | null = null;
+  /** The labeling run in flight, shared by the timer, Label now and a regenerate: one CLI at a time. */
+  private labeling: Promise<LabelRun> | null = null;
+  /** Stands in for the CLI in tests (see labeler.ts). */
+  labelerDeps: LabelerDeps = {};
   /** The digest slot that failed to write: not tried again until the next start, so a bad folder doesn't repeat every check. */
   private digestFailed: number | null = null;
   /** The Cursor sync in flight, shared by the timer and Sync now. */
@@ -151,6 +160,8 @@ export class App {
         this.emit({ type: "scan", result });
         if (result.filesParsed > 0) this.sendAlerts().catch((err) => console.error("[alerts]", err));
         this.trimIfDue();
+        // The labeler's own runs leave transcripts that this scan may just have read.
+        tagLabelerSessions(this.db, this.labelerDir());
         return result;
       })
       .finally(() => {
@@ -194,9 +205,13 @@ export class App {
     // Opt-in, and checked against the settings each time: due once a week, caught up when the app was off.
     this.digestTimer = setInterval(() => this.checkDigest(), DIGEST_CHECK_MS);
     this.checkDigest();
+    // Opt-in: runs only while Settings has it on, and at most every 30 minutes when something is waiting.
+    this.labelTimer = setInterval(() => void this.labelSessions().catch((err) => console.error("[labels]", err)), LABEL_CHECK_MS);
   }
 
   stopBackgroundScan(): void {
+    if (this.labelTimer) clearInterval(this.labelTimer);
+    this.labelTimer = null;
     if (this.timer) clearInterval(this.timer);
     if (this.limitTimer) clearInterval(this.limitTimer);
     if (this.cursorTimer) clearInterval(this.cursorTimer);
@@ -225,6 +240,35 @@ export class App {
         this.cursorSyncing = null;
       });
     return this.cursorSyncing;
+  }
+
+  labelerDir(): string {
+    return this.labelerDeps.dir ?? labelerDir();
+  }
+
+  /** What Settings shows about the labels: the last run, today's count, and which CLIs are installed. */
+  labelStatus() {
+    const which = this.labelerDeps.which ?? ((n: string) => Bun.which(n));
+    return { config: this.cfg.labels, state: labelState(this.db, this.identity.host), available: { claude: !!which("claude"), codex: !!which("codex") }, textLimit: this.cfg.promptTextLimit };
+  }
+
+  /**
+   * Labels sessions with the user's CLI: what is waiting up to the day's cap, or just `ids`, and every waiting session
+   * with `force` (Label now) regardless of the wait since the last run. Does nothing while labels are off. Open
+   * windows hear about new labels like after a scan.
+   */
+  labelSessions(opts: { force?: boolean; ids?: string[] } = {}): Promise<LabelRun> {
+    if (this.labeling) return this.labeling;
+    const db = this.db;
+    this.labeling = labelSessions(db, this.identity.host, this.cfg, opts, this.labelerDeps)
+      .then((run) => {
+        if (run.labelled > 0 && run.skipped == null) this.emit({ type: "scan", result: { filesSeen: 0, filesParsed: 1, usageRows: 0, prompts: 0, tools: 0, errors: [], durationMs: 0 } });
+        return run;
+      })
+      .finally(() => {
+        this.labeling = null;
+      });
+    return this.labeling;
   }
 
   /**
@@ -306,7 +350,7 @@ export class App {
   }
 
   updateConfig(patch: SettingsPatch): AppConfig {
-    const { sources, limits, budgets, digest, ...rest } = patch;
+    const { sources, limits, budgets, digest, labels, metrics, ...rest } = patch;
     const was = this.cfg.digest;
     this.cfg = {
       ...this.cfg,
@@ -315,6 +359,8 @@ export class App {
       limits: { ...this.cfg.limits, ...limits },
       budgets: { ...this.cfg.budgets, ...budgets },
       digest: { ...this.cfg.digest, ...digest },
+      labels: { ...this.cfg.labels, ...labels },
+      metrics: applyMetrics(this.cfg.metrics, metrics),
     };
     // Turned on, or moved to another time, in the middle of a week: that week's slot has passed already, so the first
     // digest is the next one.

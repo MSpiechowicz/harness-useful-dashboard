@@ -1,8 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { type AlertLang, type BudgetConfig, DEFAULT_BUDGETS } from "./budgets.ts";
 import { DEFAULT_DIGEST, type DigestConfig } from "./digest.ts";
+import { DEFAULT_LABELS, type LabelConfig, MODEL_NAME } from "./labels.ts";
 import { configPath, defaultDbPath, expandHome, localIdentity } from "./paths.ts";
 
 export type OpenMode = "app" | "browser" | "none";
@@ -67,10 +69,23 @@ export interface AppConfig {
   budgets: BudgetConfig;
   /** The weekly digest: written to a folder on a schedule when on (see digest.ts). */
   digest: DigestConfig;
+  /** AI-written session labels: off until the user turns them on, run with the user's own CLI (see labels.ts). */
+  labels: LabelConfig;
   /** The UI's language, which the desktop alerts use too. */
   language: AlertLang;
+  /** The Prometheus endpoint at /metrics. */
+  metrics: MetricsConfig;
   /** Tips the user put away: `hidden` holds rule ids (never shown again), `read` holds tip keys (seen, kept on the Tips page). */
   tips: TipState;
+}
+
+/** The Prometheus endpoint (see metrics.ts): off until turned on, and read with its own token, never the app's. */
+export interface MetricsConfig {
+  enabled: boolean;
+  /** What a scraper sends as a bearer token. Made by the server when the endpoint is turned on, never taken from a client. */
+  token: string;
+  /** Label series with the project's folder name. Off, projects add up into one series. */
+  projectLabels: boolean;
 }
 
 export interface TipState {
@@ -115,7 +130,9 @@ export function defaultConfig(): AppConfig {
     planPrices: {},
     budgets: { ...DEFAULT_BUDGETS, projects: {} },
     digest: { ...DEFAULT_DIGEST },
+    labels: { ...DEFAULT_LABELS },
     language: "en",
+    metrics: { enabled: false, token: "", projectLabels: true },
     tips: { hidden: [], read: [] },
   };
 }
@@ -173,7 +190,7 @@ function extensionDirs(home: string, id: string, own: string[], jetbrains = fals
   return found.length ? found : [join(storages[0]!, id), ...own];
 }
 
-function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {
+export function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {
   return {
     ...base,
     ...patch,
@@ -185,6 +202,8 @@ function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConfig {
     limits: { ...base.limits, ...(patch.limits ?? {}) },
     budgets: { ...base.budgets, ...(patch.budgets ?? {}) },
     digest: { ...base.digest, ...(patch.digest ?? {}) },
+    labels: { ...base.labels, ...(patch.labels ?? {}) },
+    metrics: { ...base.metrics, ...(patch.metrics ?? {}) },
     tips: { ...base.tips, ...(patch.tips ?? {}) },
   };
 }
@@ -229,9 +248,12 @@ const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "ro
 const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode", "copilot"] as const;
 
 /** A settings change: what `parseSettings` lets through, merged into the config by the server. */
-export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips" | "budgets" | "digest">> & {
+export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips" | "budgets" | "digest" | "labels" | "metrics">> & {
+  /** The client may switch the endpoint and its labels, and ask for a new token: the server makes it. */
+  metrics?: Partial<Pick<MetricsConfig, "enabled" | "projectLabels">> & { regenerateToken?: boolean };
   budgets?: Partial<BudgetConfig>;
   digest?: Partial<DigestConfig>;
+  labels?: Partial<LabelConfig>;
   sources?: Partial<Omit<SourceConfig, "enabled">> & { enabled?: Partial<SourceConfig["enabled"]> };
   limits?: Partial<AppConfig["limits"]>;
 };
@@ -241,7 +263,6 @@ export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips
  * in range. Anything else is refused, so a bad value can't end up in the config file.
  */
 export function parseSettings(body: unknown): { patch: SettingsPatch } | { error: string } {
-  const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
   if (!isObject(body)) return { error: "expected an object" };
   const patch: SettingsPatch = {};
   const invalid = (key: string) => ({ error: `invalid value for ${key}` });
@@ -364,6 +385,41 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
     }
     patch.digest = digest;
   }
+  if (has("labels")) {
+    const g = body.labels;
+    if (!isObject(g)) return invalid("labels");
+    const labels: Partial<LabelConfig> = {};
+    if ("enabled" in g) {
+      if (typeof g.enabled !== "boolean") return invalid("labels.enabled");
+      labels.enabled = g.enabled;
+    }
+    if ("cli" in g) {
+      if (g.cli !== "claude" && g.cli !== "codex") return invalid("labels.cli");
+      labels.cli = g.cli;
+    }
+    if ("model" in g) {
+      // Empty is the default model. A name can't start with "-": it would be read as an option of the CLI.
+      const model = typeof g.model === "string" ? g.model.trim() : null;
+      if (model == null || (model !== "" && !MODEL_NAME.test(model))) return invalid("labels.model");
+      labels.model = model;
+    }
+    if ("dailyCap" in g) {
+      if (typeof g.dailyCap !== "number" || !Number.isInteger(g.dailyCap) || g.dailyCap < 1 || g.dailyCap > 500) return invalid("labels.dailyCap");
+      labels.dailyCap = g.dailyCap;
+    }
+    patch.labels = labels;
+  }
+  if (has("metrics")) {
+    const m = body.metrics;
+    if (!isObject(m)) return invalid("metrics");
+    const metrics: NonNullable<SettingsPatch["metrics"]> = {};
+    for (const k of ["enabled", "projectLabels", "regenerateToken"] as const) {
+      if (!(k in m)) continue;
+      if (typeof m[k] !== "boolean") return invalid(`metrics.${k}`);
+      metrics[k] = m[k] as boolean;
+    }
+    patch.metrics = metrics;
+  }
   if (has("language")) {
     if (!["en", "de", "es", "fr", "pl"].includes(body.language as string)) return invalid("language");
     patch.language = body.language as AlertLang;
@@ -375,6 +431,42 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
     patch.planPrices = prices;
   }
   return { patch };
+}
+
+/** A new token for the metrics endpoint. */
+export function newMetricsToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+/** The metrics settings after a change: a token is made when the endpoint is on without one, or when a new one is asked for. */
+export function applyMetrics(base: MetricsConfig, patch: SettingsPatch["metrics"]): MetricsConfig {
+  const next = { enabled: patch?.enabled ?? base.enabled, projectLabels: patch?.projectLabels ?? base.projectLabels, token: base.token };
+  if (patch?.regenerateToken || (next.enabled && !next.token)) next.token = newMetricsToken();
+  return next;
+}
+
+/**
+ * The patch for `config set <key> <value>`. A dotted key ("metrics.enabled", "budgets.daily") sets a field inside a
+ * section, and a key the config doesn't have is refused instead of being saved where nothing reads it. Turning metrics
+ * on makes its token, as Settings does.
+ */
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+export function configKeyPatch(cfg: AppConfig, key: string, value: unknown): Partial<AppConfig> {
+  const [top, ...rest] = key.split(".");
+  const defaults = defaultConfig() as unknown as Record<string, unknown>;
+  if (!top || !(top in defaults)) throw new Error(`unknown config key: ${key}`);
+  if (!rest.length) return { [top]: value } as Partial<AppConfig>;
+  const section = structuredClone((cfg as unknown as Record<string, unknown>)[top]);
+  if (!isObject(section)) throw new Error(`${top} has no fields, use: config set ${top} <value>`);
+  let node: Record<string, unknown> = section;
+  for (const part of rest.slice(0, -1)) {
+    if (!isObject(node[part])) throw new Error(`unknown config key: ${key}`);
+    node = node[part] as Record<string, unknown>;
+  }
+  node[rest[rest.length - 1] as string] = value;
+  if (top === "metrics") return { metrics: applyMetrics(section as unknown as MetricsConfig, {}) };
+  return { [top]: section } as Partial<AppConfig>;
 }
 
 export function updateConfig(patch: Partial<AppConfig>, path = configPath()): AppConfig {

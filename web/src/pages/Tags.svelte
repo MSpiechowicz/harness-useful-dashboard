@@ -17,6 +17,10 @@
   type SortKey = "label" | "cost" | "tokens" | "sessions" | "changed" | "costPer100" | "lastTs";
 
   const data = useFetch<{ total: { tokens: number; cost: number }; rows: TagRow[] }>(() => apiUrl("/api/tags"));
+  // The kinds of work (AI session labels, Settings): shown below once sessions have been labelled.
+  const kinds = useFetch<{ total: { tokens: number; cost: number }; rows: TagRow[] }>(() => apiUrl("/api/kinds"));
+  const kindRows = $derived(kinds.data?.rows ?? []);
+  const maxKindShare = $derived(Math.max(0.0001, ...kindRows.map((r) => (store.metric === "cost" ? r.share : r.tokenShare))));
   const rows = $derived(data.data?.rows ?? []);
   // The untagged sessions are listed in the table (what is left out of every tag) but are no tag to filter by.
   const tagged = $derived(rows.filter((r) => r.key !== "(none)"));
@@ -54,7 +58,7 @@
 
 <div class="flex flex-col gap-5">
   <PageHeader title={t("nav.tags")} subtitle={t("tags.subtitle")} />
-  <ViewGate ready={settled(data)}>
+  <ViewGate ready={settled(data, kinds)}>
     {#if data.data && !tagged.length}
       <div class="card"><Empty title={t("tags.empty")} body={t("tags.emptyBody")} /></div>
     {:else}
@@ -118,6 +122,50 @@
         {/snippet}
       </TableCard>
       <p class="flex items-start gap-2 text-xs text-muted"><Info size={14} class="mt-px shrink-0" />{t("tags.overlapHint")}</p>
+    {/if}
+
+    {#if kindRows.some((r) => r.key !== "(none)")}
+      <Card title={t("kinds.title")} subtitle={t("kinds.subtitle")} pad={false}>
+        <table class="data">
+          <thead>
+            <tr>
+              <th>{t("filter.kind")}</th>
+              <th class="num">{t("col.cost")}</th>
+              <th class="num">{t("col.tokens")}</th>
+              <th class="num">{t("col.share")}</th>
+              <th class="num">{t("col.sessions")}</th>
+              <th class="num">{t("col.lines")}</th>
+              <th class="num">{t("tags.col.per100")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each kindRows as r (r.key)}
+              {@const share = store.metric === "cost" ? r.share : r.tokenShare}
+              {@const none = r.key === "(none)"}
+              <tr class:cursor-pointer={!none} onclick={() => !none && store.setFilter("kind", r.key)} title={none ? undefined : t("kinds.tableHint")}>
+                <td>
+                  <div class="flex items-center gap-2">
+                    {#if none}
+                      <span class="h-2.5 w-2.5 shrink-0 rounded-sm border border-dashed border-muted"></span>
+                      <span class="truncate text-ink-2 italic">{entityLabel("kind", r.key, r.label)}</span>
+                    {:else}
+                      <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("kind", r.key)}></span>
+                      <button type="button" class="truncate text-left">{entityLabel("kind", r.key, r.label)}</button>
+                    {/if}
+                  </div>
+                </td>
+                <td class="num font-medium">{usd(r.cost)}</td>
+                <td class="num text-ink-2">{compact(r.tokens)}</td>
+                <td class="num text-ink-2"><ValueBar label={percent(share, share < 0.1 ? 1 : 0)} fraction={share / maxKindShare} color={none ? undefined : colorFor("kind", r.key)} /></td>
+                <td class="num text-ink-2">{compact(r.sessions)}</td>
+                <td class="num text-ink-2">{r.changed ? compact(r.changed) : "–"}</td>
+                <td class="num text-ink-2">{r.costPer100 != null ? usd(r.costPer100) : "–"}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </Card>
+      <p class="flex items-start gap-2 text-xs text-muted"><Info size={14} class="mt-px shrink-0" />{t("kinds.hint")}</p>
     {/if}
   </ViewGate>
 </div>

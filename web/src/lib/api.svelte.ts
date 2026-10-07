@@ -218,6 +218,7 @@ export interface FilterOptions {
   skill: FilterOption[];
   agent: FilterOption[];
   tag: FilterOption[];
+  kind: FilterOption[];
   range: { minTs: number | null; maxTs: number | null; rows: number };
 }
 
