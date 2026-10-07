@@ -1,3 +1,10 @@
+## [1.14.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.14.1...v1.14.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* plan limits keep showing the last reading when the provider says "too often" ([9fa0388](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9fa03885a8d7a88258a5551025080b49a3f5871d))
+
 ## [1.14.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.14.0...v1.14.1) (2026-10-07)
 
 
