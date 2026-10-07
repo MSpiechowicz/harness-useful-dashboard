@@ -1,3 +1,10 @@
+## [1.13.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.2...v1.13.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* failed calls in Live show their cause as a pill, details open below ([3021fed](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/3021fed28ed5cfe69f9512c3f482d9aafd9b8c54))
+
 ## [1.13.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.1...v1.13.2) (2026-10-07)
 
 
