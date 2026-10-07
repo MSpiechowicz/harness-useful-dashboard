@@ -7,8 +7,11 @@ everything in a local SQLite database and shows clear, interactive charts of whe
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
 - **By project, user, model, provider, skill, agent, session and prompt**: every dimension is a filter
+- **Who used what**: where the money goes from tool to model to project in one flow chart, every project side by side on
+  one scale, and on each breakdown page a network of what used what, with lights running along the busiest links
 - **Trends**: hourly/daily/weekly/monthly series, a 7-day moving average, cumulative spend, peak day and a 30-day projection
-- **Per-prompt cost analytics**: what each request really consumed, call by call, including the subagents it spawned
+- **Per-prompt cost analytics**: what each request really consumed, call by call, including the subagents it spawned, and
+  in a session how much context each prompt added
 - **Tool and file heatmaps**: tools × projects, tools × hour of day, and the files that get read or edited most
 - **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads, OpenCode subagent sessions, Gemini CLI subagent chats and omp subagents are tied back to the spawning prompt or parent session
 - **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
@@ -38,6 +41,13 @@ Everything runs locally. Your usage is never uploaded anywhere.
   <tr>
     <td width="50%"><img src="docs/screenshots/live.png" alt="Live: tokens per minute, plan limits left and the sessions running now"><br><sub><b>Live</b>: tokens per minute, plan limits left and the sessions running now</sub></td>
     <td width="50%"><img src="docs/screenshots/trends.png" alt="Trends: daily usage, a moving average and the running total"><br><sub><b>Trends</b>: daily usage, a moving average and the running total</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/flow.png" alt="Where the money goes: from tool to model to project"><br><sub><b>Where the money goes</b>: from tool to model to project</sub></td>
+    <td width="50%"><img src="docs/screenshots/network.png" alt="Models by project: a network of what used what, with lights along the busiest links"><br><sub><b>Who used what</b>: models and the projects they worked on, as a network</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/project-tiles.png" alt="Projects side by side: every project's usage on one scale"><br><sub><b>Projects side by side</b>: every project's usage on one scale</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/projects.png" alt="Projects: where the tokens go, project by project"><br><sub><b>Projects</b>: where the tokens go, project by project</sub></td>
@@ -496,7 +506,8 @@ macOS and a toast on Windows. **Send test** checks that your system lets them th
 
 ### Tags and notes
 
-Open a session and add tags such as a client name (`acme`), `experiment` or `billable`, and a short note. Tags are
+Open a session and add tags such as a client name (`acme`), `experiment` or `billable`, and a short note. While you
+type, the tags you already use are suggested, the most used first. Tags are
 lowercase, up to 32 characters of letters, digits and `. _ : / -`. Then filter by **Tag** like by any other dimension,
 see what each tag cost under **Tags** (with sessions and lines changed, and an export), and group a report with
 `report --by tag` or filter it with `--tag acme`. A subagent's session takes its parent's tags. In **Settings → Tags**,

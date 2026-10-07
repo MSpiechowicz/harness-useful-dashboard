@@ -72,6 +72,9 @@ const SHOTS: Shot[] = [
         return { x: x - 8, y: y - 8, width: r - x + 16, height: bottom - y + 16 };
       })()`),
   },
+  { name: "flow", route: "overview", clip: (p) => cardClip(p, "Where the money goes") },
+  { name: "network", route: "models", clip: (p) => cardClip(p, "Models by project") },
+  { name: "project-tiles", route: "projects", clip: (p) => cardClip(p, "Projects side by side") },
   { name: "live", route: "live" },
   { name: "trends", route: "trends" },
   { name: "projects", route: "projects" },
@@ -106,6 +109,17 @@ const SHOTS: Shot[] = [
     },
   },
 ];
+
+/** One card of a page, found by its title, wherever it sits on the page. */
+function cardClip(p: Page, title: string): Promise<Clip> {
+  return p.eval<Clip>(`(() => {
+    const h = [...document.querySelectorAll("main h2, main h3")].find((h) => h.textContent.trim() === ${JSON.stringify(title)});
+    const card = h?.closest(".card");
+    if (!card) throw new Error(${JSON.stringify(`card not found: ${title}`)});
+    const r = card.getBoundingClientRect();
+    return { x: r.left - 8, y: r.top + scrollY - 8, width: r.width + 16, height: r.height + 16 };
+  })()`);
+}
 
 /** Clicks the first row of the page's table, which opens its detail page ("#/sessions/<id>"). */
 async function openFirst(p: Page, prefix: string): Promise<void> {
