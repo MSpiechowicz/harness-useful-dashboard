@@ -1,3 +1,10 @@
+## [1.13.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.4...v1.13.5) (2026-10-07)
+
+
+### Bug Fixes
+
+* the Add project budget button lines up with the other controls in Settings ([4477262](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/4477262fa751d442a2686b1dd19f86d8e75248d9))
+
 ## [1.13.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.13.3...v1.13.4) (2026-10-07)
 
 
