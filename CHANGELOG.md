@@ -1,3 +1,10 @@
+## [1.19.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.19.1...v1.19.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* plan limits note on pace is white with a steady arrow ([33d6f3b](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/33d6f3b386dddff22757725601e7966b2b43a643))
+
 ## [1.19.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.19.0...v1.19.1) (2026-10-07)
 
 
