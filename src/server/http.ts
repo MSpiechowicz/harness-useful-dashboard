@@ -309,6 +309,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           return json(q.filters(f));
         case "/api/settings":
           return json({ config: app.cfg, dbPath: app.dbPath, defaultDbPath: defaultDbPath(), syncFolders: findSyncFolders(), sharedFolder: SHARED_FOLDER });
+        case "/api/db/size":
+          return json(app.dbSize());
         case "/api/settings/db-target":
           return json(dbTarget(sp.get("path") ?? "", app.dbPath, defaultDbPath()));
         case "/api/pricing":
@@ -384,6 +386,9 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           const updated = recomputeCosts(app.db, app.priceBook());
           return json({ updated });
         }
+        case "/api/db/compact":
+          // VACUUM: rewrites the whole file, and no scan runs until it is done.
+          return json(await app.compactDb());
         case "/api/notify/test": {
           const lang = app.cfg.language;
           return json({ shown: await notify(message(lang, "title"), message(lang, "test")) });

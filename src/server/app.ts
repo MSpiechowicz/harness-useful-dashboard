@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { type AppConfig, loadConfig, resolveDbPath, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
+import { type AppConfig, loadConfig, resolveDbPath, retentionMonths, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
 import { getMeta, openDb, setMeta } from "../core/db.ts";
 import { type ScanResult, scan } from "../core/ingest/index.ts";
 import { budgetAlerts, budgetStatus, limitAlerts, takeNew } from "../core/budgets.ts";
@@ -11,6 +11,7 @@ import { BUILTIN_PRICES_VERSION, PriceBook } from "../core/pricing.ts";
 import { recomputeCosts } from "../core/ingest/writer.ts";
 import { redactStored } from "../core/redact.ts";
 import { Queries } from "../core/queries.ts";
+import { compact, type DbSize, dbSize, trimDetail, trimDue } from "../core/retention.ts";
 import { notify } from "./notify.ts";
 
 /** How often plan limits are read in the background, for the history on the plans view. */
@@ -43,6 +44,9 @@ export class App {
   private scanningFull = false;
   /** A full rescan asked for while an incremental scan was running: it runs right after that one. */
   private queuedFull: Promise<ScanResult> | null = null;
+  /** The detail trim running in the background (retention.ts), at most one at a time. */
+  private trimming: Promise<void> | null = null;
+  private closed = false;
   lastScan: ScanResult | null = null;
   lastScanAt: number | null = null;
 
@@ -132,6 +136,7 @@ export class App {
         this.lastScanAt = Date.now();
         this.emit({ type: "scan", result });
         if (result.filesParsed > 0) this.sendAlerts().catch((err) => console.error("[alerts]", err));
+        this.trimIfDue();
         return result;
       })
       .finally(() => {
@@ -233,7 +238,45 @@ export class App {
     };
     saveConfig(this.cfg);
     this.startBackgroundScan();
+    if (patch.detailRetentionMonths !== undefined) this.trimIfDue();
     return this.cfg;
+  }
+
+  /**
+   * Trims old detail when retention is on and the last trim is a day old or ran with another setting (retention.ts).
+   * Checked after every scan: it reads one meta row, and writes only when a trim is due. Runs in the background, in
+   * batches the server answers requests between. It stops when the database is switched or closed under it.
+   */
+  trimIfDue(): void {
+    if (this.trimming) return;
+    const db = this.db;
+    const { host } = this.identity;
+    const months = retentionMonths(this.cfg.detailRetentionMonths);
+    if (!trimDue(db, host, months)) return;
+    this.trimming = trimDetail(db, host, months, { stop: () => this.closed || this.db !== db })
+      .then((r) => {
+        const rows = r.prompts + r.toolCalls + r.outcomes + r.sessions + r.responseMeta;
+        if (rows || r.freedPages) console.log(`[retention] trimmed ${rows} rows in ${r.batches} batches, freed ${r.freedPages} pages`);
+      })
+      .catch((err) => console.error("[retention]", err))
+      .finally(() => {
+        this.trimming = null;
+      });
+  }
+
+  /** How big the database is and how much of it is free pages. */
+  dbSize(): DbSize {
+    return dbSize(this.db);
+  }
+
+  /**
+   * Rewrites the database without its free pages (Settings → Compact). Waits for a scan or trim in progress. VACUUM
+   * holds the connection until done, so no scan runs meanwhile.
+   */
+  async compactDb(): Promise<DbSize> {
+    if (this.scanning) await this.scanning.catch(() => {});
+    if (this.trimming) await this.trimming;
+    return compact(this.db);
   }
 
   saveLanguage(language: AppConfig["language"]): void {
@@ -248,6 +291,7 @@ export class App {
   }
 
   close(): void {
+    this.closed = true;
     this.stopBackgroundScan();
     this.db.close();
   }

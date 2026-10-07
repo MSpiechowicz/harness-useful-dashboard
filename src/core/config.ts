@@ -46,6 +46,11 @@ export interface AppConfig {
   scanIntervalSec: number;
   /** Max characters of prompt text kept in the database (0 = do not store prompt text). */
   promptTextLimit: number;
+  /**
+   * Months of detail kept for this machine's rows: prompt text, error messages, file paths and response times older
+   * than that are trimmed, usage rows never (see retention.ts). 0 keeps everything.
+   */
+  detailRetentionMonths: number;
   checkUpdates: boolean;
   sources: SourceConfig;
   /** Where the Live view reads how much of each plan limit is left (see limits.ts). */
@@ -81,6 +86,7 @@ export function defaultConfig(): AppConfig {
     openMode: "app",
     scanIntervalSec: 30,
     promptTextLimit: 2000,
+    detailRetentionMonths: 0,
     checkUpdates: true,
     sources: {
       claudeDirs: [join(claudeRoot, "projects")],
@@ -197,6 +203,16 @@ export function scanInterval(sec: unknown): number {
   return Math.min(86_400, Math.max(5, Math.round(n)));
 }
 
+/** The fewest months of detail kept when trimming is on: model drift compares 35 days, and a month back stays whole. */
+export const MIN_RETENTION_MONTHS = 2;
+
+/** Months of detail kept: 0 (or anything not a positive number) keeps everything, others are kept in range. */
+export function retentionMonths(months: unknown): number {
+  const n = Number(months);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(120, Math.max(MIN_RETENTION_MONTHS, Math.round(n)));
+}
+
 const SOURCE_DIRS = ["claudeDirs", "codexDirs", "ompDirs", "piDirs", "opencodeDirs", "zedDirs", "clineDirs", "rooDirs", "kiloDirs", "geminiDirs", "copilotDirs"] as const;
 const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo", "gemini", "copilot"] as const;
 const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode"] as const;
@@ -252,6 +268,10 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
   if (has("promptTextLimit")) {
     if (typeof body.promptTextLimit !== "number" || !Number.isFinite(body.promptTextLimit)) return invalid("promptTextLimit");
     patch.promptTextLimit = Math.min(100_000, Math.max(0, Math.round(body.promptTextLimit)));
+  }
+  if (has("detailRetentionMonths")) {
+    if (typeof body.detailRetentionMonths !== "number" || !Number.isFinite(body.detailRetentionMonths)) return invalid("detailRetentionMonths");
+    patch.detailRetentionMonths = retentionMonths(body.detailRetentionMonths);
   }
   if (has("port")) {
     const port = body.port;

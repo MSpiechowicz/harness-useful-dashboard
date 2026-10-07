@@ -1,11 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { AppConfig } from "../config.ts";
+import { type AppConfig, retentionMonths } from "../config.ts";
 import { optimize, setMeta } from "../db.ts";
 import { expandHome } from "../paths.ts";
 import { PriceBook } from "../pricing.ts";
 import { normalizeProjects } from "../project.ts";
+import { detailCutoff } from "../retention.ts";
 import { claudeParser } from "./claude.ts";
 import { codexParser } from "./codex.ts";
 import { copilotParser } from "./copilot.ts";
@@ -177,7 +178,8 @@ export async function scan(
 ): Promise<ScanResult> {
   const started = performance.now();
   const prices = PriceBook.fromDb(db);
-  const writer = new DbWriter(db, prices, identity);
+  // Detail retention trims what is older than this: reading old logs again leaves it out rather than bringing it back.
+  const writer = new DbWriter(db, prices, identity, detailCutoff(retentionMonths(cfg.detailRetentionMonths)) ?? 0);
   const files = await discoverFiles(cfg);
   const result: ScanResult = { filesSeen: files.length, filesParsed: 0, usageRows: 0, prompts: 0, tools: 0, errors: [], durationMs: 0 };
 

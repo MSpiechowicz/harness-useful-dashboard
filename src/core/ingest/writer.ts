@@ -29,6 +29,11 @@ export class DbWriter implements IngestSink {
     db: Database,
     private prices: PriceBook,
     private identity: { user: string; host: string },
+    /**
+     * Detail older than this (epoch ms) is not stored: the text, paths and response times that retention trims. A full
+     * rescan would otherwise bring them back each time, only for the next trim to take them out again.
+     */
+    private detailBefore = 0,
   ) {
     this.sSession = db.prepare(`
       INSERT INTO sessions (id, provider, native_id, project, user, host, title, git_branch, client, client_version,
@@ -125,7 +130,7 @@ export class DbWriter implements IngestSink {
       project: this.project(s.project),
       user: this.identity.user,
       host: this.identity.host,
-      brief: s.brief ?? null,
+      brief: this.isOld(s.endedAt ?? s.startedAt) ? null : (s.brief ?? null),
       title: s.title ?? null,
       gitBranch: s.gitBranch ?? null,
       client: s.client ?? null,
@@ -200,17 +205,18 @@ export class DbWriter implements IngestSink {
       project: this.project(t.project),
       user: this.identity.user,
       tool: t.tool,
-      filePath: t.filePath,
+      filePath: this.isOld(t.ts) ? null : t.filePath,
       skill: t.skill,
       agent: t.agent,
       spawnRef: t.spawnRef ?? null,
-      brief: t.brief ?? null,
+      brief: this.isOld(t.ts) ? null : (t.brief ?? null),
     });
     this.sOutcomeTool.run({ id: t.id, tool: t.tool });
     this.stats.tools++;
   }
 
   responseMeta(m: ResponseMetaRecord): void {
+    if (this.isOld(m.endTs ?? m.startTs)) return;
     this.sMeta.run({
       usageId: m.usageId,
       startTs: m.startTs,
@@ -236,10 +242,15 @@ export class DbWriter implements IngestSink {
       kind: o.kind,
       tool: o.tool ?? null,
       reason: o.reason ?? null,
-      detail: o.detail ?? null,
-      input: o.input ?? null,
+      detail: this.isOld(o.ts) ? null : (o.detail ?? null),
+      input: this.isOld(o.ts) ? null : (o.input ?? null),
       status: o.status ?? null,
     });
+  }
+
+  /** Whether a record is older than the detail kept. */
+  private isOld(ts: number | null | undefined): boolean {
+    return ts != null && ts < this.detailBefore;
   }
 
   limit(l: LimitRecord): void {

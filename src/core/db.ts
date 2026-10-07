@@ -249,6 +249,9 @@ export function openDb(path: string, opts: OpenDbOptions = {}): Database {
   const db = new Database(path, { create: !opts.readonly, readonly: opts.readonly, strict: true });
   db.exec("PRAGMA busy_timeout = 15000");
   db.exec("PRAGMA foreign_keys = ON");
+  // A new database gives the pages that trimming frees back to the disk a few at a time (retention.ts). This must come
+  // before anything writes the file, the journal mode too. An existing one keeps its mode until VACUUM (Compact).
+  if (!opts.readonly) db.exec("PRAGMA auto_vacuum = INCREMENTAL");
   if (!opts.readonly && path !== ":memory:") {
     // WAL does not work reliably on network/cloud-synced filesystems, so only use it for local default paths.
     const mode = opts.journalMode ?? "auto";

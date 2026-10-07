@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bell, Check, Cloud, Download, FileUp, Info, Loader, Plus, Power, RefreshCw, Trash2, TriangleAlert, Users } from "@lucide/svelte";
+  import { Bell, Check, Cloud, Download, FileUp, Info, Loader, Plus, Power, RefreshCw, Shrink, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import LangPicker from "../components/LangPicker.svelte";
@@ -10,6 +10,7 @@
   import Switch from "../components/Switch.svelte";
   import ThemeToggle from "../components/ThemeToggle.svelte";
   import { getJson, send } from "../lib/api.svelte.ts";
+  import { decimal } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
   import { checkUpdate, installUpdate, updater } from "../lib/update.svelte.ts";
@@ -24,6 +25,7 @@
     openMode: "app" | "browser" | "none";
     scanIntervalSec: number;
     promptTextLimit: number;
+    detailRetentionMonths?: number;
     checkUpdates: boolean;
     sources: Record<DirsKey, string[]> & { enabled: Record<SourceKey, boolean> };
     limits: Record<LimitKey, boolean>;
@@ -85,6 +87,18 @@
   let projectBudgets = $state<{ project: string; cap: number }[]>([]);
   let projectOptions = $state<{ value: string; label: string }[]>([]);
   let testMsg = $state<string | null>(null);
+  // Detail retention in months ("0" keeps everything), and the database's size with what Compact would give back.
+  let retention = $state("0");
+  let dbSize = $state<{ bytes: number; freeBytes: number; incremental: boolean } | null>(null);
+  let compacting = $state(false);
+  let compactMsg = $state<string | null>(null);
+  const RETENTION = [0, 3, 6, 12, 24];
+  const retentionOptions = $derived(
+    [...new Set([...RETENTION, Number(retention)])]
+      .sort((a, b) => a - b)
+      .map((n) => ({ value: String(n), label: n === 0 ? t("settings.retention.all") : RETENTION.includes(n) ? t(`settings.retention.m${n as 3 | 6 | 12 | 24}`) : t("settings.retention.months", { n }) })),
+  );
+  const megabytes = (b: number) => (b >= 1e9 ? `${decimal(b / 1e9, 2)} GB` : `${decimal(b / 1e6, 1)} MB`);
 
   /** Join a folder and a name with the separator the folder already uses. */
   const joinPath = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") && !dir.includes("/") ? "\\" : "/"}${name}`;
@@ -115,6 +129,7 @@
     dbInput = asFolder(s.config.dbPath);
     for (const src of SOURCES) dirs[src.key] = s.config.sources[src.dirs]?.length ? [...s.config.sources[src.dirs]] : [""];
     const b = s.config.budgets;
+    retention = String(s.config.detailRetentionMonths ?? 0);
     budgetDaily = b?.daily ?? 0;
     budgetMonthly = b?.monthly ?? 0;
     projectBudgets = Object.entries(b?.projects ?? {}).map(([project, cap]) => ({ project, cap }));
@@ -180,6 +195,7 @@
         promptTextLimit: Number(cfg.promptTextLimit),
         checkUpdates: cfg.checkUpdates,
         journalMode: cfg.journalMode,
+        detailRetentionMonths: Number(retention),
         sources: { ...Object.fromEntries(SOURCES.filter((src) => knownDirs.has(src.dirs)).map((src) => [src.dirs, clean(dirs[src.key])])), enabled: cfg.sources.enabled },
         limits: cfg.limits,
         ...extra,
@@ -291,6 +307,27 @@
     stopped = true;
   }
 
+  async function loadSize() {
+    dbSize = await getJson<NonNullable<typeof dbSize>>("/api/db/size").catch(() => null);
+  }
+  $effect(() => {
+    void currentDb;
+    loadSize();
+  });
+
+  async function compactDb() {
+    compacting = true;
+    compactMsg = null;
+    try {
+      dbSize = await send<NonNullable<typeof dbSize>>("/api/db/compact");
+      compactMsg = t("settings.compacted", { size: megabytes(dbSize.bytes) });
+    } catch (e) {
+      compactMsg = (e as Error).message;
+    } finally {
+      compacting = false;
+    }
+  }
+
   async function checkNow() {
     await checkUpdate(true);
     checked = true;
@@ -392,6 +429,15 @@
           bind:value={cfg.journalMode}
           options={(["auto", "delete", "wal"] as const).map((v) => ({ value: v, label: t(`settings.journal.${v}`) }))}
         />
+      </SettingRow>
+      <SettingRow label={t("settings.retention")} hint={t("settings.retentionHint")}>
+        <Dropdown full label={t("settings.retention")} bind:value={retention} options={retentionOptions} onchange={() => save()} />
+      </SettingRow>
+      <SettingRow label={t("settings.dbSize")} hint={compactMsg ?? `${t("settings.dbSizeHint")}${dbSize && !dbSize.incremental ? ` ${t("settings.dbSizeOnce")}` : ""}`}>
+        {#if dbSize}<span class="text-xs text-ink-2 tabular">{t("settings.dbSizeValue", { size: megabytes(dbSize.bytes), free: megabytes(dbSize.freeBytes) })}</span>{/if}
+        <button class="btn" onclick={compactDb} disabled={compacting || busy}>
+          {#if compacting}<Loader size={14} class="animate-spin" />{t("settings.compacting")}{:else}<Shrink size={14} />{t("settings.compact")}{/if}
+        </button>
       </SettingRow>
       {#snippet footer()}
         {#if currentDb !== defaultDb}

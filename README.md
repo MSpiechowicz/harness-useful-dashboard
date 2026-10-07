@@ -326,6 +326,19 @@ For non-default paths the database uses SQLite's rollback journal instead of WAL
 network or synced filesystems. Sync services don't lock files across machines, so avoid scanning from two machines at the
 exact same moment. The default 30-second rescan interval with a 15-second busy timeout handles normal use.
 
+### Database size
+
+Two months of heavy use come to about 250 MB, mostly one row per tool call and per tool result with its indexes. In
+**Settings → Database**, *Keep details for* (off by default) trims older detail once a day: prompt text (each session keeps
+the start of its first prompt as its title), error messages, file paths and response times. Usage rows are never touched,
+so totals, costs, trends and budgets stay exactly the same. Prompts, Files, Friction and Time show less for older dates.
+The setting is per machine and only trims rows that machine ingested, so on a shared database each machine decides for
+its own history. Trimming runs in small batches, and a full rescan doesn't bring the trimmed detail back.
+
+*Compact* rewrites the file without its free space (SQLite `VACUUM`) and shows the size before and after. It pauses scans
+until done and holds the file the whole time, so on a shared database run it while the other machines are off. New
+databases, and older ones after one Compact, give the space that trimming frees back to the disk by themselves.
+
 ## How the numbers are computed
 
 - **Tokens.** Claude Code writes one line per content block, repeating the same message id, so rows are deduplicated by
