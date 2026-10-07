@@ -1,3 +1,12 @@
+# [1.16.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.15.1...v1.16.0) (2026-10-07)
+
+
+### Features
+
+* Cursor usage syncs by itself with the login Cursor keeps ([e4b484f](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/e4b484f085c2edace958759f450deb2792bae577))
+* lines changed, and what 100 changed lines cost ([7a49f2c](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/7a49f2ca5367c1c5c4d7feb94b8b909007fc9db3))
+* today, report and limits --check on the command line ([9837298](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9837298c4ccc4e50aa6af82b344e135895c30cdb))
+
 ## [1.15.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.15.0...v1.15.1) (2026-10-07)
 
 
