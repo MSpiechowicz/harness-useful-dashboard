@@ -3,13 +3,15 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve, win32 } from "node:path";
 import { en } from "../../web/src/lib/locales/en.ts";
 import { branchDetail, branches, branchId, type BranchRow } from "../core/branches.ts";
-import { type BudgetConfig, budgetStatus } from "../core/budgets.ts";
-import { openDb } from "../core/db.ts";
+import type { BudgetConfig } from "../core/budgets.ts";
+import { per100, sessionLines } from "../core/changes.ts";
 import { friction } from "../core/friction.ts";
-import { codexLimits } from "../core/limits.ts";
-import { PriceBook } from "../core/pricing.ts";
-import { type Dimension, type Filters, Queries, relativeTo } from "../core/queries.ts";
-import { LIMIT_FRESH_MS, sessionCost } from "../core/statusline.ts";
+import type { PriceBook } from "../core/pricing.ts";
+import { type Dimension, type Queries, relativeTo } from "../core/queries.ts";
+import {
+  budgetRows, filtersOf, filtersOut, InputError, iso, limitWindows, openReadOnly, RANGES, type Range, rangeOut, ratio, resolveRange, usd,
+} from "../core/reports.ts";
+import { sessionCost } from "../core/statusline.ts";
 import { generateTips } from "../core/tips.ts";
 import { type Schema, type Tool, ToolError } from "./server.ts";
 
@@ -32,7 +34,6 @@ export interface ToolContext {
 }
 
 const COST_NOTE = "Costs are USD at API-equivalent list prices, not what a subscription bills.";
-const DAY = 86_400_000;
 
 /** The read-only database, opened when a tool first needs it. */
 class Store {
@@ -42,17 +43,7 @@ class Store {
 
   get(): { db: Database; queries: Queries; prices: PriceBook } {
     if (this.handle) return this.handle;
-    // openDb would create the folder: a missing database is reported instead, and nothing is written.
-    if (!existsSync(this.path)) throw new ToolError(`No usage database at ${this.path}. Run harness-dashboard once to scan the local logs, or start the server with --db <path>.`);
-    let db: Database;
-    try {
-      db = openDb(this.path, { readonly: true });
-      db.exec("PRAGMA busy_timeout = 3000");
-    } catch (e) {
-      throw new ToolError(`Could not open the usage database at ${this.path}: ${(e as Error).message}`);
-    }
-    const prices = PriceBook.fromDb(db);
-    this.handle = { db, queries: new Queries(db, () => prices), prices };
+    this.handle = openReadOnly(this.path);
     return this.handle;
   }
 
@@ -65,9 +56,6 @@ class Store {
 // ---------------------------------------------------------------------------------------------------------------
 // Output helpers
 
-const iso = (ms: number | null | undefined) => (ms == null || !Number.isFinite(ms) ? null : new Date(ms).toISOString());
-const usd = (v: number | null | undefined) => (v == null ? null : Math.round(v * 10_000) / 10_000);
-const ratio = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 1000) / 1000);
 const clip = (s: string | null | undefined, n: number) => {
   if (!s) return null;
   const t = s.replace(/\s+/g, " ").trim();
@@ -84,9 +72,6 @@ const tokensOf = (t: { tokens: number; input: number; output: number; cacheRead:
 
 // ---------------------------------------------------------------------------------------------------------------
 // Ranges and filters
-
-const RANGES = ["today", "7d", "30d", "month", "all", "custom"] as const;
-type Range = (typeof RANGES)[number];
 
 function rangeProps(fallback: Range): Record<string, Schema> {
   return {
@@ -105,82 +90,6 @@ const FILTER_PROPS: Record<string, Schema> = {
   project: { type: "string", maxLength: 1000, description: "Only this project: its path or its folder name." },
   model: { type: "string", maxLength: 200, description: "Only this model id, e.g. claude-opus-5-5." },
   user: { type: "string", maxLength: 200, description: "Only this user (on a database shared by several people)." },
-};
-
-const startOfDay = (t: number, daysBack = 0) => {
-  const d = new Date(t);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysBack).getTime();
-};
-
-function parseTime(v: unknown, name: string, end: boolean): number | undefined {
-  if (v == null || v === "") return undefined;
-  const s = String(v);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const [y, m, d] = s.split("-").map(Number) as [number, number, number];
-    return new Date(y, m - 1, d + (end ? 1 : 0)).getTime();
-  }
-  const t = Date.parse(s);
-  if (!Number.isFinite(t)) throw new ToolError(`${name} must be a date (YYYY-MM-DD) or an ISO 8601 time, got "${s}"`);
-  return t;
-}
-
-interface ResolvedRange {
-  name: Range;
-  from?: number;
-  to?: number;
-}
-
-function resolveRange(args: Record<string, unknown>, fallback: Range, now: number): ResolvedRange {
-  const name = (args.range as Range | undefined) ?? fallback;
-  switch (name) {
-    case "today":
-      return { name, from: startOfDay(now) };
-    case "7d":
-      return { name, from: startOfDay(now, 6) };
-    case "30d":
-      return { name, from: startOfDay(now, 29) };
-    case "month": {
-      const d = new Date(now);
-      return { name, from: new Date(d.getFullYear(), d.getMonth(), 1).getTime() };
-    }
-    case "all":
-      return { name };
-    case "custom": {
-      const from = parseTime(args.from, "from", false);
-      const to = parseTime(args.to, "to", true);
-      if (from == null && to == null) throw new ToolError("range custom needs from, to or both");
-      if (from != null && to != null && to <= from) throw new ToolError("to must be after from");
-      return { name, from, to };
-    }
-  }
-}
-
-const rangeOut = (r: ResolvedRange, now: number) => ({ name: r.name, from: iso(r.from), to: iso(r.to ?? now) });
-
-/** A project named by its folder is looked up among the projects with usage. A path is taken as it is. */
-function resolveProject(q: Queries, value: string): string {
-  if (/[\\/]/.test(value) || value === "(none)") return value.replace(/[\\/]+$/, "") || value;
-  const all = q.filters({}).project;
-  const hits = all.filter((p) => p.label.toLowerCase() === value.toLowerCase());
-  if (hits.length === 1) return hits[0]!.value;
-  if (hits.length > 1) throw new ToolError(`Several projects are named ${value}: ${hits.map((h) => h.value).join(", ")}. Pass the path.`);
-  const known = all.slice(0, 15).map((p) => p.label).join(", ");
-  throw new ToolError(`No project named ${value}. Projects by cost: ${known || "none yet"}.`);
-}
-
-function filtersOf(q: Queries, args: Record<string, unknown>, range: ResolvedRange): Filters {
-  const f: Filters = { from: range.from, to: range.to };
-  if (typeof args.provider === "string" && args.provider) f.provider = args.provider;
-  if (typeof args.model === "string" && args.model) f.model = args.model;
-  if (typeof args.user === "string" && args.user) f.user = args.user;
-  if (typeof args.project === "string" && args.project) f.project = resolveProject(q, args.project);
-  return f;
-}
-
-const filtersOut = (f: Filters) => {
-  const out: Record<string, string> = {};
-  for (const k of ["provider", "project", "model", "user"] as const) if (f[k]) out[k] = f[k]!;
-  return Object.keys(out).length ? out : undefined;
 };
 
 const limitProp = (fallback: number, max: number, what: string): Schema => ({ type: "integer", minimum: 1, maximum: max, description: `How many ${what} to return, ${fallback} by default, at most ${max}.` });
@@ -400,6 +309,11 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
       const children = d.children as { cost: number; tokens: number }[];
       const timeline = d.timeline as { ts: number }[];
       const parent = s.parent as { id: string; title: string | null } | undefined;
+      const costUsd = sessionCost(db, id) ?? own.cost;
+      // Lines its edits changed, its subagents' sessions included like the cost.
+      const lines = [id, ...(d.children as { id: string }[]).map((c) => c.id)].map((sid) => sessionLines(db, sid, 0));
+      const added = lines.reduce((a, l) => a + l.added, 0);
+      const removed = lines.reduce((a, l) => a + l.removed, 0);
       return {
         sessionId: id,
         resolvedBy,
@@ -410,8 +324,9 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
         parentSession: parent ? { id: parent.id, title: clip(parent.title, 120) } : undefined,
         started: iso((s.started_at as number | null) ?? timeline[0]?.ts),
         lastActivity: iso(timeline[timeline.length - 1]?.ts),
-        costUsd: usd(sessionCost(db, id) ?? own.cost),
+        costUsd: usd(costUsd),
         ownCostUsd: usd(own.cost),
+        linesChanged: { added, removed, costPer100LinesUsd: usd(per100(costUsd, added + removed)) },
         tokens: tokensOf(own),
         modelCalls: own.messages,
         prompts: d.prompts.length,
@@ -458,7 +373,8 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
         prompts: d.totals.prompts,
         firstActivity: iso(d.totals.firstTs),
         lastActivity: iso(d.totals.lastTs),
-        models: d.models.slice(0, 5).map((m) => ({ model: m.key, costUsd: usd(m.cost), tokens: m.tokens })),
+        linesChanged: { added: d.lines.added, removed: d.lines.removed, files: d.lines.files, costPer100LinesUsd: usd(d.lines.costPer100) },
+        models: d.models.slice(0, 5).map((m) => ({ model: m.key, costUsd: usd(m.cost), tokens: m.tokens, linesChanged: m.added + m.removed || undefined })),
         latestSessions: d.sessions.slice(0, 10).map((s) => ({
           id: s.id,
           title: clip(s.title, 100),
@@ -482,63 +398,7 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
     inputSchema: { type: "object", additionalProperties: false },
     run() {
       const { db } = store.get();
-      const t = now();
-      type Reading = {
-        host: string; reportKey: string; windowId: string; provider: string; plan: string | null; windowMs: number | null;
-        scope: string | null; label: string | null; usedFraction: number; resetsAt: number | null; observedAt: number;
-      };
-      const rows = db
-        .query<Reading, { from: number }>(
-          `SELECT host, report_key AS reportKey, window_id AS windowId, provider, plan, window_ms AS windowMs, scope, label,
-                  used_fraction AS usedFraction, resets_at AS resetsAt, observed_at AS observedAt
-           FROM limit_readings r
-           WHERE observed_at >= $from
-             AND observed_at = (SELECT MAX(x.observed_at) FROM limit_readings x WHERE x.host = r.host AND x.report_key = r.report_key AND x.window_id = r.window_id)`,
-        )
-        .all({ from: t - 30 * DAY });
-      // Per window, this machine's reading first: a shared database also holds other machines' accounts.
-      const latest = new Map<string, Reading>();
-      for (const r of rows) {
-        const key = `${r.reportKey}|${r.windowId}`;
-        const had = latest.get(key);
-        const mine = (x: Reading) => x.host === ctx.host;
-        if (!had || (mine(r) && !mine(had)) || (mine(r) === mine(had) && r.observedAt > had.observedAt)) latest.set(key, r);
-      }
-      // Codex's own readings from its logs, stored while scanning, when newer than the history.
-      const codex = codexLimits(db, ctx.host, t);
-      for (const w of codex?.windows ?? []) {
-        const key = `${codex!.key}|${w.id}`;
-        const had = latest.get(key);
-        if (!had || had.observedAt < codex!.observedAt) {
-          latest.set(key, {
-            host: ctx.host, reportKey: codex!.key, windowId: w.id, provider: "codex", plan: codex!.plan, windowMs: w.windowMs, scope: null, label: null,
-            usedFraction: w.usedFraction, resetsAt: w.resetsAt, observedAt: codex!.observedAt,
-          });
-        }
-      }
-      const windowName = (r: Reading) => {
-        if (r.windowMs == null) return r.label ?? r.windowId;
-        const h = r.windowMs / 3_600_000;
-        return h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`;
-      };
-      const out = [...latest.values()]
-        .sort((a, b) => a.provider.localeCompare(b.provider) || (a.windowMs ?? Infinity) - (b.windowMs ?? Infinity))
-        .map((r) => {
-          const reset = r.resetsAt != null && r.resetsAt <= t;
-          return {
-            provider: r.provider,
-            plan: r.plan ?? undefined,
-            window: windowName(r),
-            scope: r.scope ?? undefined,
-            // A window that reset after the reading: its use since is unknown.
-            usedPercent: reset ? null : Math.round(r.usedFraction * 1000) / 10,
-            resetsAt: reset ? null : iso(r.resetsAt),
-            observedAt: iso(r.observedAt),
-            ageMinutes: Math.max(0, Math.round((t - r.observedAt) / 60_000)),
-            status: reset ? "reset since reading" : t - r.observedAt > LIMIT_FRESH_MS ? "stale" : "fresh",
-            host: r.host !== ctx.host ? r.host : undefined,
-          };
-        });
+      const out = limitWindows(db, ctx.host, now());
       return {
         windows: out,
         note: out.length
@@ -555,20 +415,10 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
     inputSchema: { type: "object", additionalProperties: false },
     run() {
       const { db } = store.get();
-      const items = budgetStatus(db, ctx.budgets, ctx.user, new Date(now()));
+      const items = budgetRows(db, ctx.budgets, ctx.user, now());
       return {
         user: ctx.user,
-        budgets: items.map((b) => ({
-          scope: b.scope,
-          project: b.project ?? undefined,
-          period: b.period,
-          capUsd: usd(b.cap),
-          spentUsd: usd(b.spent),
-          usedPercent: Math.round(b.fraction * 1000) / 10,
-          remainingUsd: usd(Math.max(0, b.cap - b.spent)),
-          projectedUsd: b.projected == null ? undefined : usd(b.projected),
-          status: b.fraction >= 1 ? "over" : b.fraction >= 0.8 ? "warning" : "ok",
-        })),
+        budgets: items,
         note: items.length ? COST_NOTE : "No budgets set. They are set in the dashboard under Settings, Budgets and alerts.",
       };
     },
@@ -662,5 +512,17 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
     },
   };
 
-  return { tools: [usageSummary, breakdown, sessionCostTool, branchCost, limits, budgets, failures, tips], close: () => store.close() };
+  const tools = [usageSummary, breakdown, sessionCostTool, branchCost, limits, budgets, failures, tips];
+  // The shared report code reports bad input as InputError: the agent sees it as a tool error it can correct.
+  const asToolErrors = (t: Tool): Tool => ({
+    ...t,
+    run(args) {
+      try {
+        return t.run(args);
+      } catch (e) {
+        throw e instanceof InputError ? new ToolError(e.message) : e;
+      }
+    },
+  });
+  return { tools: tools.map(asToolErrors), close: () => store.close() };
 }

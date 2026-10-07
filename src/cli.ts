@@ -5,6 +5,8 @@ import { loadConfig, resolveDbPath, updateConfig } from "./core/config.ts";
 import { openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
 import { fallbackLine, gather, parseInput, render, useColor } from "./core/statusline.ts";
+import { REPORT_COMMANDS, type ReportCommand, runReport } from "./core/reportCli.ts";
+import { InputError } from "./core/reports.ts";
 import { importCursorCsv } from "./core/ingest/cursor.ts";
 import { McpServer, serveStream } from "./mcp/server.ts";
 import { createTools } from "./mcp/tools.ts";
@@ -24,6 +26,9 @@ Usage:
   ${BIN_NAME} [serve] [options]      Start the dashboard and open it (default)
   ${BIN_NAME} scan [--full]          Ingest new usage from local logs and exit
   ${BIN_NAME} import-cursor <file>   Import a Cursor usage CSV export
+  ${BIN_NAME} today                  Today's cost, tokens and sessions against yesterday
+  ${BIN_NAME} report [options]       Cost by project, model, provider, user, day, week or month
+  ${BIN_NAME} limits [--check]       Plan limits and budgets, with exit codes for scripts
   ${BIN_NAME} statusline             Print one status line for Claude Code (reads its JSON on stdin)
   ${BIN_NAME} mcp                    Serve usage data to AI agents over MCP (stdio, read-only)
   ${BIN_NAME} update [--check]       Update to the latest release
@@ -40,6 +45,19 @@ Statusline options:
   --format <tpl>    Line template (default "{model} · {session} · {today} · {limit}")
                     Placeholders: {model} {session} {today} {limit}
   --no-color        Plain text (NO_COLOR is honored too)
+
+Report options (today, report, limits):
+  --range <r>       today, 7d, 30d, month or all (report default 30d)
+  --from <date>     Start day, YYYY-MM-DD in local time (with --to, instead of --range)
+  --to <date>       Last day, included
+  --by <what>       project, model, provider, user, day, week or month (default project)
+  --provider, --project, --model, --user <value>   Only this harness, project, model or user
+  --json, --csv     Machine-readable output (CSV for report only)
+  --limit <n>       Rows in the report table (default 25, 0 for all)
+  --scan            Scan the local logs first (writes the database)
+  --check           limits: exit 0 below --warn, 10 at or above it, 11 at 100%, 2 with no fresh reading
+  --warn <pct>      limits: the warning threshold for limits and budgets (default 80)
+  Numbers are as fresh as the last scan. Exit code 2 means bad options or no database.
 `;
 
 interface Args {
@@ -47,6 +65,9 @@ interface Args {
   positional: string[];
   flags: Record<string, string | boolean>;
 }
+
+/** Flags that take a value: `--db x` as well as `--db=x`. */
+const VALUE_FLAGS = ["db", "port", "format", "range", "from", "to", "by", "provider", "project", "model", "user", "warn", "limit"];
 
 export function parseArgs(argv: string[]): Args {
   const flags: Record<string, string | boolean> = {};
@@ -56,7 +77,7 @@ export function parseArgs(argv: string[]): Args {
     if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=", 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (["db", "port", "format"].includes(k) && argv[i + 1] && !argv[i + 1]!.startsWith("--")) flags[k] = argv[++i]!;
+      else if (VALUE_FLAGS.includes(k) && argv[i + 1] && !argv[i + 1]!.startsWith("--")) flags[k] = argv[++i]!;
       else flags[k] = true;
     } else if (a === "-h") flags.help = true;
     else if (a === "-v") flags.version = true;
@@ -186,6 +207,42 @@ async function mcp(dbFlag: string | undefined): Promise<void> {
   close();
 }
 
+/** One incremental (or full) scan into the database, as `scan` runs it. */
+async function runScan(dbFlag: string | undefined, full: boolean) {
+  const cfg = loadConfig();
+  const { path, isDefault } = resolveDbPath(cfg, dbFlag);
+  const db = openDb(path, { journalMode: cfg.journalMode, isDefaultPath: isDefault });
+  try {
+    return await scan(db, cfg, { user: cfg.userName || localIdentity().user, host: localIdentity().host }, { full });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * `today`, `report` and `limits`: tables for a terminal, JSON or CSV for scripts. They read the database only, unless
+ * --scan asks for a scan first. Bad options and a missing database exit with 2, and nothing is created.
+ */
+async function report(cmd: ReportCommand, args: Args, dbFlag: string | undefined): Promise<void> {
+  try {
+    if (args.flags.scan === true) {
+      ensureAppDataDir();
+      const r = await runScan(dbFlag, false);
+      console.error(`Scanned ${r.filesSeen} files (${r.filesParsed} changed, +${r.usageRows} usage rows) in ${r.durationMs} ms`);
+    }
+    const cfg = loadConfig();
+    const { user, host } = localIdentity();
+    const { out, code } = runReport(cmd, args.flags, {
+      dbPath: resolveDbPath(cfg, dbFlag).path, budgets: cfg.budgets, user: cfg.userName || user, host, now: Date.now(), env: process.env, isTTY: process.stdout.isTTY === true,
+    });
+    process.stdout.write(out);
+    process.exitCode = code;
+  } catch (err) {
+    console.error(`error: ${(err as Error).message}`);
+    process.exitCode = err instanceof InputError ? 2 : 1;
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.flags.help || args.cmd === "help") return void console.log(HELP);
@@ -194,6 +251,8 @@ async function main(): Promise<void> {
   if (args.cmd === "statusline") return statusline(args, typeof args.flags.db === "string" ? args.flags.db : undefined);
   // Read-only as well: no app data folder is created for it.
   if (args.cmd === "mcp") return mcp(typeof args.flags.db === "string" ? args.flags.db : undefined);
+  // Reports read the database only: no app data folder either, unless --scan writes one.
+  if ((REPORT_COMMANDS as readonly string[]).includes(args.cmd)) return report(args.cmd as ReportCommand, args, typeof args.flags.db === "string" ? args.flags.db : undefined);
   ensureAppDataDir();
 
   const dbFlag = typeof args.flags.db === "string" ? args.flags.db : undefined;
@@ -203,14 +262,9 @@ async function main(): Promise<void> {
       return serve(args);
 
     case "scan": {
-      const cfg = loadConfig();
-      const { path, isDefault } = resolveDbPath(cfg, dbFlag);
-      const db = openDb(path, { journalMode: cfg.journalMode, isDefaultPath: isDefault });
-      const id = { user: cfg.userName || localIdentity().user, host: localIdentity().host };
-      const r = await scan(db, cfg, id, { full: args.flags.full === true });
+      const r = await runScan(dbFlag, args.flags.full === true);
       console.log(`Scanned ${r.filesSeen} files (${r.filesParsed} parsed) in ${r.durationMs} ms → ${r.usageRows} usage rows, ${r.prompts} prompts, ${r.tools} tool calls`);
       for (const e of r.errors) console.warn(`  ! ${e.path}: ${e.error}`);
-      db.close();
       return;
     }
 
