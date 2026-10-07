@@ -1,3 +1,10 @@
+## [1.15.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.15.0...v1.15.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* macOS opens only the app window, also when the browser isn't running yet ([db468fc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/db468fc1f1fec6b4ad5151bc462807fe5b6c1e28))
+
 # [1.15.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.14.2...v1.15.0) (2026-10-07)
 
 
