@@ -1,3 +1,10 @@
+## [1.18.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.2...v1.18.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* a new version shows within 5 minutes, not an hour ([53ffa1c](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/53ffa1c592e52655d80b6306378b5feb46856dca))
+
 ## [1.18.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.18.1...v1.18.2) (2026-10-07)
 
 
