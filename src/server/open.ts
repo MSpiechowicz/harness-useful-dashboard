@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, posix } from "node:path";
 import type { OpenMode } from "../core/config.ts";
@@ -84,39 +84,15 @@ function openDefaultBrowser(url: string): void {
   Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"] }).unref();
 }
 
-/**
- * Whether a browser already runs on the window profile. Chromium marks its profile with a `SingletonLock` link to
- * "<host>-<pid>", which it removes when it quits. A crash leaves it behind, so the process must still be alive.
- */
-export function profileInUse(profile: string): boolean {
-  let lock: string;
-  try {
-    lock = readlinkSync(join(profile, "SingletonLock"));
-  } catch {
-    return false;
-  }
-  const pid = Number(lock.slice(lock.lastIndexOf("-") + 1));
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
 /** The command that opens `url` in an app window of `browser` on `profile`. */
-export function appWindowCommand(browser: string, url: string, profile: string, running: boolean, platform = process.platform): string[] {
+export function appWindowCommand(browser: string, url: string, profile: string, platform = process.platform): string[] {
   const flags = [`--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--window-size=1440,920"];
   if (platform !== "darwin") return [browser, ...flags];
-  // A browser that starts here is started by LaunchServices, as a Dock launch would: run as our child it inherits our
-  // launch context, which runs a universal browser under Rosetta when we were started from the app bundle, and makes
-  // it crash and hang. -n starts a new instance, so the flags apply even while the browser is open on another profile.
-  if (!running) return ["open", "-n", "-a", browser, "--args", ...flags];
-  // Already running on the window profile: the browser binary only hands the flags to that instance and quits, and
-  // the instance opens the window. Through LaunchServices the instance can also get a reopen event, which a browser
-  // whose only windows are app windows answers with an extra, empty browser window. arch picks the native build even
-  // under Rosetta.
+  // On macOS the browser binary is started directly, never through LaunchServices (`open -a`): a launch through it
+  // sends the browser an open or reopen event, which it answers with an ordinary, empty browser window next to the app
+  // window, on a cold start and when its instance is already running alike. Started directly it opens the app window
+  // only, or hands the flags to the running instance and quits. arch picks the native build: run as our child under
+  // Rosetta (started from the app bundle), a universal browser would otherwise run translated and crash or hang.
   // A macOS path, built the same way wherever the command is built (tests run on Windows too).
   return ["arch", "-arm64", "-x86_64", posix.join(browser, "Contents", "MacOS", posix.basename(browser, ".app")), ...flags];
 }
@@ -129,8 +105,8 @@ export function openUi(url: string, mode: OpenMode): "app" | "browser" | "none" 
       const profile = join(appDataDir(), "window-profile");
       mkdirSync(profile, { recursive: true });
       linkWindowToLauncher(browser, url);
-      const cmd = appWindowCommand(browser, url, profile, process.platform === "darwin" && profileInUse(profile));
-      Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"] }).unref();
+      // Detached: the browser outlives this process, which exits after opening it when the dashboard already runs.
+      Bun.spawn(appWindowCommand(browser, url, profile), { stdio: ["ignore", "ignore", "ignore"], detached: true }).unref();
       return "app";
     }
   }
