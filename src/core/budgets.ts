@@ -153,7 +153,7 @@ const money = (v: number) => `$${v < 100 ? v.toFixed(2) : Math.round(v).toLocale
 const percent = (f: number) => `${Math.round(f * 100)}%`;
 const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
-function windowName(ms: number | null, label: string | null): string {
+export function windowName(ms: number | null, label: string | null): string {
   if (ms == null) return label ?? "";
   const h = ms / 3_600_000;
   return h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`;
