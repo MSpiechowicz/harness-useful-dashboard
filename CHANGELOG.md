@@ -1,3 +1,15 @@
+# [1.10.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.9.1...v1.10.0) (2026-10-07)
+
+
+### Bug Fixes
+
+* harden the local server, speed up Live and idle scans, correct OpenAI prices ([6fb60db](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/6fb60db9bfe884d7f78692d5aac865dc7be19d34))
+
+
+### Features
+
+* calmer loading and refreshes, error states, and a paged daily calendar ([b1713cf](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b1713cf21711ee6c0b3f76c8665f3c3b81e13391))
+
 ## [1.9.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.9.0...v1.9.1) (2026-10-06)
 
 
