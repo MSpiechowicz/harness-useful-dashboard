@@ -1,8 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { memo } from "./cache.ts";
+import { type FailureReason, storedReason } from "./failures.ts";
 import { type Bucket, bucketExpr, fillBuckets, type Filters, projectLabel, sessionTitle, whereClause } from "./queries.ts";
 
 type Params = Record<string, string | number | null>;
+
+/** Failures the recent-failures table lists, newest first. */
+const RECENT_FAILURES = 200;
 
 /** How tool calls ended and prompts were stopped, counted per group. */
 const COUNTS = `
@@ -31,7 +35,8 @@ export function rejectRate(c: FrictionCounts): number | null {
 
 /**
  * Where work gets stuck: failed and rejected tool calls and interrupted prompts, over time and by tool, model, project
- * and session. Outcomes carry no skill, so that filter doesn't apply.
+ * and session, why calls failed, and the latest failures with their error text. Outcomes carry no skill, so that filter
+ * doesn't apply.
  */
 export function friction(db: Database, f: Filters, bucket: Bucket) {
   return memo(db, `friction:${bucket}:${JSON.stringify(f)}`, () => computeFriction(db, f, bucket));
@@ -56,11 +61,55 @@ function computeFriction(db: Database, f: Filters, bucket: Bucket) {
 
   const withRates = <T extends FrictionCounts>(r: T) => ({ ...r, calls: r.ok + r.errors + r.rejected, errorRate: errorRate(r), rejectRate: rejectRate(r) });
   const noisy = "HAVING errors + rejected + interrupts > 0";
-  // Codex names its tool results differently from its tool calls: those outcomes have no tool to go with.
+  const and = w.sql ? `${w.sql} AND` : "WHERE";
+  const failed = `${and} o.kind IN ('tool_error', 'tool_rejected')`;
+
+  // Why calls failed: failures counted by reason and tool, then summed per reason (with its tools) and per tool.
+  const byReasonTool = all<{ reason: string | null; kind: string; tool: string | null; n: number }>(
+    `SELECT o.reason, o.kind, o.tool, COUNT(*) AS n FROM outcomes o ${failed} GROUP BY o.reason, o.kind, o.tool`,
+  );
+  const reasonMap = new Map<FailureReason, { count: number; tools: Map<string, number> }>();
+  const toolReasons = new Map<string, Map<FailureReason, number>>();
+  for (const r of byReasonTool) {
+    const reason = storedReason(r.kind, r.reason);
+    const tool = r.tool ?? "(none)";
+    const e = reasonMap.get(reason) ?? { count: 0, tools: new Map() };
+    e.count += r.n;
+    e.tools.set(tool, (e.tools.get(tool) ?? 0) + r.n);
+    reasonMap.set(reason, e);
+    const t = toolReasons.get(tool) ?? new Map();
+    t.set(reason, (t.get(reason) ?? 0) + r.n);
+    toolReasons.set(tool, t);
+  }
+  const failures = totals.errors + totals.rejected;
+  const top = <K>(m: Map<K, number>) => [...m].sort((a, b) => b[1] - a[1]);
+  const reasons = [...reasonMap]
+    .map(([reason, e]) => ({ reason, count: e.count, share: failures ? e.count / failures : 0, tools: top(e.tools).slice(0, 3).map(([tool, count]) => ({ tool, count })) }))
+    .sort((a, b) => b.count - a.count);
+
+  // Codex names its tool results differently from its tool calls: outcomes read before they carried their tool have none.
   const tools = all<FrictionCounts & { key: string | null }>(
     `SELECT o.tool AS key, ${COUNTS} FROM outcomes o
-     ${w.sql ? `${w.sql} AND` : "WHERE"} o.kind <> 'interrupt' GROUP BY key ORDER BY errors + rejected DESC, ok DESC LIMIT 50`,
-  ).map((r) => withRates({ ...r, key: r.key ?? "(none)" }));
+     ${and} o.kind <> 'interrupt' GROUP BY key ORDER BY errors + rejected DESC, ok DESC LIMIT 50`,
+  ).map((r) => {
+    const key = r.key ?? "(none)";
+    const main = top(toolReasons.get(key) ?? new Map<FailureReason, number>()).find(([reason]) => reason !== "rejected");
+    return { ...withRates({ ...r, key }), topReason: main?.[0] ?? null };
+  });
+
+  // The latest failures with what each said, for the table under the reasons. A subagent's failure opens the session
+  // that started it.
+  const recent = all<{
+    id: string; ts: number; kind: string; tool: string | null; reason: string | null; detail: string | null; input: string | null;
+    sessionId: string; title: string | null; provider: string; project: string | null;
+  }>(
+    `SELECT f.id, f.ts, f.kind, f.tool, f.reason, f.detail, f.input, COALESCE(s.parent_session_id, f.session_id) AS sessionId,
+            ${sessionTitle("root")} AS title, f.provider, root.project
+     FROM (SELECT o.* FROM outcomes o ${failed} ORDER BY o.ts DESC LIMIT ${RECENT_FAILURES}) f
+     LEFT JOIN sessions s ON s.id = f.session_id
+     LEFT JOIN sessions root ON root.id = COALESCE(s.parent_session_id, f.session_id)
+     ORDER BY f.ts DESC`,
+  ).map((r) => ({ ...r, reason: storedReason(r.kind, r.reason), projectLabel: projectLabel(r.project) }));
   const models = all<FrictionCounts & { key: string | null }>(`SELECT o.model AS key, ${COUNTS} FROM outcomes o ${w.sql} GROUP BY key ORDER BY errors + rejected + interrupts DESC`).map((r) =>
     withRates({ ...r, key: r.key ?? "(none)" }),
   );
@@ -84,5 +133,7 @@ function computeFriction(db: Database, f: Filters, bucket: Bucket) {
     tools,
     models,
     sessions,
+    reasons,
+    recent,
   };
 }

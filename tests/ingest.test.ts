@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, chmodSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, writeFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { scan, splitLines } from "../src/core/ingest/index.ts";
+import { scan, settledTail, splitLines } from "../src/core/ingest/index.ts";
 import { DbWriter } from "../src/core/ingest/writer.ts";
 import { PriceBook } from "../src/core/pricing.ts";
 import { claudeAssistant, claudeUser, CLAUDE_SESSION, ID, memDb, tempDir, testConfig, writeJsonl } from "./helpers.ts";
@@ -50,6 +50,66 @@ describe("incremental scanning", () => {
     const r = await scan(db, cfg, ID);
     expect(r.filesParsed).toBe(0);
     expect(changes()).toBe(before);
+  });
+
+  test("a last line without a newline is read once it has settled and is a whole record", async () => {
+    const root = tempDir();
+    const path = file(root);
+    writeJsonl(path, [claudeUser("one", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" })]);
+    appendFileSync(path, JSON.stringify(claudeAssistant({ id: "m1", ts: "2026-09-01T10:00:01.000Z" })));
+    const db = memDb();
+    const cfg = testConfig(root);
+    const count = () => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM usage").get()!.n;
+    await scan(db, cfg, ID);
+    expect(count()).toBe(0); // just written: it may still grow
+    const old = new Date(Date.now() - 20 * 60_000);
+    utimesSync(path, old, old);
+    const changes = () => db.query<{ n: number }, []>("SELECT total_changes() AS n").get()!.n;
+    await scan(db, cfg, ID);
+    expect(count()).toBe(1);
+    // Read once: later scans find nothing new and write nothing.
+    const before = changes();
+    expect((await scan(db, cfg, ID)).filesParsed).toBe(0);
+    expect(changes()).toBe(before);
+    // The log goes on: the next line arrives with its newline first, and counts once.
+    appendFileSync(path, "\n" + JSON.stringify(claudeAssistant({ id: "m2", ts: "2026-09-01T10:00:02.000Z" })) + "\n");
+    await scan(db, cfg, ID);
+    expect(count()).toBe(2);
+  });
+
+  test("an old last line that isn't a whole record is left alone, without writing on every scan", async () => {
+    expect(settledTail(new TextEncoder().encode('{"type":"assist'), Date.now() - 20 * 60_000)).toBeNull();
+    expect(settledTail(new TextEncoder().encode('{"a":1}'), Date.now())).toBeNull();
+    expect(settledTail(new TextEncoder().encode(' {"a":1} '), Date.now() - 20 * 60_000)).toBe('{"a":1}');
+    const root = tempDir();
+    const path = file(root);
+    writeJsonl(path, [claudeUser("one", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" })]);
+    appendFileSync(path, '{"type":"assist');
+    const old = new Date(Date.now() - 20 * 60_000);
+    utimesSync(path, old, old);
+    const db = memDb();
+    const cfg = testConfig(root);
+    await scan(db, cfg, ID);
+    const changes = () => db.query<{ n: number }, []>("SELECT total_changes() AS n").get()!.n;
+    const before = changes();
+    expect((await scan(db, cfg, ID)).filesParsed).toBe(0);
+    expect(changes()).toBe(before);
+  });
+
+  test("a file rewritten and written on past where reading stopped is read again from the start", async () => {
+    const root = tempDir();
+    const path = file(root);
+    const a = claudeAssistant({ id: "m1", ts: "2026-09-01T10:00:01.000Z" });
+    writeJsonl(path, [claudeUser("one", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }), a]);
+    const db = memDb();
+    const cfg = testConfig(root);
+    await scan(db, cfg, ID);
+    // Rewound to the prompt, then a longer answer: the old reading position now falls inside a line.
+    const longer = claudeAssistant({ id: "m9", ts: "2026-09-01T10:05:00.000Z" });
+    writeJsonl(path, [claudeUser("one, but longer this time to move the line ends", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }), longer, a]);
+    await scan(db, cfg, ID);
+    const ids = db.query<{ id: string }, []>("SELECT id FROM usage ORDER BY id").all().map((r) => r.id);
+    expect(ids).toEqual(["claude:m1", "claude:m9"]);
   });
 
   test("a partially written trailing line is consumed only once complete", async () => {

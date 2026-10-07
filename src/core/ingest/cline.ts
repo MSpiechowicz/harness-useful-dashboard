@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { failureOf, inputSummary } from "../failures.ts";
 import type { OpencodeFlavor } from "./opencode.ts";
 import { type IngestSink, num, type Provider, truncate } from "./types.ts";
 
@@ -370,6 +371,7 @@ export function ingestClineSession(
   let rows = 0;
   let firstText: string | null = null;
 
+  const calls = new Map<string, { name: string; input: unknown }>();
   for (const [i, m] of messages.entries()) {
     if (m?.metadata?.displayOnly) continue;
     // Messages without a time take the one before them, a millisecond on, so they keep their order.
@@ -387,7 +389,20 @@ export function ingestClineSession(
       }
       for (const c of Array.isArray(m.content) ? m.content : []) {
         if (c?.type !== "tool_result" || !c.tool_use_id) continue;
-        sink.outcome?.({ id: cl(String(c.tool_use_id)), provider: "cline", sessionId, ts, project, model: null, agent, kind: c.is_error ? "tool_error" : "tool_ok" });
+        const kind = c.is_error ? "tool_error" : "tool_ok";
+        const call = calls.get(String(c.tool_use_id));
+        const error = c.is_error ? (typeof c.content === "string" ? c.content : userText(c.content) ?? "") : "";
+        sink.outcome?.({
+          id: cl(String(c.tool_use_id)),
+          provider: "cline",
+          sessionId,
+          ts,
+          project,
+          model: null,
+          agent,
+          kind,
+          ...failureOf(kind, call?.name ?? null, error, inputSummary(call?.input, opts.promptTextLimit), opts.promptTextLimit),
+        });
       }
       continue;
     }
@@ -397,6 +412,7 @@ export function ingestClineSession(
     for (const c of Array.isArray(m.content) ? m.content : []) {
       if (c?.type !== "tool_use" || !c.id || !c.name) continue;
       const input = c.input ?? {};
+      calls.set(String(c.id), { name: String(c.name), input });
       const path = typeof input.path === "string" ? input.path : typeof input.file_path === "string" ? input.file_path : null;
       sink.tool({ id: cl(String(c.id)), usageId, sessionId, promptId, provider: "cline", ts, project, tool: String(c.name), filePath: path, skill: null, agent });
     }

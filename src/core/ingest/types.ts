@@ -118,6 +118,12 @@ export interface OutcomeRecord {
   /** Effort the model was running at. */
   effort?: string | null;
   kind: OutcomeKind;
+  /** The tool, when the outcome is not keyed like its tool call (Codex): otherwise it is looked up by id. */
+  tool?: string | null;
+  /** Why a failed or rejected call failed (see failures.ts), its error text and what it was given. */
+  reason?: string | null;
+  detail?: string | null;
+  input?: string | null;
 }
 
 export interface IngestSink {

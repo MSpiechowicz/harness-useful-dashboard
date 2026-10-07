@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
+import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
 import {
   type FileContext,
   type IngestSink,
@@ -36,6 +37,8 @@ interface ClaudeState {
   responseId?: string | null;
   responseStart?: number | null;
   responseEnd?: number | null;
+  /** Tool calls waiting for their results: what a failed one was given. */
+  calls?: PendingCalls;
 }
 
 interface ContentBlock {
@@ -164,8 +167,11 @@ export const claudeParser: LineParser<ClaudeState> = {
           const outcome = { provider: "claude" as const, sessionId, ts, project: rec.cwd ?? null, model: state.model ?? null, agent, effort: state.effort ?? null };
           for (const b of blocks) {
             if (b?.type !== "tool_result" || !b.tool_use_id) continue;
-            const kind = !b.is_error ? "tool_ok" : REJECTED_RE.test(resultText(b.content).trim()) ? "tool_rejected" : "tool_error";
-            sink.outcome?.({ ...outcome, id: `claude:${b.tool_use_id}`, kind });
+            const id = `claude:${b.tool_use_id}`;
+            const call = takeCall(state.calls, id);
+            const error = b.is_error ? resultText(b.content).trim() : "";
+            const kind = !b.is_error ? "tool_ok" : REJECTED_RE.test(error) ? "tool_rejected" : "tool_error";
+            sink.outcome?.({ ...outcome, id, kind, ...failureOf(kind, call.tool, error, call.input, ctx.promptTextLimit) });
           }
           if (texts.some((t) => t.trim().startsWith("[Request interrupted by user"))) {
             sink.outcome?.({ ...outcome, id: `${sessionId}:${rec.uuid ?? ts}:interrupt`, kind: "interrupt" });
@@ -256,8 +262,11 @@ export const claudeParser: LineParser<ClaudeState> = {
           filePath = typeof p === "string" ? p : null;
         }
         const toolName = block.name.startsWith("mcp__") ? block.name.split("__").slice(0, 2).join("__") : block.name;
+        const toolId = `claude:${block.id ?? `${usageId}:${block.name}`}`;
+        // Streaming repeats a response's lines: a call seen again is still the one waiting.
+        if (block.id) rememberCall((state.calls ??= {}), toolId, block.name, inputSummary(input, ctx.promptTextLimit));
         sink.tool({
-          id: `claude:${block.id ?? `${usageId}:${block.name}`}`,
+          id: toolId,
           usageId,
           sessionId,
           promptId,

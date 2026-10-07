@@ -119,6 +119,29 @@ describe("omp ingest", () => {
     expect(db.query<any, []>("SELECT skill FROM usage").get().skill).toBe("us-workflow");
   });
 
+  test("a failed tool result keeps its error and what the call was given", async () => {
+    const root = tempDir();
+    const result = (id: string, callId: string, toolName: string, text: string) => ({
+      type: "message",
+      id,
+      timestamp: "2026-09-28T14:43:30.000Z",
+      message: { role: "toolResult", toolCallId: callId, toolName, content: [{ type: "text", text }], isError: true, timestamp: 1790000000000 },
+    });
+    writeJsonl(sessionFile(root), [
+      header(UUID),
+      user("u1", "Ship it"),
+      assistant("a1", { tools: [toolCall("c1", "bash", { command: "cargo test" }), toolCall("c2", "read", { path: "AGENTS.md" })] }),
+      result("r1", "c1", "bash", "running 4 tests\ntest a ... FAILED\n\nWall time: 0.4 seconds\n\nCommand exited with code 101"),
+      result("r2", "c2", "read", "Path 'AGENTS.md' not found"),
+    ]);
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    expect(db.query<any, []>("SELECT tool, reason, detail, input FROM outcomes ORDER BY id").all()).toEqual([
+      { tool: "bash", reason: "exit_code", detail: "running 4 tests\ntest a ... FAILED", input: "cargo test" },
+      { tool: "read", reason: "not_found", detail: "Path 'AGENTS.md' not found", input: "AGENTS.md" },
+    ]);
+  });
+
   test("appended messages are picked up incrementally without double counting", async () => {
     const root = tempDir();
     const file = sessionFile(root);

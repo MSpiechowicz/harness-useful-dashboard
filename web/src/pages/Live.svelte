@@ -38,11 +38,16 @@
     activeSubagents: number;
     errors: number;
   }
+  type FailureReason = "timeout" | "edit_mismatch" | "stale_read" | "not_found" | "permission" | "exit_code" | "bad_input" | "other" | "rejected";
   interface FeedItem {
     ts: number;
     kind: "prompt" | "tool_error" | "tool_rejected" | "interrupt";
     text: string | null;
     tool: string | null;
+    /** Why a failed or declined call failed, its error text and what it was given. */
+    reason: FailureReason | null;
+    detail: string | null;
+    input: string | null;
     sessionId: string;
     title: string | null;
     provider: string;
@@ -184,6 +189,11 @@
       : e.kind === "interrupt"
         ? t("live.feed.interrupt")
         : t(e.kind === "tool_error" ? "live.feed.error" : "live.feed.declined", { tool: e.tool ?? t("live.feed.aTool") });
+  // A failure's second line: why it failed and the start of its error, all of it on hover. What the call was given
+  // (a command, a file) follows its name.
+  const feedWhy = (e: FeedItem) =>
+    e.reason ? [t(`friction.reason.${e.reason}`), e.detail?.replace(/\s+/g, " ")].filter(Boolean).join(" · ") : null;
+  const feedTitle = (e: FeedItem) => [feedText(e), e.reason ? t(`friction.reason.${e.reason}`) : null, e.input, e.detail].filter(Boolean).join("\n\n");
   const quiet = $derived(!!total && total.sum === 0);
   const windowLabel = $derived(minutes < 60 ? t("live.lastMinutes", { n: minutes }) : minutes === 60 ? t("live.lastHour") : t("live.lastHours", { n: minutes / 60 }));
   const time = (ts: number) => new Intl.DateTimeFormat(i18n.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts);
@@ -352,7 +362,7 @@
       title={t("live.feed")}
       subtitle={t("live.feedHint")}
       rows={feedRows}
-      searchText={(e) => `${feedText(e)} ${e.title ?? ""} ${e.tool ?? ""}`}
+      searchText={(e) => `${feedText(e)} ${feedWhy(e) ?? ""} ${e.title ?? ""} ${e.tool ?? ""}`}
       sorts={FEED_SORTS}
       bind:sortKey={feedSort}
       exportName="live-feed"
@@ -374,13 +384,16 @@
           <tbody>
             {#each view.rows.slice(view.offset, view.limit == null ? undefined : view.offset + view.limit) as e, i (`${e.ts}:${e.kind}:${e.sessionId}:${i}`)}
               {@const Icon = FEED_ICON[e.kind]}
+              {@const why = feedWhy(e)}
               <tr class="cursor-pointer" onclick={() => navigate("sessions", e.sessionId)}>
                 <td class="text-ink-2 tabular">{time(e.ts)}</td>
                 <td>
                   <span class="flex min-w-0 items-center gap-2.5">
                     <Icon size={14} class="shrink-0 {e.kind === 'prompt' ? 'text-muted' : e.kind === 'tool_error' ? 'text-bad' : 'text-warn'}" />
-                    <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class="truncate {e.kind === 'prompt' ? 'text-ink' : 'text-ink-2'}" title={feedText(e)}>{feedText(e)}</Link>
+                    <Link to="#/sessions/{encodeURIComponent(e.sessionId)}" class="truncate {e.kind === 'prompt' ? 'text-ink' : 'text-ink-2'}" title={feedTitle(e)}>{feedText(e)}</Link>
+                    {#if e.input}<span class="min-w-0 truncate font-mono text-xs text-muted" title={e.input}>{e.input}</span>{/if}
                   </span>
+                  {#if why}<span class="mt-0.5 block truncate pl-6 text-xs text-muted" title={feedTitle(e)}>{why}</span>{/if}
                 </td>
                 <td>
                   <span class="flex min-w-0 items-center gap-2 text-ink-2">

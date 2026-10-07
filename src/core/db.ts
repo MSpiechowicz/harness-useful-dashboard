@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -212,6 +212,17 @@ const MIGRATIONS: Record<number, string> = {
   9: /* sql */ `
     ALTER TABLE outcomes ADD COLUMN tool TEXT;
     UPDATE outcomes SET tool = (SELECT t.tool FROM tool_calls t WHERE t.id = outcomes.id);
+  `,
+  // Why a tool call failed: its class (failures.ts), the error text and what the call was given (a command, a path).
+  // Text only when prompt text is kept.
+  10: /* sql */ `
+    ALTER TABLE outcomes ADD COLUMN reason TEXT;
+    ALTER TABLE outcomes ADD COLUMN detail TEXT;
+    ALTER TABLE outcomes ADD COLUMN input TEXT;
+    CREATE INDEX IF NOT EXISTS idx_outcomes_kind_ts ON outcomes(kind, ts);
+    -- Read every log once more for the failures already ingested. Records are keyed by their place in the logs, so
+    -- reading again changes nothing else.
+    DELETE FROM ingest_files;
   `,
 };
 

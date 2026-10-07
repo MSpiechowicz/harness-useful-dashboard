@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { failureOf, inputSummary } from "../failures.ts";
 import { type IngestSink, num, parseTs, truncate } from "./types.ts";
 
 /**
@@ -61,9 +62,26 @@ interface Turn {
   role: "user" | "agent";
   id: string | null;
   text: string;
-  tools: { id: string; name: string }[];
-  results: { id: string; isError: boolean }[];
+  tools: { id: string; name: string; input: unknown }[];
+  results: { id: string; isError: boolean; text: string }[];
 }
+
+/** A tool's input as Zed stores it: the value itself, or wrapped as {"type": "json", "value": …}. */
+const inputOf = (input: any): unknown => (input && typeof input === "object" && input.type === "json" && "value" in input ? input.value : input);
+
+/** A tool result's text: a string, {"Text": "…"}, or a list of either. */
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map(resultText).filter(Boolean).join("\n");
+  if (content && typeof content === "object") {
+    const c = content as Record<string, unknown>;
+    if (typeof c.Text === "string") return c.Text;
+    if (typeof c.text === "string") return c.text;
+  }
+  return "";
+}
+
+const resultOf = (r: any) => ({ id: String(r?.tool_use_id), isError: r?.is_error === true, text: r?.is_error === true ? resultText(r?.content ?? r?.output) : "" });
 
 /** Every message as a user prompt or an agent reply with its tool calls and their results, whatever the version. */
 function turnsOf(doc: Record<string, any>): Turn[] {
@@ -74,13 +92,13 @@ function turnsOf(doc: Record<string, any>): Turn[] {
       turns.push({ role: "user", id: typeof m.User.id === "string" ? m.User.id : String(i), text: textOf(m.User.content), tools: [], results: [] });
     } else if (m?.Agent) {
       const content: any[] = Array.isArray(m.Agent.content) ? m.Agent.content : [];
-      const tools = content.filter((c) => c?.ToolUse?.id && c.ToolUse.name).map((c) => ({ id: String(c.ToolUse.id), name: String(c.ToolUse.name) }));
-      const results = Object.values((m.Agent.tool_results ?? {}) as Record<string, any>).map((r) => ({ id: String(r?.tool_use_id), isError: r?.is_error === true }));
+      const tools = content.filter((c) => c?.ToolUse?.id && c.ToolUse.name).map((c) => ({ id: String(c.ToolUse.id), name: String(c.ToolUse.name), input: inputOf(c.ToolUse.input) }));
+      const results = Object.values((m.Agent.tool_results ?? {}) as Record<string, any>).map(resultOf);
       turns.push({ role: "agent", id: null, text: "", tools, results });
     } else if (typeof m?.role === "string") {
       // 0.1.0 / 0.2.0. In 0.1.0 a tool's results sit on the user message after the call.
-      const tools = (Array.isArray(m.tool_uses) ? m.tool_uses : []).filter((t: any) => t?.id && t.name).map((t: any) => ({ id: String(t.id), name: String(t.name) }));
-      const results = (Array.isArray(m.tool_results) ? m.tool_results : []).map((r: any) => ({ id: String(r?.tool_use_id), isError: r?.is_error === true }));
+      const tools = (Array.isArray(m.tool_uses) ? m.tool_uses : []).filter((t: any) => t?.id && t.name).map((t: any) => ({ id: String(t.id), name: String(t.name), input: inputOf(t.input) }));
+      const results = (Array.isArray(m.tool_results) ? m.tool_results : []).map(resultOf);
       const user = m.role === "user" && !m.is_hidden;
       turns.push({ role: user ? "user" : "agent", id: user ? String(m.id ?? i) : null, text: user ? textOf(m.segments) || (typeof m.text === "string" ? m.text : "") : "", tools, results });
     }
@@ -136,6 +154,7 @@ export function ingestZed(path: string, sink: IngestSink, opts: { since: number;
       // Messages carry no time: prompts keep their order a millisecond apart from the thread's start.
       let promptId: string | null = null;
       let firstPrompt: string | null = null;
+      const calls = new Map<string, { name: string; input: unknown }>();
       for (const [i, turn] of turnsOf(doc).entries()) {
         const ts = started + i;
         if (turn.role === "user" && !isSub && turn.text.trim()) {
@@ -152,10 +171,23 @@ export function ingestZed(path: string, sink: IngestSink, opts: { since: number;
           });
         }
         for (const t of turn.tools) {
+          calls.set(t.id, t);
           sink.tool({ id: zed(t.id), usageId: sessionId, sessionId, promptId, provider: "zed", ts, project, tool: t.name, filePath: null, skill: null, agent });
         }
         for (const r of turn.results) {
-          sink.outcome?.({ id: zed(r.id), provider: "zed", sessionId, ts, project, model, agent, kind: r.isError ? "tool_error" : "tool_ok" });
+          const kind = r.isError ? "tool_error" : "tool_ok";
+          const call = calls.get(r.id);
+          sink.outcome?.({
+            id: zed(r.id),
+            provider: "zed",
+            sessionId,
+            ts,
+            project,
+            model,
+            agent,
+            kind,
+            ...failureOf(kind, call?.name ?? null, r.text, inputSummary(call?.input, opts.promptTextLimit), opts.promptTextLimit),
+          });
         }
       }
 

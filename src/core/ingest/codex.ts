@@ -1,3 +1,4 @@
+import { failureOf, inputSummary } from "../failures.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
 interface CodexState {
@@ -55,6 +56,42 @@ function userMessageText(item: Record<string, any>): { text: string | null; skil
     if (c?.type === "skill" && typeof c.name === "string") skill = c.name;
   }
   return { text: texts.join("\n") || null, skill };
+}
+
+const texts = (content: unknown): string =>
+  Array.isArray(content) ? content.map((c: any) => (typeof c?.text === "string" ? c.text : "")).filter(Boolean).join("\n") : "";
+
+/** A command as it was run: the shell's script rather than the shell (["bash", "-lc", "…"]), or the parsed commands. */
+function commandOf(x: Record<string, any>): string | null {
+  const parsed = Array.isArray(x.parsed_cmd) ? x.parsed_cmd.map((c: any) => c?.cmd).filter((c: unknown) => typeof c === "string") : [];
+  if (parsed.length) return parsed.join(" && ");
+  if (typeof x.command === "string") return x.command;
+  return Array.isArray(x.command) && x.command.length ? String(x.command[x.command.length - 1]) : null;
+}
+
+/**
+ * The tool a finished Codex call was (its results are keyed apart from its calls, so the tool is not found by id), what
+ * it was given and the error it gave: a command's exit code and output, a patch's or an MCP tool's error.
+ */
+function codexCall(x: Record<string, any>, type: string): { tool: string | null; input: string | null; error: string } {
+  const output = (o: Record<string, any>) => [o.stderr, o.aggregated_output ?? o.formatted_output ?? o.stdout].find((v) => typeof v === "string" && v.trim()) ?? "";
+  if (type === "CommandExecution" || type === "exec_command_end") {
+    const code = typeof x.exit_code === "number" && x.exit_code !== 0 ? `Exit code ${x.exit_code}\n` : "";
+    return { tool: "exec_command", input: commandOf(x), error: code + output(x) };
+  }
+  if (type === "FileChange" || type === "patch_apply_end") {
+    const files = x.changes && typeof x.changes === "object" ? Object.keys(x.changes) : [];
+    return { tool: "apply_patch", input: files[0] ?? null, error: output(x) };
+  }
+  if (type === "McpToolCall" || type === "mcp_tool_call_end") {
+    const inv = type === "McpToolCall" ? x : (x.invocation ?? {});
+    const r = x.result ?? {};
+    const err = r.Err ?? x.error;
+    const error = typeof err === "string" ? err : typeof err?.message === "string" ? err.message : texts(r.content ?? r.Ok?.content);
+    const tool = typeof inv.server === "string" && typeof inv.tool === "string" ? `mcp__${inv.server}__${inv.tool}` : null;
+    return { tool, input: inputSummary(inv.arguments), error };
+  }
+  return { tool: typeof x.tool === "string" ? x.tool : null, input: null, error: typeof x.error === "string" ? x.error : "" };
 }
 
 function skillFrom(text: string): string | null {
@@ -212,12 +249,29 @@ export const codexParser: LineParser<CodexState> = {
         if (p.type === "item_completed" && TOOL_ITEMS.has(p.item?.type)) {
           state.itemOutcomes = true;
           const kind = ITEM_OUTCOME[p.item.status];
-          if (kind) sink.outcome?.({ ...outcome, id: `codex:${state.threadId}:${p.item.id ?? `o${offset}`}`, kind });
+          if (kind) {
+            const call = codexCall(p.item, p.item.type);
+            sink.outcome?.({
+              ...outcome,
+              id: `codex:${state.threadId}:${p.item.id ?? `o${offset}`}`,
+              kind,
+              tool: call.tool,
+              ...failureOf(kind, call.tool, call.error, call.input, ctx.promptTextLimit),
+            });
+          }
           continue;
         }
         if ((p.type === "exec_command_end" || p.type === "patch_apply_end" || p.type === "mcp_tool_call_end") && !state.itemOutcomes) {
           const failed = p.type === "exec_command_end" ? num(p.exit_code) !== 0 : p.type === "patch_apply_end" ? p.success === false : !!p.result?.Err;
-          sink.outcome?.({ ...outcome, id: `codex:${state.threadId}:${p.call_id ?? `o${offset}`}:end`, kind: failed ? "tool_error" : "tool_ok" });
+          const kind = failed ? "tool_error" : "tool_ok";
+          const call = codexCall(p, p.type);
+          sink.outcome?.({
+            ...outcome,
+            id: `codex:${state.threadId}:${p.call_id ?? `o${offset}`}:end`,
+            kind,
+            tool: call.tool,
+            ...failureOf(kind, call.tool, call.error, call.input, ctx.promptTextLimit),
+          });
           continue;
         }
         if (p.type === "turn_aborted") {

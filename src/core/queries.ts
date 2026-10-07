@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { homedir } from "node:os";
 import { memo } from "./cache.ts";
+import { storedReason } from "./failures.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
+import { type PromptMetric, promptStats } from "./promptStats.ts";
 
 export interface Filters {
   from?: number;
@@ -200,6 +202,9 @@ export type LiveStatus = "working" | "idle" | "error";
  */
 export function liveStatus(lastTs: number, lastStop: string | null, now: number): LiveStatus {
   const quiet = now - lastTs;
+  // Far in the future: another machine on a shared database with its clock ahead. Its times can't be compared with
+  // ours, so it isn't shown as working forever. Within 10 minutes ahead it still is, until it goes quiet.
+  if (quiet < -10 * 60_000) return "idle";
   if (quiet < 90_000) return "working";
   if (quiet <= 10 * 60_000 && lastStop === "error") return "error";
   if (quiet <= 10 * 60_000 && (lastStop === "tool_use" || lastStop === "toolUse")) return "working";
@@ -459,19 +464,28 @@ export class Queries {
     });
 
     // The latest happenings across sessions: prompts sent, tool calls that failed or were declined, prompts stopped.
-    const feed = this.all<{ ts: number; kind: string; text: string | null; tool: string | null; sessionId: string; title: string | null; provider: string }>(
+    // A failed call says why (failures.ts) and what its error was, and what it was given.
+    const feed = this.all<{
+      ts: number; kind: string; text: string | null; tool: string | null; reason: string | null; detail: string | null; input: string | null;
+      sessionId: string; title: string | null; provider: string;
+    }>(
       `SELECT * FROM (
-         SELECT p.ts, 'prompt' AS kind, p.text, NULL AS tool, p.session_id AS sessionId, ${sessionTitle("s")} AS title, p.provider
+         SELECT p.ts, 'prompt' AS kind, p.text, NULL AS tool, NULL AS reason, NULL AS detail, NULL AS input, p.session_id AS sessionId,
+                ${sessionTitle("s")} AS title, p.provider
          FROM prompts p JOIN sessions s ON s.id = p.session_id WHERE p.ts >= $from
          UNION ALL
-         SELECT o.ts, o.kind, NULL AS text, t.tool, COALESCE(s.parent_session_id, o.session_id) AS sessionId,
-                ${sessionTitle("root")} AS title, o.provider
+         SELECT o.ts, o.kind, NULL AS text, COALESCE(o.tool, t.tool) AS tool, o.reason, o.detail, o.input,
+                COALESCE(s.parent_session_id, o.session_id) AS sessionId, ${sessionTitle("root")} AS title, o.provider
          FROM outcomes o LEFT JOIN tool_calls t ON t.id = o.id LEFT JOIN sessions s ON s.id = o.session_id
          LEFT JOIN sessions root ON root.id = COALESCE(s.parent_session_id, o.session_id)
          WHERE o.ts >= $from AND o.kind IN ('tool_error', 'tool_rejected', 'interrupt')
        ) ORDER BY ts DESC LIMIT 300`,
       { from },
-    ).map((e) => ({ ...e, text: e.text ? e.text.replace(/\s+/g, " ").slice(0, 140) : null }));
+    ).map((e) => ({
+      ...e,
+      text: e.text ? e.text.replace(/\s+/g, " ").slice(0, 140) : null,
+      reason: e.kind === "tool_error" || e.kind === "tool_rejected" ? storedReason(e.kind, e.reason) : null,
+    }));
 
     // Today so far, and a typical day up to the same time: the median of the last 14 days with any use.
     const midnight = new Date(now);
@@ -596,13 +610,15 @@ export class Queries {
   }
 
   /** Every prompt's cost, tokens and provider in the range: the prompts page's cost distribution and Pareto curve. */
-  promptCosts(f: Filters) {
+  /** How spend spreads across the prompts in range: summed here, so the page gets the shape, not every prompt. */
+  promptStats(f: Filters, metric: PromptMetric) {
     const w = whereClause(f);
-    return this.all<{ cost: number; tokens: number; provider: string }>(
-      `SELECT SUM(u.cost_usd) AS cost, SUM(u.total_tokens) AS tokens, MIN(u.provider) AS provider
+    const rows = this.all<{ value: number; provider: string }>(
+      `SELECT SUM(${metric === "cost" ? "u.cost_usd" : "u.total_tokens"}) AS value, MIN(u.provider) AS provider
        FROM usage u ${and(w.sql, "u.prompt_id IS NOT NULL")} GROUP BY u.prompt_id`,
       w.params,
     );
+    return promptStats(rows, metric);
   }
 
   prompts(f: Filters, opts: { sort?: string; limit?: number; offset?: number; q?: string }) {

@@ -104,11 +104,13 @@ export class DbWriter implements IngestSink {
     this.sReading = readingStatement(db);
     // An outcome carries the tool of the call it ended, whichever of the two is written first.
     this.sOutcome = db.prepare(`
-      INSERT INTO outcomes (id, provider, session_id, ts, project, user, host, model, agent, effort, kind, tool)
+      INSERT INTO outcomes (id, provider, session_id, ts, project, user, host, model, agent, effort, kind, tool, reason,
+                            detail, input)
       VALUES ($id, $provider, $sessionId, $ts, $project, $user, $host, $model, $agent, $effort, $kind,
-              (SELECT t.tool FROM tool_calls t WHERE t.id = $id))
+              COALESCE((SELECT t.tool FROM tool_calls t WHERE t.id = $id), $tool), $reason, $detail, $input)
       ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, model = COALESCE(outcomes.model, excluded.model),
-        tool = COALESCE(outcomes.tool, excluded.tool)
+        tool = COALESCE(outcomes.tool, excluded.tool), reason = excluded.reason,
+        detail = COALESCE(excluded.detail, outcomes.detail), input = COALESCE(excluded.input, outcomes.input)
     `);
     this.sOutcomeTool = db.prepare("UPDATE outcomes SET tool = $tool WHERE id = $id AND tool IS NULL");
   }
@@ -229,6 +231,10 @@ export class DbWriter implements IngestSink {
       agent: o.agent,
       effort: o.effort ?? null,
       kind: o.kind,
+      tool: o.tool ?? null,
+      reason: o.reason ?? null,
+      detail: o.detail ?? null,
+      input: o.input ?? null,
     });
   }
 

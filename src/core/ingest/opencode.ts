@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { failureOf, inputSummary } from "../failures.ts";
 import { type IngestSink, num, type Provider, truncate } from "./types.ts";
 
 /**
@@ -187,7 +188,9 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
         if (p.type !== "tool" || typeof p.tool !== "string") continue;
         const status = p.state?.status;
         if (status !== "completed" && status !== "error") continue;
-        const stopped = status === "error" && /rejected|denied|aborted/i.test(String(p.state?.error ?? ""));
+        const error = status === "error" ? String(p.state?.error ?? "") : "";
+        const stopped = status === "error" && /rejected|denied|aborted/i.test(error);
+        const kind = status === "completed" ? "tool_ok" : stopped ? "tool_rejected" : "tool_error";
         sink.outcome?.({
           id: oc(typeof p.callID === "string" ? p.callID : p.id),
           provider: flavor.provider,
@@ -196,7 +199,8 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
           project,
           model,
           agent,
-          kind: status === "completed" ? "tool_ok" : stopped ? "tool_rejected" : "tool_error",
+          kind,
+          ...failureOf(kind, p.tool, error, inputSummary(p.state?.input, opts.promptTextLimit), opts.promptTextLimit),
         });
         const input = p.state?.input ?? {};
         if (p.tool === "skill" && typeof input.name === "string" && promptId) skillOf.set(promptId, input.name);

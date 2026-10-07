@@ -7,6 +7,7 @@
  */
 import { rmSync } from "node:fs";
 import { openDb } from "../src/core/db.ts";
+import { failureOf } from "../src/core/failures.ts";
 import type { Provider } from "../src/core/ingest/types.ts";
 import { DbWriter, resolveSpawnRefs } from "../src/core/ingest/writer.ts";
 import { PriceBook } from "../src/core/pricing.ts";
@@ -85,6 +86,53 @@ const TOOLS = [
   { name: "WebFetch", file: false, w: 2 },
   { name: "mcp__github__create_pull_request", file: false, w: 1 },
 ];
+
+/**
+ * What a failed call said, per tool, and what it was given. Drawn from a generator of its own, so the rest of the
+ * picture stays the same as before failures had reasons.
+ */
+let failSeed = 7;
+const failRand = () => {
+  failSeed = (Math.imul(failSeed, 1103515245) + 12345) | 0;
+  return ((failSeed >>> 0) % 1_000_003) / 1_000_003;
+};
+const failPick = <T>(xs: readonly T[]): T => xs[Math.floor(failRand() * xs.length)]!;
+const FAILURES: Record<string, string[]> = {
+  Bash: [
+    "npm test\tExit code 1\nFAIL tests/checkout.spec.ts\n  ● checkout › applies the coupon once\n    expect(received).toBe(expected)\n    Expected: 90\n    Received: 81",
+    "go test ./...\tExit code 1\n--- FAIL: TestInvoiceTotals (0.00s)\n    service_test.go:42: got 1200, want 1180\nFAIL\tbilling-api/internal/invoice\t0.41s",
+    "pnpm build\tExit code 2\nsrc/lib/pricing.ts(14,7): error TS2322: Type 'string' is not assignable to type 'number'.",
+    "git push origin HEAD\tExit code 1\n ! [rejected]        HEAD -> feature/checkout (fetch first)\nerror: failed to push some refs to 'github.com:demo/storefront.git'",
+    "npx playwright test\tCommand timed out after 2m 0.0s",
+    "make lint\tExit code 127\nbash: line 1: golangci-lint: command not found",
+    "npm install -g pnpm\tExit code 1\nnpm error code EACCES\nnpm error syscall mkdir\nnpm error path /usr/local/lib/node_modules\nnpm error Error: EACCES: permission denied",
+  ],
+  Edit: [
+    "<tool_use_error>String to replace not found in file.\nString: const total = items.reduce((sum, i) => sum + i.price, 0)</tool_use_error>",
+    "<tool_use_error>File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.</tool_use_error>",
+    "<tool_use_error>Found 3 matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true.</tool_use_error>",
+  ],
+  Read: [
+    "File does not exist. Note: your current working directory is the project root.",
+    "File does not exist. Note: your current working directory is the project root.",
+    "File does not exist. Note: your current working directory is the project root.",
+    "File content (31204 tokens) exceeds maximum allowed tokens (25000). Use offset and limit to read part of it.",
+  ],
+  Write: ["<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>"],
+  Grep: ["Ripgrep search timed out after 20 seconds", "rg: regex parse error:\n    applyCoupon(\n               ^\nerror: unclosed group"],
+  Glob: ["<tool_use_error>InputValidationError: Glob failed due to the following issue: The required parameter `pattern` is missing</tool_use_error>"],
+  TodoWrite: ["<tool_use_error>InputValidationError: TodoWrite failed due to the following issue: todos[2].status is required</tool_use_error>"],
+  WebFetch: ["Request failed with status code 403 Forbidden", "Request to https://docs.stripe.com timed out after 60 seconds"],
+  mcp__github__create_pull_request: ["MCP error -32603: Resource not accessible by integration (permission denied)", "Validation Failed: A pull request already exists for demo:feature/checkout."],
+};
+const DECLINED = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+function demoFailure(kind: string, tool: string, file: string | null) {
+  if (kind === "tool_ok" || kind === "interrupt") return {};
+  // A command's failure names the command it ran ("command\terror").
+  const [command, error] = tool === "Bash" ? failPick(FAILURES.Bash!).split("\t") : [null, failPick(FAILURES[tool] ?? ["Unexpected error"])];
+  const input = command ?? file ?? (tool === "Grep" ? "applyCoupon" : tool === "WebFetch" ? "https://docs.stripe.com/api/credit_notes" : null);
+  return failureOf(kind, tool, kind === "tool_rejected" ? DECLINED : error!, input, 2000);
+}
 
 /** Who works where, with what: each person has their own tools and habits. */
 const PEOPLE = [
@@ -176,13 +224,11 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
       const tools = int(0, 3);
       for (let k = 0; k < tools; k++) {
         const tool = pick(TOOLS, TOOLS.map((x) => x.w));
-        w.tool({
-          id: `${usageId}:t${k}`, usageId, sessionId, promptId, provider, ts, project: project.path, tool: tool.name,
-          filePath: tool.file ? `${project.path}/${pick(project.files)}` : null, skill, agent: "main",
-        });
+        const filePath = tool.file ? `${project.path}/${pick(project.files)}` : null;
+        w.tool({ id: `${usageId}:t${k}`, usageId, sessionId, promptId, provider, ts, project: project.path, tool: tool.name, filePath, skill, agent: "main" });
         const roll = rand();
         const kind = roll < (drifting ? 0.11 : 0.04) ? "tool_error" : roll < (drifting ? 0.12 : 0.05) ? "tool_rejected" : "tool_ok";
-        w.outcome({ id: `${usageId}:t${k}`, provider, sessionId, ts, project: project.path, model, agent: "main", effort, kind });
+        w.outcome({ id: `${usageId}:t${k}`, provider, sessionId, ts, project: project.path, model, agent: "main", effort, kind, ...demoFailure(kind, tool.name, filePath) });
       }
     }
     if (rand() < (drifting ? 0.06 : 0.025)) w.outcome({ id: `${promptId}:interrupt`, provider, sessionId, ts, project: project.path, model, agent: "main", effort, kind: "interrupt" });

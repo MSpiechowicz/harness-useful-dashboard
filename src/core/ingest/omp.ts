@@ -1,3 +1,4 @@
+import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
 
 /**
@@ -32,6 +33,8 @@ interface OmpState {
   answeredBy?: string | null;
   /** A subagent's brief was kept: later "user" turns are messages from the parent, not the brief. */
   briefSeen?: boolean;
+  /** Tool calls waiting for their results: what a failed one was given. */
+  calls?: PendingCalls;
 }
 
 /** Failed tool results that only say the user or the harness stopped the call, not that it went wrong. */
@@ -203,9 +206,13 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
         }
         if (m.role === "toolResult") {
           if (typeof m.toolCallId !== "string" || ts == null) continue;
-          const kind = m.isError !== true ? "tool_ok" : STOPPED_RE.test(textOf(m.content)?.trim() ?? "") ? "tool_rejected" : "tool_error";
+          const id = harness === "pi" ? `pi:${m.toolCallId}` : `${sessionId}:${m.toolCallId}`;
+          const call = takeCall(state.calls, id);
+          const error = m.isError === true ? (textOf(m.content)?.trim() ?? "") : "";
+          const kind = m.isError !== true ? "tool_ok" : STOPPED_RE.test(error) ? "tool_rejected" : "tool_error";
+          const tool = typeof m.toolName === "string" ? m.toolName : call.tool;
           sink.outcome?.({
-            id: harness === "pi" ? `pi:${m.toolCallId}` : `${sessionId}:${m.toolCallId}`,
+            id,
             provider: harness,
             sessionId,
             ts,
@@ -214,6 +221,7 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
             agent,
             effort: state.effort ?? null,
             kind,
+            ...failureOf(kind, tool, error, call.input, ctx.promptTextLimit),
           });
           continue;
         }
@@ -231,6 +239,7 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
               : FILE_TOOLS.has(c.name) && path ? filePaths(path) : [];
           // One row per call; a patch over several files adds a row for each further file.
           const callId = harness === "pi" && c.id ? `pi:${c.id}` : `${sessionId}:${c.id ?? `${entry}:${i}`}`;
+          if (c.id) rememberCall((state.calls ??= {}), callId, c.name, inputSummary(c.arguments, ctx.promptTextLimit) ?? (ctx.promptTextLimit > 0 ? (files[0] ?? null) : null));
           (files.length ? files : [null]).forEach((filePath, n) =>
             sink.tool({
               id: n === 0 ? callId : `${callId}:f${n}`,

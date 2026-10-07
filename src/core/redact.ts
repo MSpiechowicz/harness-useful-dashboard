@@ -38,7 +38,7 @@ export function redactStored(db: Database): number {
   if (Number(getMeta(db, "redacted") ?? 0) >= REDACT_VERSION) return 0;
   let changed = 0;
   db.transaction(() => {
-    for (const [table, column] of [["prompts", "text"], ["sessions", "brief"]] as const) {
+    for (const [table, column] of [["prompts", "text"], ["sessions", "brief"], ["outcomes", "detail"], ["outcomes", "input"]] as const) {
       const rows = db.query<{ id: string; v: string }, []>(`SELECT id, ${column} AS v FROM ${table} WHERE ${column} IS NOT NULL`).all();
       const upd = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
       for (const r of rows) {

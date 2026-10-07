@@ -73,6 +73,7 @@ export async function discoverFiles(cfg: AppConfig): Promise<SourceFile[]> {
 }
 
 const NEWLINE = 0x0a;
+const CLOSE_BRACE = 0x7d;
 const decoder = new TextDecoder();
 
 /** Splits a byte buffer into complete lines, returning them with absolute byte offsets. */
@@ -94,6 +95,28 @@ export function splitLines(buf: Uint8Array, baseOffset: number): { lines: { text
 const SLICE_BYTES = 32 * 1024 * 1024;
 /** New bytes up to which a file is read at once, in a transaction shared with other small files. */
 const SMALL_BYTES = 1024 * 1024;
+/**
+ * A last line with no newline after it is read once the file has stopped changing for this long: a line still being
+ * written is never cut off, and a log that simply doesn't end in a newline isn't missed.
+ */
+const TAIL_SETTLE_MS = 10 * 60_000;
+
+/**
+ * The last line of a file that ends without a newline, when it has settled and is a whole JSON record. Logs are JSON
+ * lines, so a record that parses is complete. Anything else waits.
+ */
+export function settledTail(rest: Uint8Array, mtimeMs: number, now = Date.now()): string | null {
+  if (!rest.length || now - mtimeMs < TAIL_SETTLE_MS) return null;
+  const text = decoder.decode(rest).trim();
+  if (!text.startsWith("{")) return null;
+  try {
+    JSON.parse(text);
+    return text;
+  } catch {
+    return null;
+  }
+}
+
 /** Small files per shared transaction. */
 const BATCH_FILES = 200;
 
@@ -177,11 +200,17 @@ export async function scan(
         const st = statSync(file.path);
         const mtime = Math.floor(st.mtimeMs);
         const prev = getState.get(identity.host, file.path);
-        if (prev && prev.size === st.size && prev.mtime === mtime) continue;
+        // An unchanged file is skipped, unless it ends in a line without a newline that has had time to settle.
+        const tailDue = !!prev && prev.offset < st.size && st.size - prev.offset <= SMALL_BYTES && Date.now() - mtime >= TAIL_SETTLE_MS;
+        const unchanged = !!prev && prev.size === st.size && prev.mtime === mtime;
+        if (unchanged && !tailDue) continue;
 
         let offset = prev?.offset ?? 0;
         let state = prev?.state ? JSON.parse(prev.state) : file.parser.initialState(file.path);
-        if (st.size < offset) {
+        // Reading goes on from the end of the last whole line, so a newline (or the closing brace of a settled last
+        // record) comes right before it. Anything else: the file was rewritten since, e.g. rewound and written on.
+        const rewritten = offset > 0 && offset <= st.size && ![NEWLINE, CLOSE_BRACE].includes(readRange(file.path, offset - 1, 1)[0]!);
+        if (st.size < offset || rewritten) {
           // File was truncated or rewritten: start over (upserts keep this idempotent).
           offset = 0;
           state = file.parser.initialState(file.path);
@@ -191,9 +220,17 @@ export async function scan(
         if (st.size - offset <= SMALL_BYTES) {
           if (!db.inTransaction) db.exec("BEGIN");
           const buf = st.size > offset ? readRange(file.path, offset, st.size - offset) : new Uint8Array(0);
-          const { lines, consumed } = splitLines(buf, offset);
+          let { lines, consumed } = splitLines(buf, offset);
+          const tail = settledTail(buf.subarray(consumed), mtime);
+          if (tail) {
+            lines = [...lines, { text: tail, offset: offset + consumed }];
+            consumed = buf.length;
+          } else if (unchanged) {
+            // Looked at only for its last line, which isn't a whole record: nothing to write, as in any idle scan.
+            continue;
+          }
           db.transaction(() => {
-            if (consumed > 0) state = file.parser.parse(lines, { ...ctx, baseOffset: offset }, state, writer);
+            if (lines.length) state = file.parser.parse(lines, { ...ctx, baseOffset: offset }, state, writer);
             putState.run(identity.host, file.path, st.size, mtime, offset + consumed, JSON.stringify(state));
           })();
           if (++batched >= BATCH_FILES) commit();
