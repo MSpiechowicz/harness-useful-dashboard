@@ -226,6 +226,23 @@ export function chatgptWindows(body: Record<string, any>, now: number): LimitWin
   return windows.sort((a, b) => (a.windowMs ?? Infinity) - (b.windowMs ?? Infinity));
 }
 
+/**
+ * How long a monthly quota's window is: from the same day a calendar month before its reset (GitHub resets premium
+ * requests on the 1st, UTC) up to the reset. Null without a reset. With it the Live view can tell whether use is on
+ * pace to last, like Claude's limits.
+ */
+export function monthlyWindowMs(resetsAt: number | null): number | null {
+  if (resetsAt == null || !Number.isFinite(resetsAt)) return null;
+  const end = new Date(resetsAt);
+  const start = new Date(resetsAt);
+  start.setUTCDate(1);
+  start.setUTCMonth(end.getUTCMonth() - 1);
+  // The same day a month before, or the month's last day when it is shorter (March 31 → February 28).
+  const last = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
+  start.setUTCDate(Math.min(end.getUTCDate(), last));
+  return resetsAt - start.getTime();
+}
+
 /** Copilot's monthly premium requests: how many of the plan's entitlement are used, until the quota resets. */
 export function copilotWindows(body: Record<string, any>): LimitWindow[] {
   const premium = body?.quota_snapshots?.premium_interactions;
@@ -233,7 +250,17 @@ export function copilotWindows(body: Record<string, any>): LimitWindow[] {
   const used = Math.max(0, premium.entitlement - premium.remaining);
   const reset = typeof body.quota_reset_date === "string" ? Date.parse(body.quota_reset_date) : NaN;
   return [
-    { id: "premium", windowMs: null, scope: null, label: "Premium requests", usedFraction: used / premium.entitlement, resetsAt: Number.isFinite(reset) ? reset : null, used, limit: premium.entitlement, unit: "requests" },
+    {
+      id: "premium",
+      windowMs: monthlyWindowMs(Number.isFinite(reset) ? reset : null),
+      scope: null,
+      label: "Premium requests",
+      usedFraction: used / premium.entitlement,
+      resetsAt: Number.isFinite(reset) ? reset : null,
+      used,
+      limit: premium.entitlement,
+      unit: "requests",
+    },
   ];
 }
 
@@ -401,7 +428,13 @@ export function ompReports(json: unknown, now: number): LimitReport[] {
       const counted = a.unit && a.unit !== "percent" && typeof a.used === "number" && typeof a.limit === "number";
       windows.push({
         id: String(l.id ?? windows.length),
-        windowMs: typeof l.window?.durationMs === "number" ? l.window.durationMs : null,
+        // Copilot's premium requests are monthly: without a length from omp, the month before the reset.
+        windowMs:
+          typeof l.window?.durationMs === "number"
+            ? l.window.durationMs
+            : r.provider === "github-copilot" && typeof l.window?.resetsAt === "number"
+              ? monthlyWindowMs(l.window.resetsAt)
+              : null,
         scope: typeof l.scope?.modelId === "string" ? l.scope.modelId : typeof l.scope?.tier === "string" ? l.scope.tier : null,
         label: typeof l.label === "string" ? l.label : null,
         usedFraction: Math.max(0, fraction),

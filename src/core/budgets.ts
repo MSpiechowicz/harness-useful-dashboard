@@ -154,7 +154,8 @@ const percent = (f: number) => `${Math.round(f * 100)}%`;
 const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
 export function windowName(ms: number | null, label: string | null): string {
-  if (ms == null) return label ?? "";
+  // A monthly quota (Copilot's premium requests) reads better by its name than as "31d".
+  if (ms == null || (label && ms > 8 * 86_400_000)) return label ?? "";
   const h = ms / 3_600_000;
   return h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`;
 }

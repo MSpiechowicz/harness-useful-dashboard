@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { scan } from "../src/core/ingest/index.ts";
 import { DbWriter } from "../src/core/ingest/writer.ts";
-import { activePlans, chatgptWindows, claudeLimits, claudeWindows, codexLimits, copilotLimits, copilotWindows, LimitsCache, loginLimits, ompReports, planFor } from "../src/core/limits.ts";
+import { activePlans, chatgptWindows, claudeLimits, claudeWindows, codexLimits, copilotLimits, copilotWindows, LimitsCache, loginLimits, monthlyWindowMs, ompReports, planFor } from "../src/core/limits.ts";
 import { PriceBook } from "../src/core/pricing.ts";
 import { Queries } from "../src/core/queries.ts";
 import { codexMeta, codexTokenCount, codexTurn, ID, memDb, tempDir, testConfig, writeJsonl } from "./helpers.ts";
@@ -218,7 +218,7 @@ describe("pi and OpenCode logins", () => {
       [5 * HOUR, 0.4, NOW + 600_000],
       [168 * HOUR, 0.1, NOW + 86_400_000],
     ]);
-    expect(reports[1]!.windows).toEqual([{ id: "premium", windowMs: null, scope: null, label: "Premium requests", usedFraction: 0.6, resetsAt: Date.parse("2026-11-01"), used: 180, limit: 300, unit: "requests" }]);
+    expect(reports[1]!.windows).toEqual([{ id: "premium", windowMs: 31 * 24 * HOUR, scope: null, label: "Premium requests", usedFraction: 0.6, resetsAt: Date.parse("2026-11-01"), used: 180, limit: 300, unit: "requests" }]);
   });
 
   test("OpenCode's logins live in its data folder, its ChatGPT login is named openai", async () => {
@@ -229,6 +229,18 @@ describe("pi and OpenCode logins", () => {
     expect(problem).toBeNull();
     expect(reports.map((r) => [r.provider, r.source])).toEqual([["claude", "opencode"], ["codex", "opencode"]]);
     expect(seen.find((s) => s.url.includes("chatgpt"))!.headers["ChatGPT-Account-Id"]).toBe("acct_2");
+  });
+
+  test("a monthly quota's window is the calendar month before its reset", () => {
+    expect(monthlyWindowMs(Date.parse("2026-11-01T00:00:00Z"))).toBe(31 * 24 * HOUR);
+    expect(monthlyWindowMs(Date.parse("2026-03-01T00:00:00Z"))).toBe(28 * 24 * HOUR);
+    expect(monthlyWindowMs(Date.parse("2026-03-31T00:00:00Z"))).toBe(31 * 24 * HOUR);
+    expect(monthlyWindowMs(null)).toBeNull();
+  });
+
+  test("Copilot through omp without a window length gets the month before its reset", () => {
+    const reports = ompReports({ reports: [{ provider: "github-copilot", limits: [{ id: "premium", window: { resetsAt: Date.parse("2026-11-01T00:00:00Z") }, amount: { used: 10, limit: 300, unit: "requests" } }] }] }, NOW);
+    expect(reports[0]!.windows[0]!.windowMs).toBe(31 * 24 * HOUR);
   });
 
   test("windows are read from ChatGPT's and Copilot's answers", () => {
