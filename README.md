@@ -243,13 +243,25 @@ writes, or makes a network request, and needs no sign-in. It finds the database 
 
 Times are ISO 8601. Costs are USD at API-equivalent prices. Range tools also filter by provider, project, model and user.
 
-**Claude Code**:
+Every harness the dashboard reads can use it. Each one keeps its MCP servers in its own settings, so add it once per
+harness you use. The dashboard keeps nothing for the MCP server: removing it from a harness is all there is to undo,
+and the dashboard works the same with or without it. The entry is called `harness` below, any name works.
+
+**Claude Code**
 
 ```sh
-claude mcp add --scope user harness -- harness-dashboard mcp
+claude mcp add --scope user harness -- harness-dashboard mcp   # add
+claude mcp remove --scope user harness                        # remove
 ```
 
-**Codex** (`~/.codex/config.toml`, or `codex mcp add harness -- harness-dashboard mcp`):
+**Codex**
+
+```sh
+codex mcp add harness -- harness-dashboard mcp   # add
+codex mcp remove harness                         # remove
+```
+
+Or by hand in `~/.codex/config.toml` (remove the table to take it out again):
 
 ```toml
 [mcp_servers.harness]
@@ -257,7 +269,7 @@ command = "harness-dashboard"
 args = ["mcp"]
 ```
 
-**Cursor** (`~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project):
+**omp (oh-my-pi)**: in `~/.omp/agent/mcp.json` (or `.omp/mcp.json` in a project), or with `/mcp add` inside omp:
 
 ```json
 {
@@ -266,6 +278,53 @@ args = ["mcp"]
   }
 }
 ```
+
+To remove it, delete the entry and run `/mcp reload`, or turn it off with `/mcp disable`.
+
+**pi**: recent versions read `~/.pi/agent/mcp.json` (or `.pi/mcp.json` in a project), with the same `mcpServers` entry as
+omp above. Older ones need the adapter first: `pi install npm:pi-mcp-adapter`. To remove it, delete the entry.
+
+**Gemini CLI**
+
+```sh
+gemini mcp add --scope user harness harness-dashboard mcp   # add
+gemini mcp remove --scope user harness                     # remove
+```
+
+Or by hand in `~/.gemini/settings.json`, under `mcpServers`, with the same entry as omp above.
+
+**GitHub Copilot CLI**: in `~/.copilot/mcp-config.json`, or with `/mcp add` inside Copilot:
+
+```json
+{
+  "mcpServers": {
+    "harness": { "type": "local", "command": "harness-dashboard", "args": ["mcp"], "tools": ["*"] }
+  }
+}
+```
+
+To remove it: `copilot mcp remove harness`, or delete the entry.
+
+**OpenCode** (`~/.config/opencode/opencode.json`, or `opencode.json` in a project) and **Kilo Code** 7
+(`~/.config/kilo/kilo.jsonc`, or `kilo.jsonc` in a project):
+
+```json
+{
+  "mcp": {
+    "harness": { "type": "local", "command": ["harness-dashboard", "mcp"] }
+  }
+}
+```
+
+To remove it, delete the entry, or set `"enabled": false` to keep it but turn it off.
+
+**Cline** and **Roo Code** (and Kilo Code up to 5.x): open the extension's **MCP Servers** panel, then its configure
+button, which opens its settings file (Cline's `cline_mcp_settings.json`, Roo Code's `mcp_settings.json`, or `.roo/mcp.json`
+in a project), and add the same `mcpServers` entry as omp above. To remove it, use the delete button next to the server in
+that panel, or delete the entry. `"disabled": true` keeps it but turns it off.
+
+**Cursor**: in `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project), the same `mcpServers` entry as omp above. To
+remove it, delete the entry.
 
 **Zed** (`settings.json`):
 
@@ -277,28 +336,10 @@ args = ["mcp"]
 }
 ```
 
-**OpenCode** (`opencode.json`, or `~/.config/opencode/opencode.json`):
-
-```json
-{
-  "mcp": {
-    "harness": { "type": "local", "command": ["harness-dashboard", "mcp"] }
-  }
-}
-```
+To remove it, delete the entry.
 
 To read another database, add `--db <path>` after `mcp`. The server speaks MCP 2026-07-28 and the
 handshake-based versions before it (2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05).
-
-**Removing it.** The dashboard keeps nothing for the MCP server, so taking it out of the client is all there is:
-
-```sh
-claude mcp remove --scope user harness   # Claude Code
-codex mcp remove harness                 # Codex
-```
-
-For Cursor, Zed and OpenCode, delete the `harness` entry from the file you added it to. The dashboard itself works the
-same with or without it.
 
 ### Budgets and alerts
 
