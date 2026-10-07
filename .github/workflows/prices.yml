@@ -1,6 +1,7 @@
 name: Prices
 
-# Every Monday: compare the built-in model prices with LiteLLM's price list (scripts/update-prices.ts). When something
+# Every Monday: compare the built-in model prices with LiteLLM's and OpenRouter's price lists (scripts/update-prices.ts),
+# update what both agree on, add new models, and list disagreements for a human. When something
 # differs, check + test, then open or update ONE pull request on chore/update-prices for a human to review.
 # Merging it releases a patch (fix:) and the app re-prices history once. Nothing is ever merged automatically.
 on:
