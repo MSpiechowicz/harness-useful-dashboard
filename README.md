@@ -290,6 +290,16 @@ args = ["mcp"]
 To read another database, add `--db <path>` after `mcp`. The server speaks MCP 2026-07-28 and the
 handshake-based versions before it (2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05).
 
+**Removing it.** The dashboard keeps nothing for the MCP server, so taking it out of the client is all there is:
+
+```sh
+claude mcp remove --scope user harness   # Claude Code
+codex mcp remove harness                 # Codex
+```
+
+For Cursor, Zed and OpenCode, delete the `harness` entry from the file you added it to. The dashboard itself works the
+same with or without it.
+
 ### Budgets and alerts
 
 In **Settings → Budgets and alerts**, set a daily or monthly cap, or a monthly cap per project. Caps count your own
