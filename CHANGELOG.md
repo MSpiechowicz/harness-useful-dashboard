@@ -1,3 +1,10 @@
+## [1.20.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.20.1...v1.20.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* Copilot's premium requests get the on-pace view like Claude ([a4d340a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a4d340aac2ec66b3fdf11cdcfd1f3fb7143365de))
+
 ## [1.20.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.20.0...v1.20.1) (2026-10-07)
 
 
