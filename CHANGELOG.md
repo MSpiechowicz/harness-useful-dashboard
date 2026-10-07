@@ -1,3 +1,16 @@
+# [1.13.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.12.0...v1.13.0) (2026-10-07)
+
+
+### Bug Fixes
+
+* prompt statistics summed on the server, and muted text readable on every surface ([512fa0d](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/512fa0de19866a70bddb362240e9abb7fd6cb201))
+* updates that end in "Restarting" for good, the app window's icon on Linux, and an extra empty window on macOS ([5440592](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/5440592c28214f8ff235377c33f4cdcd465597be))
+
+
+### Features
+
+* why tool calls failed, in Friction and Live ([f6d75d8](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/f6d75d8582554ff86e33d3dc96570f76dd4a00d3))
+
 # [1.12.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.11.1...v1.12.0) (2026-10-07)
 
 
