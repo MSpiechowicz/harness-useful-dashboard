@@ -7,6 +7,9 @@ dist/
 web/dist/
 src/server/assets.generated.ts
 
+# HyperFrames project of the README video (the rendered MP4 lives in docs/video)
+videos/
+
 # Local databases
 *.db
 *.db-shm
