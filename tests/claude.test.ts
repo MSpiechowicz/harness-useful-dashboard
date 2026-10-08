@@ -36,6 +36,7 @@ describe("agentSkill", () => {
   });
   test("a folder outside a plugin goes by its own name", () => {
     expect(agentSkill(["Read /nowhere/skills/lone/SKILL.md first."])).toBe("lone");
+    expect(agentSkill(["Read C:\\nowhere\\skills\\lone\\SKILL.md first."])).toBe("lone");
   });
   test("only the agent's own instructions count, and none without a skill folder", () => {
     expect(agentSkill(["Search the code.", "/work/skills/x/a.md"])).toBeNull();

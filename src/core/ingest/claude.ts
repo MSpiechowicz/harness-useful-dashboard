@@ -174,9 +174,10 @@ function pluginOf(skillsDir: string): string | null {
 export function agentSkill(systemPrompt: unknown): string | null {
   const own = Array.isArray(systemPrompt) ? systemPrompt[0] : systemPrompt;
   if (typeof own !== "string") return null;
-  const m = /((?:\/[^\s`'"()]+?)?\/skills)\/([A-Za-z0-9_.-]+)\//.exec(own);
+  // Either separator, and a drive letter, so Windows paths name their plugin too.
+  const m = /((?:[A-Za-z]:)?(?:[\\/][^\s`'"()]+?)?[\\/]skills)[\\/]([A-Za-z0-9_.-]+)[\\/]/.exec(own);
   if (!m) return null;
-  const plugin = m[1]!.startsWith("/") ? pluginOf(m[1]!) : null;
+  const plugin = pluginOf(m[1]!);
   return plugin ? `${plugin}:${m[2]}` : m[2]!;
 }
 
