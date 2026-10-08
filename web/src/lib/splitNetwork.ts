@@ -2,8 +2,9 @@ import { chrome, tooltipRows } from "./charts.ts";
 import { colorFor, isColored } from "./colors.svelte.ts";
 import type { EChartsOption } from "./echarts.ts";
 import { percent } from "./format.ts";
-import { t } from "./i18n.svelte.ts";
-import { edgeToEdge, foldPairs, OTHER, settle, type PairRow, type Point } from "./network.ts";
+import { t, tMaybe } from "./i18n.svelte.ts";
+import { edgeToEdge, foldPairs, labelSides, OTHER, settle, type PairRow, type Point } from "./network.ts";
+import { store } from "./state.svelte.ts";
 
 /** Whoever asked their system for less motion gets the network without the pulses. */
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -29,12 +30,13 @@ const PULSES = 12;
 export function splitNetwork(rows: PairRow[], dim: string, by: string, fmt: (v: number) => string, width = 1000, height = 460): EChartsOption {
   const c = chrome();
   const narrow = width < 700;
-  const other = t("chart.other");
+  // Each side's "Other" says what it holds, as both sides have one.
+  const otherOf = (d: string) => tMaybe(`chart.other.${d}`) ?? t("chart.other");
   const total = rows.reduce((a, r) => a + r.value, 0);
   const color = (d: string, key: string) => (key !== OTHER && isColored(d, key) ? colorFor(d, key) : c.data);
-  const kept = foldPairs(rows, other);
+  const kept = foldPairs(rows, otherOf(by));
 
-  const totals = (pick: (r: PairRow) => [string, string]) => {
+  const totals = (other: string, pick: (r: PairRow) => [string, string]) => {
     const m = new Map<string, { label: string; value: number }>();
     for (const r of kept) {
       const [k, label] = pick(r);
@@ -42,8 +44,8 @@ export function splitNetwork(rows: PairRow[], dim: string, by: string, fmt: (v: 
     }
     return m;
   };
-  const own = totals((r) => [r.key, r.label]);
-  const theirs = totals((r) => [r.sub, r.subLabel]);
+  const own = totals(otherOf(dim), (r) => [r.key, r.label]);
+  const theirs = totals(otherOf(by), (r) => [r.sub, r.subLabel]);
   const biggest = Math.max(1e-9, ...[...own.values(), ...theirs.values()].map((v) => v.value));
   const heaviest = Math.max(1e-9, ...kept.map((r) => r.value));
   // Points stay small, their size only a hint of the measure, so they never cover each other.
@@ -56,8 +58,24 @@ export function splitNetwork(rows: PairRow[], dim: string, by: string, fmt: (v: 
   ];
   const fibres = kept.map((r) => ({ source: `a:${r.key}`, target: `b:${r.sub}`, value: r.value, strength: strength(r.value) }));
   const points: Point[] = entries.map((e) => ({ id: e.id, x: 0, y: 0, r: size(e.v.value) / 2 }));
-  settle(points, fibres, width, height);
+  // The fibres' bend. The lights' paths are worked out along the same curve, so they run exactly along the fibres.
+  const CURVE = 0.25;
+  settle(points, fibres, width, height, CURVE);
   const where = new Map(points.map((p) => [p.id, [p.x, p.y] as [number, number]]));
+  // Each name goes on the side of its point where it crosses the fewest fibres and no other name. Its width is guessed
+  // from its length at 11px, up to the width it is cut to. The biggest points' names are placed first: they are the
+  // ones that show.
+  const labelWidth = narrow ? 70 : 120;
+  const sides = labelSides(
+    points,
+    new Map([...entries].sort((x, y) => y.v.value - x.v.value).map((e) => [e.id, { w: Math.min(labelWidth, e.v.label.length * 6.2), h: 14 }])),
+    fibres,
+    CURVE,
+    width,
+    height,
+  );
+  // On a light card a glow in the point's color only smudges it, so there it is a faint halo.
+  const glow = store.dark ? 1 : 0.3;
 
   const nodes = entries.map((e) => {
     const tint = color(e.d, e.k);
@@ -70,17 +88,15 @@ export function splitNetwork(rows: PairRow[], dim: string, by: string, fmt: (v: 
         // The page's side filled, the other side rings.
         ...(e.filled ? { color: tint } : { color: c.surface, borderColor: tint, borderWidth: 2 }),
         // The glow, in the point's own color.
-        shadowBlur: 6 + 14 * Math.sqrt(e.v.value / biggest),
+        shadowBlur: (6 + 14 * Math.sqrt(e.v.value / biggest)) * glow,
         shadowColor: tint,
       },
-      label: { show: e.v.value / biggest >= 0.08, position: "right", distance: 6, color: c.ink2 },
+      label: { show: e.v.value / biggest >= 0.08, position: sides.get(e.id) ?? "right", distance: 6, color: c.ink2 },
       emphasis: { label: { show: true, color: c.ink } },
     };
   });
   const names = new Map(nodes.map((n) => [n.id, n.name]));
   const tintOf = new Map(entries.map((e) => [e.id, color(e.d, e.k)]));
-  // The fibres' bend. The lights' paths are worked out along the same curve, so they run exactly along the fibres.
-  const CURVE = 0.25;
   const links = fibres.map((f) => ({
     source: f.source,
     target: f.target,
@@ -119,7 +135,7 @@ export function splitNetwork(rows: PairRow[], dim: string, by: string, fmt: (v: 
         coordinateSystem: "cartesian2d",
         data: nodes,
         links,
-        label: { fontSize: 11, overflow: "truncate", width: narrow ? 70 : 120 },
+        label: { fontSize: 11, overflow: "truncate", width: labelWidth },
         labelLayout: { hideOverlap: true },
         lineStyle: { color: "source" },
         emphasis: { focus: "adjacency", lineStyle: { opacity: 0.9 }, label: { show: true } },
@@ -138,13 +154,14 @@ export function splitNetwork(rows: PairRow[], dim: string, by: string, fmt: (v: 
         z: 3,
         effect: { show: !reducedMotion(), constantSpeed: narrow ? 50 : 70, trailLength: 0.15, symbol: "circle", symbolSize: 3 },
         // A light is a near white version of its fibre's color, bigger on a thicker fibre and glowing in the fibre's
-        // color, so it shows on any fibre, the thickest included.
+        // color, so it shows on any fibre, the thickest included. On a light card near white would vanish, so there
+        // it is the fibre's own color.
         data: pulsing.map((f) => {
           const tint = tintOf.get(f.source)!;
           return {
             coords: f.path!,
             lineStyle: { color: tint, opacity: 0 },
-            effect: { color: lighten(tint, 0.7), symbolSize: 2.5 + 2.5 * f.strength, shadowBlur: 1 + 1.5 * f.strength, shadowColor: tint },
+            effect: { color: store.dark ? lighten(tint, 0.7) : tint, symbolSize: 2.5 + 2.5 * f.strength, shadowBlur: (1 + 1.5 * f.strength) * glow, shadowColor: tint },
           };
         }),
       },

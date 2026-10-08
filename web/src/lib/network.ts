@@ -36,6 +36,9 @@ export function foldPairs(rows: PairRow[], otherLabel: string): PairRow[] {
   return [...pairs.values()];
 }
 
+/** The gap a point keeps from a fibre that isn't its own, past its edge. */
+export const FIBRE_GAP = 6;
+
 export interface Point {
   id: string;
   x: number;
@@ -47,9 +50,16 @@ export interface Point {
 /**
  * Where each point goes: a small force layout that keeps everything inside the box (with room on the right for the
  * labels) and comes out the same every time. Points push each other apart and never overlap, fibres pull their ends
- * together, and a light pull keeps the whole near the middle, weaker sideways so it spreads along the wide card.
+ * together, a point is pushed off any fibre that isn't its own (drawn with `curveness`, as ECharts bends it), and a
+ * light pull keeps the whole near the middle, weaker sideways so it spreads along the wide card.
  */
-export function settle(points: Point[], links: { source: string; target: string; strength: number }[], width: number, height: number): void {
+export function settle(
+  points: Point[],
+  links: { source: string; target: string; strength: number }[],
+  width: number,
+  height: number,
+  curveness = 0,
+): void {
   const pad = 24;
   const left = pad;
   const right = Math.max(left + 100, width - 130);
@@ -110,6 +120,53 @@ export function settle(points: Point[], links: { source: string; target: string;
       p.y = Math.min(bottom, Math.max(top, p.y + (m > cap ? (my / m) * cap : my)));
     }
   }
+  // Then a point that sits on someone else's fibre, and so looks joined to it, is moved off: away from the nearest
+  // part of the curve until there is a clear gap, in small steps that keep points apart. Moving a point moves its own
+  // fibres too, so this goes round until nothing changes.
+  for (let round = 0; round < 120; round++) {
+    let moved = false;
+    for (const l of links) {
+      const a = at.get(l.source)!;
+      const b = at.get(l.target)!;
+      const along = curve([a.x, a.y], [b.x, b.y], curveness);
+      const marks = Array.from({ length: 33 }, (_, i) => along(i / 32));
+      for (const p of points) {
+        if (p === a || p === b) continue;
+        let [nx, ny, nd] = [0, 0, Infinity];
+        for (let i = 0; i < 32; i++) {
+          // The nearest spot on each stretch between two samples.
+          const [x0, y0] = marks[i]!;
+          const [x1, y1] = marks[i + 1]!;
+          const [sx, sy] = [x1 - x0, y1 - y0];
+          const len = sx * sx + sy * sy || 1;
+          const t = Math.min(1, Math.max(0, ((p.x - x0) * sx + (p.y - y0) * sy) / len));
+          const [qx, qy] = [x0 + sx * t, y0 + sy * t];
+          const d = Math.hypot(p.x - qx, p.y - qy);
+          if (d < nd) [nx, ny, nd] = [qx, qy, d];
+        }
+        const clear = p.r + FIBRE_GAP;
+        if (nd >= clear) continue;
+        // Exactly on the curve: off to one side, the same side every time.
+        const [ux, uy] = nd < 0.01 ? [0, 1] : [(p.x - nx) / nd, (p.y - ny) / nd];
+        const step = Math.min(2, clear - nd);
+        const x = Math.min(right, Math.max(left, p.x + ux * step));
+        const y = Math.min(bottom, Math.max(top, p.y + uy * step));
+        // Never onto another point.
+        if (points.some((q) => q !== p && Math.hypot(q.x - x, q.y - y) < q.r + p.r + 4)) continue;
+        if (x !== p.x || y !== p.y) [p.x, p.y, moved] = [x, y, true];
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+/** The curve ECharts draws for a fibre between two centers, as a point at `t` (0 to 1) along it. */
+function curve(p0: [number, number], p1: [number, number], curveness: number): (t: number) => [number, number] {
+  const c: [number, number] = [(p0[0] + p1[0]) / 2 - (p0[1] - p1[1]) * curveness, (p0[1] + p1[1]) / 2 - (p1[0] - p0[0]) * curveness];
+  return (t) => [
+    (1 - t) * (1 - t) * p0[0] + 2 * (1 - t) * t * c[0] + t * t * p1[0],
+    (1 - t) * (1 - t) * p0[1] + 2 * (1 - t) * t * c[1] + t * t * p1[1],
+  ];
 }
 
 /**
@@ -119,11 +176,7 @@ export function settle(points: Point[], links: { source: string; target: string;
  * edges instead of inside the bubbles. Null when the bubbles touch and nothing is left between them.
  */
 export function edgeToEdge(p0: [number, number], p1: [number, number], curveness: number, r0: number, r1: number, samples = 24): [number, number][] | null {
-  const c: [number, number] = [(p0[0] + p1[0]) / 2 - (p0[1] - p1[1]) * curveness, (p0[1] + p1[1]) / 2 - (p1[0] - p0[0]) * curveness];
-  const at = (t: number): [number, number] => [
-    (1 - t) * (1 - t) * p0[0] + 2 * (1 - t) * t * c[0] + t * t * p1[0],
-    (1 - t) * (1 - t) * p0[1] + 2 * (1 - t) * t * c[1] + t * t * p1[1],
-  ];
+  const at = curve(p0, p1, curveness);
   // Where the curve crosses a circle around one end: the distance from that end only grows along the curve's first
   // stretch, so halving the interval finds it.
   const cross = (end: [number, number], r: number, from: number, to: number) => {
@@ -143,4 +196,73 @@ export function edgeToEdge(p0: [number, number], p1: [number, number], curveness
   const t1 = cross(p1, r1, 1, 0.5);
   if (t1 - t0 <= 0.02) return null;
   return Array.from({ length: samples + 1 }, (_, i) => at(t0 + ((t1 - t0) * i) / samples));
+}
+
+export type LabelSide = "right" | "left" | "top" | "bottom";
+
+/**
+ * Where each point's name goes: of right, left, above and below, the side its name crosses the fewest fibres on, and
+ * no other point or name. A name has to fit in the card. Right wins a tie, so most names read on from their point.
+ * `labels` holds each name's width and height in pixels, in the order they are placed: a name placed earlier keeps
+ * its spot and later ones go around it, so the names that show come first.
+ */
+export function labelSides(
+  points: Point[],
+  labels: Map<string, { w: number; h: number }>,
+  links: { source: string; target: string; strength: number }[],
+  curveness: number,
+  width: number,
+  height: number,
+  gap = 6,
+): Map<string, LabelSide> {
+  const at = new Map(points.map((p) => [p.id, p]));
+  // Each fibre as points along it, every few pixels, weighed by how thick it is drawn.
+  const marks: { x: number; y: number; w: number }[] = [];
+  for (const l of links) {
+    const a = at.get(l.source);
+    const b = at.get(l.target);
+    if (!a || !b) continue;
+    const along = curve([a.x, a.y], [b.x, b.y], curveness);
+    const n = Math.max(8, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4));
+    for (let i = 0; i <= n; i++) {
+      const [x, y] = along(i / n);
+      marks.push({ x, y, w: 1 + l.strength });
+    }
+  }
+  const sides: LabelSide[] = ["right", "left", "top", "bottom"];
+  const out = new Map<string, LabelSide>();
+  // The names placed so far, a little bigger than they are, so two names never quite touch.
+  const placed: [number, number, number, number][] = [];
+  for (const [id, size] of labels) {
+    const p = at.get(id);
+    if (!p) continue;
+    const { w, h } = size;
+    const d = p.r + gap;
+    const boxes: Record<LabelSide, [number, number, number, number]> = {
+      right: [p.x + d, p.y - h / 2, p.x + d + w, p.y + h / 2],
+      left: [p.x - d - w, p.y - h / 2, p.x - d, p.y + h / 2],
+      top: [p.x - w / 2, p.y - d - h, p.x + w / 2, p.y - d],
+      bottom: [p.x - w / 2, p.y + d, p.x + w / 2, p.y + d + h],
+    };
+    let best: LabelSide = "right";
+    let bestScore = Infinity;
+    for (const side of sides) {
+      const [x0, y0, x1, y1] = boxes[side];
+      if (x0 < 0 || y0 < 0 || x1 > width || y1 > height) continue;
+      let score = 0;
+      for (const m of marks) if (m.x >= x0 && m.x <= x1 && m.y >= y0 && m.y <= y1) score += m.w;
+      for (const q of points) {
+        if (q === p) continue;
+        const cx = Math.min(x1, Math.max(x0, q.x));
+        const cy = Math.min(y1, Math.max(y0, q.y));
+        if (Math.hypot(q.x - cx, q.y - cy) < q.r + 2) score += 1000;
+      }
+      for (const [a0, b0, a1, b1] of placed) if (x0 < a1 && x1 > a0 && y0 < b1 && y1 > b0) score += 1000;
+      if (score < bestScore) [best, bestScore] = [side, score];
+    }
+    out.set(p.id, best);
+    const [x0, y0, x1, y1] = boxes[best];
+    placed.push([x0 - 3, y0 - 2, x1 + 3, y1 + 2]);
+  }
+  return out;
 }
