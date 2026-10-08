@@ -35,6 +35,8 @@
     kind: string | null;
     /** The title shown is the AI's (session labels, Settings). */
     aiTitle: boolean;
+    /** Newer servers only. */
+    compactions?: number;
   }
 
   const keep = keeper();
@@ -109,7 +111,7 @@
       exportAll={() => getJson<{ rows: SessionRow[] }>(apiUrl("/api/sessions", { sort, q: debounced, limit: 10000, export: 1 })).then((d) => d.rows)}
     >
       {#snippet children(view)}
-        <table class="data fixed-cols" use:resizableColumns={"sessions"}>
+        <table class="data fixed-cols" use:resizableColumns={"sessions-v2"}>
           <colgroup>
             <col />
             <col class="w-44" />
@@ -117,6 +119,7 @@
             <col class="w-40" />
             <col class="w-20" />
             <col class="w-[4.5rem]" />
+            <col class="w-28" />
             <col class="w-24" />
             <col class="w-24" />
             <col class="w-32" />
@@ -129,6 +132,7 @@
               <th>{t("col.models")}</th>
               <th class="num">{t("col.prompts")}</th>
               <th class="num">{t("col.messages")}</th>
+              <th class="num">{t("sessions.col.compactions")}</th>
               <th class="num">{t("col.tokens")}</th>
               <th class="num">{t("col.cost")}</th>
               <th class="num">{t("col.lastSeen")}</th>
@@ -155,6 +159,7 @@
                 <td class="max-w-40 truncate text-xs text-ink-2">{r.models?.split(",").join(", ")}</td>
                 <td class="num text-ink-2">{compact(r.prompts)}</td>
                 <td class="num text-ink-2">{compact(r.messages)}</td>
+                <td class="num text-ink-2">{r.compactions ? compact(r.compactions) : "–"}</td>
                 <td class="num text-ink-2">{compact(r.tokens)}</td>
                 <td class="num font-medium">{usd(r.cost)}</td>
                 <td class="num text-muted">{relative(r.lastTs)}</td>

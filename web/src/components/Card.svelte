@@ -43,7 +43,8 @@
         {#if title}<h2 class="font-semibold text-ink {divided ? 'text-[15px]' : 'text-sm'}">{title}</h2>{/if}
         {#if subtitle}<p class="mt-0.5 text-xs text-muted">{subtitle}</p>{/if}
       </div>
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
+      <!-- The buttons start where the title's letters do, not at the top of its line box (about 5px higher). -->
+      <div class="flex min-w-0 flex-wrap items-center gap-2 {title ? 'mt-[5px]' : ''}">
         {#if actions}{@render actions()}{/if}
         {#if sets.length}<ColumnsMenu {sets} small={!actions} />{/if}
         {#if exportName && exportRows}<ExportMenu name={exportName} rows={exportRows} small />{/if}

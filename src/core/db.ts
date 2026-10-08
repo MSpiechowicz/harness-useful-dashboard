@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 import { CURSOR_REKEY } from "./ingest/cursor.ts";
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 19;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -294,7 +294,119 @@ const MIGRATIONS: Record<number, string> = {
     UPDATE tool_calls SET skill = NULL, prompt_id = NULL WHERE provider = 'claude' AND spawn_ref IS NOT NULL;
     DELETE FROM ingest_files WHERE path LIKE '%/subagents/agent-%.jsonl' OR path LIKE '%\\subagents\\agent-%.jsonl';
   `,
+  // Four things at once, so every machine reads its logs once more only once:
+  // - `outcome_days`: successful tool calls older than a week, counted per local day, session and dimensions instead of
+  //   one row each (rollup.ts). `outcome_counts` reads both as one, with `n` the count a row stands for. A rowid table:
+  //   WITHOUT ROWID can't hold the NULL key columns.
+  // - `chart_notes`: notes the user puts on the charts. The user's own data, never ingested, shared like tags.
+  // - `git_events`: commits and pull requests the agents made, read from their tool output (ingest/vcs.ts).
+  // - `compactions`: a session's context compacted, with an estimated cost.
+  // `min_reader_schema` keeps an app older than this one from writing rows the rollup already counted: it opens
+  // read-only (openDb). The logs are read again for the commits, PRs and compactions in them. Records are keyed by
+  // their place in the logs, so reading again changes nothing else.
+  18: /* sql */ `
+    CREATE TABLE IF NOT EXISTS outcome_days (
+      ts         INTEGER NOT NULL,          -- local midnight of the rolling host, epoch ms
+      host       TEXT NOT NULL,
+      provider   TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      project    TEXT,
+      user       TEXT,
+      model      TEXT,
+      agent      TEXT NOT NULL DEFAULT 'main',
+      effort     TEXT,
+      tool       TEXT,
+      kind       TEXT NOT NULL DEFAULT 'tool_ok',
+      n          INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_outcome_days_session ON outcome_days(session_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_outcome_days_ts ON outcome_days(ts);
+    CREATE INDEX IF NOT EXISTS idx_outcome_days_model ON outcome_days(model, ts);
+    CREATE VIEW IF NOT EXISTS outcome_counts AS
+      SELECT provider, session_id, ts, project, user, host, model, agent, effort, kind, tool, reason, status, 1 AS n FROM outcomes
+      UNION ALL
+      SELECT provider, session_id, ts, project, user, host, model, agent, effort, kind, tool, NULL, NULL, n FROM outcome_days;
+
+    CREATE TABLE IF NOT EXISTS chart_notes (
+      id         TEXT PRIMARY KEY,
+      ts         INTEGER NOT NULL,
+      day        TEXT,                      -- YYYY-MM-DD for a note on a whole day
+      text       TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chart_notes_ts ON chart_notes(ts);
+
+    CREATE TABLE IF NOT EXISTS git_events (
+      id         TEXT PRIMARY KEY,          -- commit:<project>:<sha> | commit:<call id> | pr:<repo lower>#<n> | pr:<call id>
+      kind       TEXT NOT NULL,             -- commit, pr
+      provider   TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      ts         INTEGER NOT NULL,
+      project    TEXT,
+      user       TEXT,
+      host       TEXT,
+      agent      TEXT NOT NULL DEFAULT 'main',
+      branch     TEXT,
+      sha        TEXT,
+      subject    TEXT,
+      repo       TEXT,
+      number     INTEGER,
+      url        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_git_events_branch ON git_events(project, branch);
+    CREATE INDEX IF NOT EXISTS idx_git_events_session ON git_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_git_events_ts ON git_events(ts);
+
+    CREATE TABLE IF NOT EXISTS compactions (
+      id          TEXT PRIMARY KEY,         -- <session id>:<uuid ?? ts>:compact
+      provider    TEXT NOT NULL,
+      session_id  TEXT NOT NULL,
+      ts          INTEGER NOT NULL,
+      project     TEXT,
+      user        TEXT,
+      host        TEXT,
+      model       TEXT,
+      agent       TEXT NOT NULL DEFAULT 'main',
+      trigger     TEXT,                     -- manual, auto
+      pre_tokens  INTEGER,
+      post_tokens INTEGER,
+      duration_ms INTEGER,
+      cost_usd    REAL NOT NULL DEFAULT 0,
+      estimated   INTEGER NOT NULL DEFAULT 1  -- 0 = cost reported by the harness
+    );
+    CREATE INDEX IF NOT EXISTS idx_compactions_session ON compactions(session_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_compactions_ts ON compactions(ts);
+
+    INSERT OR REPLACE INTO meta(key, value) VALUES ('min_reader_schema', '18');
+    DELETE FROM ingest_files WHERE path LIKE '%.jsonl'
+       OR path LIKE '%/chats/%.json' OR path LIKE '%\\chats\\%.json'
+       OR (path LIKE '%.db' AND (path LIKE '%opencode%' OR path LIKE '%kilo%'));
+  `,
+  // Model ids are stored without their snapshot date (models.ts withoutSnapshotDate), so "claude-haiku-4-5-20251001"
+  // and "claude-haiku-4-5" are one model everywhere. The rows already stored lose theirs here.
+  19: /* sql */ `
+    UPDATE usage SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+    UPDATE tool_calls SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+    UPDATE outcomes SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+    UPDATE outcome_days SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+    UPDATE compactions SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+  `,
 };
+
+/**
+ * The database was written by a newer app: its schema is ahead of this one's. `version` is the database's schema
+ * version, `minReader` the oldest schema that may still read it (0 when it doesn't say).
+ */
+export class NewerSchemaError extends Error {
+  constructor(
+    readonly version: number,
+    readonly minReader: number,
+  ) {
+    super(`The database was written by a newer version of the app (schema ${version}, this app knows ${SCHEMA_VERSION}). Update the app.`);
+    this.name = "NewerSchemaError";
+  }
+}
 
 export interface OpenDbOptions {
   journalMode?: JournalMode;
@@ -306,6 +418,16 @@ export function openDb(path: string, opts: OpenDbOptions = {}): Database {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { create: !opts.readonly, readonly: opts.readonly, strict: true });
   db.exec("PRAGMA busy_timeout = 15000");
+  // A newer app's database: never written to (not even a pragma), since this app doesn't know what its rows mean. It is
+  // read-only for this app, or not readable at all when the newer app says so (min_reader_schema).
+  const schema = startupSchema(db);
+  const unreadable = schema.minReader > SCHEMA_VERSION;
+  const unwritable = !opts.readonly && schema.version > SCHEMA_VERSION;
+  if (unreadable || unwritable) {
+    db.close();
+    throw new NewerSchemaError(schema.version, schema.minReader);
+  }
+
   db.exec("PRAGMA foreign_keys = ON");
   // A new database gives the pages that trimming frees back to the disk a few at a time (retention.ts). This must come
   // before anything writes the file, the journal mode too. An existing one keeps its mode until VACUUM (Compact).
@@ -325,10 +447,24 @@ export function openDb(path: string, opts: OpenDbOptions = {}): Database {
   // 64 MB of page cache instead of 2 MB: the views read the same indexes over and over.
   db.exec("PRAGMA cache_size = -65536");
   if (!opts.readonly) {
-    migrate(db);
+    try {
+      migrate(db);
+    } catch (err) {
+      db.close();
+      throw err;
+    }
     optimize(db, true);
   }
   return db;
+}
+
+/** schemaInfo for openDb: a meta table that can't be read counts as none there, and fails where it is used next. */
+function startupSchema(db: Database): { version: number; minReader: number } {
+  try {
+    return schemaInfo(db);
+  } catch {
+    return { version: 0, minReader: 0 };
+  }
 }
 
 /**
@@ -339,26 +475,74 @@ export function optimize(db: Database, opening = false): void {
   db.exec(`PRAGMA optimize${opening ? " = 0x10002" : ""}`);
 }
 
-function schemaVersion(db: Database): number {
+/**
+ * A version number kept in `meta`, 0 when unset or when there is no meta table yet. Any other error, or a value that is
+ * no whole number, is thrown: a version that can't be read must not pass for an old one.
+ */
+function metaNumber(db: Database, key: string): number {
+  let row: { value: unknown } | null;
   try {
-    const row = db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'").get();
-    return row ? Number(row.value) : 0;
-  } catch {
-    return 0; // no meta table yet
+    row = db.query<{ value: unknown }, [string]>("SELECT value FROM meta WHERE key = ?").get(key);
+  } catch (err) {
+    if (err instanceof Error && err.message === "no such table: meta") return 0;
+    throw err;
   }
+
+  if (!row) return 0;
+  if (!/^\d+$/.test(String(row.value))) throw new Error(`meta ${key} holds no version number: ${String(row.value).slice(0, 50)}`);
+  return Number(row.value);
+}
+
+function schemaVersion(db: Database): number {
+  return metaNumber(db, "schema_version");
+}
+
+/** The database's schema version and the oldest schema that may read it (0 when unset). Throws when meta can't be read. */
+export function schemaInfo(db: Database): { version: number; minReader: number } {
+  return { version: schemaVersion(db), minReader: metaNumber(db, "min_reader_schema") };
+}
+
+/** Tables known to exist, per connection. Only a hit is kept: a read-only reader sees the table once another migrates. */
+const knownTables = new WeakMap<Database, Set<string>>();
+
+/**
+ * Whether a table or view exists. Readers that open the database read-only (MCP, statusline, reports) never migrate it,
+ * so they check before reading a table newer than the schema they may find.
+ */
+export function hasTable(db: Database, name: string): boolean {
+  let known = knownTables.get(db);
+  if (known?.has(name)) return true;
+
+  const row = db.query<{ name: string }, [string]>("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?").get(name);
+  if (!row) return false;
+
+  if (!known) knownTables.set(db, (known = new Set()));
+  known.add(name);
+  return true;
 }
 
 /**
  * Brings the schema up to date. Several machines can open a shared database at once: each step takes the write lock
  * first (BEGIN IMMEDIATE) and reads the version again under it, so a step another process just ran is not run twice
- * (a second `ALTER TABLE … ADD COLUMN` would fail).
+ * (a second `ALTER TABLE … ADD COLUMN` would fail). A newer app that migrated it past this one's schema meanwhile
+ * throws NewerSchemaError, with nothing written.
  */
 export function migrate(db: Database): void {
-  if (schemaVersion(db) >= SCHEMA_VERSION) return;
+  const newer = () => {
+    const schema = schemaInfo(db);
+    return new NewerSchemaError(schema.version, schema.minReader);
+  };
+
+  const version = schemaVersion(db);
+  if (version > SCHEMA_VERSION) throw newer();
+  if (version === SCHEMA_VERSION) return;
+
   const step = db.transaction((): boolean => {
-    db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
     const current = schemaVersion(db);
-    if (current >= SCHEMA_VERSION) return false;
+    if (current > SCHEMA_VERSION) throw newer();
+    if (current === SCHEMA_VERSION) return false;
+
+    db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
     db.exec(MIGRATIONS[current + 1]!);
     db.query("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)").run(String(current + 1));
     return true;

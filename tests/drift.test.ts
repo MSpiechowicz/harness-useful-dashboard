@@ -11,7 +11,7 @@ const NOW = new Date(2026, 9, 6, 18, 0, 0).getTime();
  * 35 days of one model at a steady pace, 20 responses and 20 tool calls a day. From `slowFrom` days ago on, it
  * answers at half the speed and fails a tool call in four.
  */
-function seed(opts: { slowFrom?: number; model?: string; effort?: string } = {}) {
+function seed(opts: { slowFrom?: number; model?: string; effort?: string; apiErrors?: (d: number) => number } = {}) {
   const db = memDb();
   const w = new DbWriter(db, new PriceBook(), ID);
   const model = opts.model ?? "gpt-6";
@@ -29,6 +29,9 @@ function seed(opts: { slowFrom?: number; model?: string; effort?: string } = {})
       w.responseMeta({ usageId: id, startTs: ts - secs * 1000, endTs: ts, ttftMs: 1000, effort: opts.effort ?? "high" });
       const failed = slow ? i % 4 === 0 : i % 20 === 0;
       w.outcome({ id: `${id}:tool`, provider: "omp", sessionId: "omp:s1", ts, project: "/work/alpha", model, agent: "main", effort: opts.effort ?? "high", kind: failed ? "tool_error" : "tool_ok" });
+    }
+    for (let i = 0; i < (opts.apiErrors?.(d) ?? 0); i++) {
+      w.outcome({ id: `${model}:${d}:api${i}`, provider: "omp", sessionId: "omp:s1", ts: dayStart + i * 1000, project: "/work/alpha", model, agent: "main", effort: opts.effort ?? "high", kind: "api_error", reason: "overloaded" });
     }
   }
   return db;
@@ -75,6 +78,40 @@ describe("drift", () => {
     expect(m.output.status).toBe("stable");
     expect(m.steps.status).toBe("stable");
     expect(m.toolErrors.recent).toBeCloseTo(25, 5);
+  });
+
+  test("failed model requests are a rate of their own: out of responses plus failures", () => {
+    const steady = drift(seed({ apiErrors: () => 1 }), {}, { now: NOW }).models[0]!.metrics.apiErrors;
+    expect(steady.status).toBe("stable");
+    expect(steady.baseline).toBeCloseTo((1 / 21) * 100, 5);
+
+    // One failure a day, then five a day in the last week: far outside the spread, and more than 20% up.
+    const d = drift(seed({ apiErrors: (day) => (day < 7 ? 5 : 1) }), {}, { now: NOW });
+    const m = d.models[0]!.metrics;
+    expect(m.apiErrors).toMatchObject({ status: "changed", better: false, recentN: 7 * 25 });
+    expect(m.apiErrors.recent).toBeCloseTo((5 / 25) * 100, 5);
+    expect(m.toolErrors.status).toBe("stable");
+    const series = d.series.find((s) => s.key === "apiErrors")!;
+    expect(series.providers).toEqual(["omp"]);
+    expect(series.counts.at(-1)).toBe(25);
+  });
+
+  test("a small move in the API error rate is not flagged", () => {
+    // Two failures more over a week of 140 responses: within what chance gives.
+    const d = drift(seed({ apiErrors: (day) => (day === 0 || day === 3 ? 2 : 1) }), {}, { now: NOW });
+    expect(d.models[0]!.metrics.apiErrors.status).toBe("stable");
+  });
+
+  test("Claude Code's own <synthetic> messages are no model", () => {
+    const db = seed();
+    const w = new DbWriter(db, new PriceBook(), ID);
+    for (let i = 0; i < 100; i++) {
+      const ts = NOW - (i % 30) * DAY - 3_600_000;
+      w.usage({ id: `syn:${i}`, provider: "claude", sessionId: "claude:s9", promptId: null, ts, project: "/work/alpha", model: "<synthetic>", skill: null, agent: "main", isSubagent: false, input: 0, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0 });
+    }
+    const d = drift(db, {}, { now: NOW });
+    expect(d.models.map((m) => m.model)).toEqual(["gpt-6"]);
+    expect(drift(db, {}, { now: NOW, model: "<synthetic>" }).series.every((s) => s.counts.every((n) => n === 0))).toBe(true);
   });
 
   test("too little data is not judged", () => {

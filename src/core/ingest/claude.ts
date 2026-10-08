@@ -12,6 +12,7 @@ import {
   SessionAccumulator,
   truncate,
 } from "./types.ts";
+import { emitGitEvents, prsIn, vcsCall } from "./vcs.ts";
 
 /** Built-in Claude Code slash commands; any other slash command is treated as a skill/custom command. */
 export const CLAUDE_BUILTIN_COMMANDS = new Set([
@@ -23,6 +24,8 @@ export const CLAUDE_BUILTIN_COMMANDS = new Set([
 ]);
 
 const FILE_TOOLS = new Set(["Read", "Edit", "MultiEdit", "Write", "NotebookEdit", "NotebookRead"]);
+/** The tools that run a shell command (`command`): a commit or PR is read from what they print. */
+const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 
 interface ClaudeState {
   promptId: string | null;
@@ -41,6 +44,9 @@ interface ClaudeState {
   responseEnd?: number | null;
   /** Tool calls waiting for their results: what a failed one was given. */
   calls?: PendingCalls;
+  /** The last working directory and branch logged, for records that carry neither (pr-link). */
+  cwd?: string | null;
+  gitBranch?: string | null;
 }
 
 interface ContentBlock {
@@ -130,6 +136,9 @@ function resultLines(r: unknown): LineCount | null {
   return hunkLines(x.structuredPatch) ?? (x.type === "create" ? { added: countLines(x.content), removed: 0 } : null);
 }
 
+/** A logged branch, or null for none or a detached HEAD. */
+const branchOf = (v: unknown): string | null => (typeof v === "string" && v && v !== "HEAD" ? v : null);
+
 /** The tools that start a subagent (Task in older Claude Code versions). */
 const SPAWN_TOOLS = new Set(["Agent", "Task"]);
 /** A text input's first line, if it has any words. */
@@ -202,6 +211,9 @@ export const claudeParser: LineParser<ClaudeState> = {
       const sidechain = rec.isSidechain === true || state.agent !== null;
       const agent = sidechain ? state.agent ?? "subagent" : "main";
 
+      if (typeof rec.cwd === "string" && rec.cwd) state.cwd = rec.cwd;
+      if (typeof rec.gitBranch === "string") state.gitBranch = branchOf(rec.gitBranch);
+
       if (rec.type === "ai-title" || rec.type === "custom-title" || rec.type === "summary") {
         const title = rec.customTitle ?? rec.aiTitle ?? rec.summary;
         if (typeof title === "string" && !sidechain) sessions.touch({ id: sessionId, provider: "claude", nativeId: nativeSession, title });
@@ -225,6 +237,35 @@ export const claudeParser: LineParser<ClaudeState> = {
         });
         continue;
       }
+      // The session's context was compacted: the summary that replaces it follows as a user record (isCompactSummary).
+      if (rec.type === "system" && rec.subtype === "compact_boundary" && ts != null) {
+        const m = rec.compactMetadata ?? {};
+        const count = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+        sink.compaction?.({
+          id: `${sessionId}:${rec.uuid ?? ts}:compact`,
+          provider: "claude",
+          sessionId,
+          ts,
+          project: state.cwd ?? null,
+          model: state.model ?? null,
+          agent,
+          trigger: typeof m.trigger === "string" ? m.trigger : null,
+          preTokens: count(m.preTokens),
+          postTokens: count(m.postTokens),
+          durationMs: count(m.durationMs),
+        });
+        continue;
+      }
+
+      // A pull request the session opened or worked on, logged again on each update. It carries no cwd or branch.
+      if (rec.type === "pr-link") {
+        const pr = prsIn(rec.prUrl)[0];
+        if (pr && ts != null) {
+          sink.gitEvent?.({ kind: "pr", provider: "claude", sessionId, ts, project: state.cwd ?? null, agent, branch: state.gitBranch ?? null, callId: null, ...pr });
+        }
+        continue;
+      }
+
       // A subagent's own instructions, logged before it starts: the skill its agent is built from is its skill.
       if (rec.type === "attachment" && rec.attachment?.type === "prompt_snapshot") {
         if (state.agent !== null && !state.skill) state.skill = agentSkill(rec.attachment.systemPrompt);
@@ -266,12 +307,31 @@ export const claudeParser: LineParser<ClaudeState> = {
             // The record's toolUseResult belongs to its only result.
             const lines = kind === "tool_ok" && results.length === 1 ? resultLines(rec.toolUseResult) : null;
             if (lines) sink.editLines?.({ toolId: id, ...lines });
+
+            // A commit or PR the call made, read from what it printed.
+            if (kind === "tool_ok" && call.vcs) {
+              const stdout = results.length === 1 && typeof rec.toolUseResult?.stdout === "string" ? rec.toolUseResult.stdout : "";
+              const output = `${resultText(b.content)}\n${stdout}`;
+              // The branch git printed, else the one logged (state.gitBranch is this record's, when it has one).
+              const branch = state.gitBranch ?? null;
+              emitGitEvents(sink, call.vcs, output, { provider: "claude", sessionId, ts, project: state.cwd ?? null, agent, branch, callId: id }, ctx.promptTextLimit);
+            }
           }
           if (texts.some((t) => t.trim().startsWith("[Request interrupted by user"))) {
             sink.outcome?.({ ...outcome, id: `${sessionId}:${rec.uuid ?? ts}:interrupt`, kind: "interrupt" });
           }
         }
         if (sidechain || rec.isMeta || ts == null) continue;
+
+        // The summary a compaction left is no prompt: one stored as a prompt before goes, and its usage moves back to
+        // the prompt it continues. A compaction mid-turn logs its summary under that prompt's own id: then there is
+        // nothing to take back, and the prompt stays.
+        if (rec.isCompactSummary === true) {
+          const summaryId = `${sessionId}:${rec.promptId ?? rec.uuid}`;
+          if (summaryId !== state.promptId) sink.notPrompt?.(summaryId, state.promptId);
+          continue;
+        }
+
         const parsed = parseClaudePrompt(rec.message?.content);
         if (!parsed) continue;
         const isBuiltin = parsed.command !== null && CLAUDE_BUILTIN_COMMANDS.has(parsed.command);
@@ -380,7 +440,10 @@ export const claudeParser: LineParser<ClaudeState> = {
         const toolId = `claude:${block.id ?? `${usageId}:${block.name}`}`;
         const lines = claudeEditLines(block.name, input);
         // Streaming repeats a response's lines: a call seen again is still the one waiting.
-        if (block.id) rememberCall((state.calls ??= {}), toolId, block.name, inputSummary(input, ctx.promptTextLimit));
+        if (block.id) {
+          const vcs = SHELL_TOOLS.has(block.name) ? vcsCall(input.command, ctx.promptTextLimit, block.name === "PowerShell" ? "windows" : "posix") : null;
+          rememberCall((state.calls ??= {}), toolId, block.name, inputSummary(input, ctx.promptTextLimit), vcs);
+        }
         sink.tool({
           id: toolId,
           usageId,

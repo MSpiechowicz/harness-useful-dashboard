@@ -86,6 +86,8 @@ class Store {
   agent = $state("");
   tag = $state("");
   kind = $state("");
+  /** The chart note picked on Trends (its id), shown with its before and after. Not a filter: it is in the address only on Trends. */
+  note = $state("");
   metric = $state<Metric>(load("hd.metric", ["tokens", "cost"] as const, "cost"));
   /** Whether project views list the work done outside any project ("No project"). */
   showNoProject = $state<boolean>(load("hd.showNoProject", ["true", "false"] as const, "true") === "true");
@@ -143,7 +145,7 @@ class Store {
     }
   }
 
-  /** The range and filters as a query string, without defaults. */
+  /** The range, filters and (on Trends) the picked note as a query string, without defaults. */
   query(): string {
     const q = new URLSearchParams();
     if (this.range !== "30d") q.set("range", this.range);
@@ -152,11 +154,13 @@ class Store {
       if (this.customTo) q.set("to", this.customTo);
     }
     for (const k of FILTER_KEYS) if (this[k]) q.set(k, this[k]);
+    if (this.note && this.route.page === "trends") q.set("note", this.note);
     return q.toString();
   }
 
   /** Takes the range and filters from the address. Without a query (an old bookmark, the sign-in redirect), the saved range stays. */
   private applyQuery(q: URLSearchParams): void {
+    this.note = q.get("note") ?? "";
     if (![...q.keys()].length) return;
     const range = q.get("range");
     const from = q.get("from") ?? "";

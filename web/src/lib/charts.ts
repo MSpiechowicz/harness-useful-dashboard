@@ -1,9 +1,10 @@
 import { PROMPT_BANDS, type PromptMetric, type PromptStats } from "../../../src/core/promptStats.ts";
-import type { BreakdownRow, TimeSeries } from "./api.svelte.ts";
+import type { BreakdownRow, Note, TimeSeries } from "./api.svelte.ts";
 import { colorFor, cssVar, isColored, seqRamp } from "./colors.svelte.ts";
 import type { EChartsOption } from "./echarts.ts";
-import { bucketLabel, compact, entityLabel, integer, metricValue, percent, usd } from "./format.ts";
+import { bucketLabel, compact, dateTime, entityLabel, integer, metricValue, percent, shortDate, usd } from "./format.ts";
 import { i18n, t } from "./i18n.svelte.ts";
+import { noteBucketIndex } from "./noteBuckets.ts";
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -23,8 +24,10 @@ export function chrome() {
   const grid = cssVar("--grid");
   const axis = cssVar("--axis");
   const surface = cssVar("--surface");
+  const accent = cssVar("--accent");
+  const accentInk = cssVar("--accent-ink");
   return {
-    ink, ink2, muted, grid, axis, surface,
+    ink, ink2, muted, grid, axis, surface, accent, accentInk,
     data: cssVar("--data"),
     text: { fontFamily: getComputedStyle(document.body).fontFamily, color: ink2, fontSize: 11 },
     tooltip: {
@@ -98,6 +101,137 @@ function foldUncolored(ts: TimeSeries, dim: string): TimeSeries {
   return { ...ts, series: [...keep.filter((s) => s !== other), { key: "__other__", name: "other", data }] };
 }
 
+/** A note placed on a time series: `index` is the bucket it sits in, `when` its date or time as shown in the tooltip. */
+export interface ChartNote {
+  index: number;
+  label: string;
+  id: string;
+  when?: string;
+}
+
+/** The notes that fall in the series' buckets, placed on them. The rest (outside the range, in a gap) are left out. */
+export function chartNotes(buckets: string[], bucket: string, notes: Note[]): ChartNote[] {
+  const placed: ChartNote[] = [];
+  for (const n of notes) {
+    const index = noteBucketIndex(buckets, bucket, n);
+    if (index == null) continue;
+    placed.push({ index, label: n.text, id: n.id, when: n.day ? shortDate(n.day) : dateTime(n.ts) });
+  }
+  return placed.sort((a, b) => a.index - b.index);
+}
+
+/** The longest a note reads on the chart itself, its whole text is in the tooltip and the list. */
+const NOTE_LABEL_MAX = 22;
+
+function shortLabel(text: string, max = NOTE_LABEL_MAX): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** The room above the plot for the notes' pills and the dots under them. */
+const NOTE_GRID_TOP = 34;
+/** The notes' dot radius and the gap between the dot and the pill above it, in CSS pixels. */
+const NOTE_DOT = 3.5;
+const NOTE_GAP = 6;
+/** The width of the invisible strip along a note's rule that answers clicks and hovers. */
+const NOTE_HIT = 10;
+
+/** The pill's horizontal padding and border, around its text, in CSS pixels. */
+const NOTE_PILL_CHROME = 14;
+let pillCanvas: HTMLCanvasElement | undefined;
+/** The width of a note's pill, measured in the font the chart draws it in. */
+function pillWidth(text: string, fontFamily: string): number {
+  const ctx = (pillCanvas ??= document.createElement("canvas")).getContext("2d");
+  if (!ctx) return 0;
+  ctx.font = `500 11px ${fontFamily}`;
+  return ctx.measureText(text).width + NOTE_PILL_CHROME;
+}
+
+type NoteDatum = { value: [number, number]; noteId: string; label: string; first: boolean };
+
+/**
+ * A rule at each note's bucket with a dot at its top end and the note's text in a pill above the dot, drawn by a
+ * custom series of its own so it stays out of the legend (it has no entry there) and the tooltip's rows (the tooltip
+ * ignores it). A custom series draws the line, dot and pill at the same exact x: the rule of a markLine is snapped to
+ * the pixel grid while its symbol is not, so the two never line up. The marks answer clicks (their data carries
+ * `noteId`), unless `inert` (moments that open nothing, such as a session's compactions on its time axis, where `index`
+ * is the time). A `name` other than the default gives them a legend entry that hides them. Two notes at one x share the label of the first. The label is canvas text, which needs no escaping.
+ */
+function noteMarks(notes: ChartNote[], c: ReturnType<typeof chrome>, inert = false, name = "__notes__") {
+  const labelled = new Set<number>();
+  const data: NoteDatum[] = notes.map((n) => {
+    const first = !labelled.has(n.index);
+    labelled.add(n.index);
+    return { value: [n.index, 0], noteId: n.id, label: shortLabel(n.label), first };
+  });
+
+  return {
+    name,
+    type: "custom",
+    data,
+    encode: { x: 0, y: 1 },
+    clip: false,
+    silent: inert,
+    z: 10,
+    cursor: inert ? "default" : "pointer",
+    emphasis: { focus: "none" },
+    renderItem: (
+      params: { dataIndex: number; coordSys: { y: number; height: number } },
+      api: { value: (d: number) => number; coord: (p: number[]) => number[]; getWidth: () => number },
+    ) => {
+      const note = data[params.dataIndex];
+      if (!note) return null;
+
+      const x = api.coord([api.value(0), 0])[0]!;
+      const top = params.coordSys.y;
+      const bottom = top + params.coordSys.height;
+      const children: Record<string, unknown>[] = [
+        // The strip that makes the thin rule easy to hit.
+        { type: "rect", shape: { x: x - NOTE_HIT / 2, y: top, width: NOTE_HIT, height: bottom - top }, style: { fill: "transparent" }, cursor: "pointer" },
+        {
+          type: "line",
+          shape: { x1: x, y1: bottom, x2: x, y2: top },
+          style: { stroke: c.accent, lineWidth: 2, lineCap: "round" },
+          emphasis: { style: { stroke: c.accent, lineWidth: 3 } },
+          cursor: "pointer",
+        },
+        {
+          type: "circle",
+          shape: { cx: x, cy: top, r: NOTE_DOT },
+          style: { fill: c.accent, stroke: c.surface, lineWidth: 1.5 },
+          cursor: "pointer",
+        },
+      ];
+
+      if (note.first) {
+        // Centred over its rule, unless that would cut it at an edge of the chart: then it moves in, still over the dot.
+        const half = pillWidth(note.label, c.text.fontFamily) / 2;
+        const labelX = Math.min(Math.max(x, half + 1), api.getWidth() - half - 1);
+        children.push({
+          type: "text",
+          x: labelX,
+          y: top - NOTE_DOT - NOTE_GAP,
+          style: {
+            text: note.label,
+            fill: c.accentInk,
+            fontSize: 11,
+            fontWeight: 500,
+            backgroundColor: c.surface,
+            borderColor: c.accent,
+            borderWidth: 1,
+            borderRadius: 4,
+            padding: [2, 6],
+            align: "center",
+            verticalAlign: "bottom",
+          },
+          cursor: "pointer",
+        });
+      }
+
+      return { type: "group", children };
+    },
+  };
+}
+
 /** Columns up to 60 buckets; longer ranges are drawn as an area. */
 export function timeSeriesKind(ts: TimeSeries, kind?: "bar" | "area"): "bar" | "area" {
   return kind ?? (ts.buckets.length > 60 ? "area" : "bar");
@@ -122,6 +256,8 @@ export function timeSeriesChart(
     highlight?: string | null;
     /** Legend entries switched off: the average, and in columns any series. */
     hidden?: string[];
+    /** Notes to mark on the chart (see chartNotes), as vertical rules. */
+    notes?: ChartNote[];
   },
 ): EChartsOption {
   const c = chrome();
@@ -154,19 +290,24 @@ export function timeSeriesChart(
   return {
     animationDuration: 300,
     textStyle: c.text,
-    grid: { left: 4, right: 8, top: 12, bottom: 4, containLabel: true },
+    grid: { left: 4, right: 8, top: opts.notes?.length ? NOTE_GRID_TOP : 12, bottom: 4, containLabel: true },
     legend: legendNames.length > 1 ? htmlLegend(legendNames, legendColors, !bar && shown.length > 1 ? hi?.label : undefined) : undefined,
     tooltip: {
       ...c.tooltip,
       trigger: "axis",
       axisPointer: { type: bar ? "shadow" : "line", lineStyle: { color: c.axis }, shadowStyle: { color: "rgba(127,127,127,0.08)" } },
-      formatter: (params: { dataIndex: number }[]) => {
+      formatter: (all: { dataIndex: number; seriesName?: string }[]) => {
+        // The notes' marks are a series of their own, whose data index counts the notes rather than the buckets.
+        const params = all.filter((p) => p.seriesName !== "__notes__");
         const i = params[0]?.dataIndex ?? 0;
         const rows = visible
           .map((x) => ({ color: x.color, name: x.label, raw: x.s.data[i] ?? 0, value: fmt(x.s.data[i] ?? 0) }))
           .filter((r) => r.raw > 0)
           .sort((a, b) => b.raw - a.raw);
-        const notes = showAvg && avg?.[i] != null ? [{ color: c.ink2, name: opts.average!.label, value: fmt(avg[i]!) }] : [];
+        const notes = [
+          ...(showAvg && avg?.[i] != null ? [{ color: c.ink2, name: opts.average!.label, value: fmt(avg[i]!) }] : []),
+          ...(opts.notes ?? []).filter((n) => n.index === i).map((n) => ({ color: c.muted, name: shortLabel(n.label, 80), value: escapeHtml(n.when ?? "") })),
+        ];
         const header = bucketLabel(ts.buckets[i]!, opts.bucket);
         if (!rows.length && !notes.length) return `<div style="font-size:11px;opacity:.7">${escapeHtml(header)}</div><div style="line-height:1.7;opacity:.7">${t("chart.noUsage")}</div>`;
         return tooltipRows(header, rows, rows.length > 1 ? fmt(rows.reduce((a, r) => a + r.raw, 0)) : undefined, notes);
@@ -256,6 +397,7 @@ export function timeSeriesChart(
             },
           ]
         : []),
+      ...(opts.notes?.length ? [noteMarks(opts.notes, c)] : []),
     ],
   };
 }
@@ -570,7 +712,6 @@ export function cumulativeChart(ts: TimeSeries, opts: { dim: string; metric: "to
       return { label, name: `${label} · ${fmt(finals[i]!)}`, color: colorFor(opts.dim, ts.series[i]!.key), run: runs[i]!, final: finals[i]! };
     });
   const labelEvery = opts.bucket === "day" && ts.buckets.length > 14 ? 6 : "auto";
-  const total = ts.buckets.map((_, i) => shown.reduce((a, x) => a + (x.run[i] ?? 0), 0));
 
   return {
     animationDuration: 700,
@@ -609,15 +750,13 @@ export function cumulativeChart(ts: TimeSeries, opts: { dim: string; metric: "to
       smooth: 0.3,
       smoothMonotone: "x",
       showSymbol: false,
-      lineStyle: { width: 0 },
+      // Each band's top edge in its own color, so the stack reads clearly without a separate total line.
+      lineStyle: { width: 1.5, color: x.color },
       areaStyle: {
-        color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(x.color, 0.85) }, { offset: 1, color: withAlpha(x.color, 0.25) }] },
+        color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: withAlpha(x.color, 0.9) }, { offset: 1, color: withAlpha(x.color, 0.4) }] },
       },
       emphasis: { focus: "series" },
       })),
-      ...(shown.length > 1
-        ? [{ name: t("common.total"), type: "line", data: total, color: c.ink2, smooth: 0.3, smoothMonotone: "x", showSymbol: false, lineStyle: { width: 1.5 }, emphasis: { disabled: true }, z: 5 }]
-        : []),
     ],
   };
 }
@@ -851,9 +990,10 @@ export function intervalBars(
  * The context each call sent (cache read, cache write and fresh input together), over time, one line per agent. Each
  * line joins only its own agent's calls, so agents working side by side never cut into each other. The session's own
  * agent has a soft fill; up to four subagents wear their agent colours and names, more share one muted entry. Prompt
- * starts, when there are several prompts, are thin numbered rules.
+ * starts, when there are several prompts, are thin numbered rules. `marks` are moments of the session, such as a
+ * compaction, drawn like the notes on Trends: a rule with a dot and its label in a pill above the plot.
  */
-export function contextByAgent(rows: CallRow[]): EChartsOption {
+export function contextByAgent(rows: CallRow[], opts: { marks?: { ts: number; label: string }[]; marksName?: string } = {}): EChartsOption {
   const c = chrome();
   // The main agent where it worked, else (a subagent's own page) the agent of the calls.
   const own = rows.some((r) => (r.agent ?? "main") === "main") ? "main" : (rows[0]?.agent ?? "main");
@@ -896,19 +1036,30 @@ export function contextByAgent(rows: CallRow[]): EChartsOption {
     line(runs.get(own)?.pts ?? [], own === "main" ? t("timeline.mainAgent") : own, ownColor, true),
     ...sub.map((r) => (named.length ? line(r.pts, r.agent, colorFor("agent", r.agent), false) : line(r.pts, otherName, c.muted, false))),
   ];
-  const legendNames = [series[0]!.name as string, ...(named.length ? named : subs.length ? [otherName] : [])];
-  const legendColors = [ownColor, ...(named.length ? named.map((a) => colorFor("agent", a)) : subs.length ? [c.muted] : [])];
+  // Marks outside the calls' time span would stretch the axis, so they are left out.
+  const first = rows[0]?.ts ?? 0;
+  const last = rows[rows.length - 1]?.ts ?? 0;
+  const marks = (opts.marks ?? []).filter((m) => m.ts >= first && m.ts <= last);
+  // The marks have a legend entry of their own, which hides them (the label of a late one can cover the line's end).
+  const marksName = opts.marksName ?? "__notes__";
+  if (marks.length) series.push(noteMarks(marks.map((m, i) => ({ index: m.ts, label: m.label, id: String(i) })), c, true, marksName));
+  const withMarks = marks.length && opts.marksName ? [opts.marksName] : [];
+  const legendNames = [series[0]!.name as string, ...(named.length ? named : subs.length ? [otherName] : []), ...withMarks];
+  const legendColors = [ownColor, ...(named.length ? named.map((a) => colorFor("agent", a)) : subs.length ? [c.muted] : []), ...withMarks.map(() => c.accent)];
   return {
     animationDuration: 300,
     textStyle: c.text,
-    grid: { left: 8, right: 16, top: 12, bottom: 4, containLabel: true },
+    grid: { left: 8, right: 16, top: marks.length ? NOTE_GRID_TOP : 12, bottom: 4, containLabel: true },
     legend: legendNames.length > 1 ? htmlLegend(legendNames, legendColors) : undefined,
     tooltip: {
       ...c.tooltip,
       trigger: "axis",
       axisPointer: { type: "line", lineStyle: { color: c.axis } },
-      formatter: (params: { seriesName: string; color: string; value: [number, number]; axisValue: number }[]) =>
-        tooltipRows(when.format(params[0]?.axisValue ?? 0), params.map((p) => ({ color: p.color, name: p.seriesName, value: compact(p.value[1]) }))),
+      formatter: (all: { seriesName: string; color: string; value: [number, number]; axisValue: number }[]) => {
+        // The marks are a series of their own, with no value to show.
+        const params = all.filter((p) => p.seriesName !== marksName);
+        return tooltipRows(when.format(all[0]?.axisValue ?? 0), params.map((p) => ({ color: p.color, name: p.seriesName, value: compact(p.value[1]) })));
+      },
     },
     xAxis: { type: "time", axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel, splitLine: { show: false } },
     yAxis: { type: "value", splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
@@ -919,8 +1070,8 @@ export function contextByAgent(rows: CallRow[]): EChartsOption {
 /**
  * A session's prompts as dots: across, the prompt's number in the session, up, the context it added (what its main
  * agent's last call sent, less what the prompt before it ended with), and the bigger the dot, the more model calls it
- * made. A compaction would drop far below the rest and flatten them, so it is a hollow ring at the foot of the chart
- * instead, its real drop in the tooltip. Idle time between prompts takes no room.
+ * made. A prompt whose context shrank (after a compaction) is a hollow ring on the zero line, never below it: context
+ * can't be negative, and the drop is in its tooltip. Idle time between prompts takes no room.
  */
 export function contextPerPrompt(rows: (CallRow & { promptId?: string | null })[], prompts: { id: string; n: number; text: string | null }[]): EChartsOption {
   const c = chrome();
@@ -948,11 +1099,6 @@ export function contextPerPrompt(rows: (CallRow & { promptId?: string | null })[
   const most = Math.max(1, ...points.map((p) => p.calls));
   // The accent: the charts above already use green (main agent, cache reads), cyan, purple and gray.
   const color = cssVar("--accent");
-  const rise = Math.max(1, ...points.map((p) => p.added));
-  const floor = Math.min(0, ...points.map((p) => p.added));
-  // Drops deeper than a third of the biggest rise sit at that depth, as rings.
-  const deepest = Math.max(floor, -rise / 3);
-  const shown = (p: { added: number }) => Math.max(p.added, deepest);
   const excerpt = (text: string | null) => {
     const one = (text ?? t("prompts.noText")).replace(/\s+/g, " ").trim();
     return one.length > 90 ? `${one.slice(0, 89)}…` : one;
@@ -971,7 +1117,9 @@ export function contextPerPrompt(rows: (CallRow & { promptId?: string | null })[
           tooltipRows(`${t("timeline.promptN", { n: p.n })} · ${t("common.callsN", { n: p.calls })}`, []) +
           note +
           tooltipRows("", [
-            { color, name: t("timeline.added"), value: `${p.added >= 0 ? "+" : "−"}${compact(Math.abs(p.added))}` },
+            p.added < 0
+              ? { color, name: t("timeline.shrank"), value: `−${compact(-p.added)}` }
+              : { color, name: t("timeline.added"), value: `+${compact(p.added)}` },
             { color: c.muted, name: t("timeline.ended"), value: compact(p.end) },
           ]).replace(/^<div[^>]*><\/div>/, "")
         );
@@ -982,19 +1130,21 @@ export function contextPerPrompt(rows: (CallRow & { promptId?: string | null })[
       min: 0.5,
       max: (prompts[prompts.length - 1]?.n ?? 1) + 0.5,
       minInterval: 1,
-      axisLine: c.axisLine,
+      // Two value axes: each would otherwise draw its line where the other is zero, the left one dark and the
+      // bottom one under the zero grid line. As in the other charts, only the bottom one shows, at the foot.
+      axisLine: { ...c.axisLine, onZero: false },
       axisTick: { show: false },
       splitLine: { show: false },
       axisLabel: { ...c.axisLabel, formatter: (v: number) => (Number.isInteger(v) ? String(v) : "") },
     },
-    yAxis: { type: "value", min: deepest < 0 ? deepest : undefined, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
+    yAxis: { type: "value", min: 0, axisLine: { show: false }, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
     series: [
       {
         type: "scatter",
         data: points.map((p) => ({
-          value: [p.n, shown(p)],
+          value: [p.n, Math.max(0, p.added)],
           name: p.id,
-          ...(p.added < deepest ? { itemStyle: { color: "transparent", borderColor: color, borderWidth: 1.5 } } : {}),
+          ...(p.added < 0 ? { itemStyle: { color: "transparent", borderColor: color, borderWidth: 1.5 } } : {}),
         })),
         symbolSize: (_: unknown, params: { dataIndex: number }) => 6 + 16 * Math.sqrt((points[params.dataIndex]?.calls ?? 0) / most),
         itemStyle: { color: withAlpha(color, 0.75), borderColor: color, borderWidth: 1 },
@@ -1279,14 +1429,15 @@ export function apiErrorChart(
     },
     xAxis: { type: "category", data: labels, axisLine: c.axisLine, axisTick: { show: false }, axisLabel: c.axisLabel },
     yAxis: { type: "value", minInterval: 1, splitNumber: 4, splitLine: c.splitLine, axisLabel: { ...c.axisLabel, formatter: (v: number) => compact(v) } },
-    series: series.map((s) => ({
+    // One solid column a day: the causes touch, and only the top one of each day has rounded corners.
+    series: series.map((s, j) => ({
       name: name(s.key),
       type: "bar",
       stack: "apiErrors",
-      data: s.data.map((v) => v || null),
+      data: s.data.map((v, i) => (v ? { value: v, itemStyle: { borderRadius: series.slice(j + 1).some((o) => o.data[i]) ? 0 : [2, 2, 0, 0] } } : null)),
       color: color(s.key),
       barMaxWidth: BAR_WIDTH,
-      itemStyle: { borderColor: c.surface, borderWidth: 1, borderRadius: 2 },
+      barCategoryGap: "35%",
     })),
   };
 }
@@ -1378,6 +1529,181 @@ export function limitHistoryChart(o: { name: string; color: string; points: [num
       ...(o.outs.length
         ? [{ name: "out", type: "scatter", data: o.outs, symbolSize: 9, color: critical, itemStyle: { borderColor: c.surface, borderWidth: 2 }, tooltip: { show: false }, z: 5 }]
         : []),
+    ],
+  };
+}
+
+/** One metric of the before and after comparison: how it changed, whether that is good, and what it was and became. */
+export interface NoteChangeRow {
+  label: string;
+  before: number | null;
+  after: number | null;
+  /** The change as a fraction (0.2 is +20%), null when there is nothing to compare with. */
+  change: number | null;
+  tone: "good" | "bad" | "neutral";
+  /** The two values as shown, such as "$1,061" and "$1,273". */
+  beforeText: string;
+  afterText: string;
+}
+
+/** The height of a metric's row in the before and after chart, and the room around the rows for the axes. */
+export const NOTE_CHANGE_ROW = 32;
+export const NOTE_CHANGE_PAD = 36;
+
+/** The widths the scale can take, in percent: a power of ten times one of these, each halving into whole ticks. */
+const NOTE_SCALE_STEPS = [1, 2, 4, 5, 8];
+
+/** The least symmetric scale (as a fraction, never under 10%) that holds `reach` with a whole-number tick at each half. */
+function noteScale(reach: number): number {
+  const percentReach = Math.max(10, reach * 100);
+  for (let power = 10; ; power *= 10) {
+    for (const step of NOTE_SCALE_STEPS) {
+      if (step * power >= percentReach) return (step * power) / 100;
+    }
+  }
+}
+
+function signedPercent(change: number): string {
+  return `${change > 0 ? "+" : ""}${percent(change, Math.abs(change) < 0.1 ? 1 : 0)}`;
+}
+
+function axisPercent(v: number): string {
+  if (v === 0) return "0";
+
+  const whole = Number.isInteger(Math.round(v * 1e6) / 1e4);
+  return `${v > 0 ? "+" : ""}${percent(v, whole ? 0 : 1)}`;
+}
+
+/** The pixels a label takes, estimated from its length: this is only for lining columns up. */
+const textWidth = (texts: string[], px = 7) => Math.max(0, ...texts.map((x) => x.length)) * px;
+
+/** The arrow between a row's before and after values: its width, and the height shared with the values' line. */
+const NOTE_ARROW_WIDTH = 16;
+const NOTE_ARROW_HEIGHT = 16;
+
+/**
+ * A right arrow drawn as an image, the size of its box and with its shaft on the box's vertical middle. A text arrow
+ * sits low next to digits, because a font draws it around the middle of its em box and not of its figures.
+ */
+function noteArrowImage(color: string): string {
+  const w = NOTE_ARROW_WIDTH;
+  const h = NOTE_ARROW_HEIGHT;
+  const mid = h / 2;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<path d="M4.5 ${mid}H11.5M9.5 ${mid - 2}L11.5 ${mid}L9.5 ${mid + 2}" fill="none" stroke="${color}" ` +
+    `stroke-opacity="0.6" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * How each metric changed from before a note to after it: bars that grow right for a rise and left for a fall from a
+ * zero line, colored by whether the change is good, bad or neither. Each row's values read to the right of the plot in
+ * columns, with the arrows in line. The scale is symmetric and reaches the biggest change with room for its label.
+ */
+export function noteChangeChart(rows: NoteChangeRow[]): EChartsOption {
+  const c = chrome();
+  const tones = { good: cssVar("--good-ink"), bad: cssVar("--bad-ink"), neutral: c.muted };
+  const labels = rows.map((r) => r.label);
+  const scale = noteScale(Math.max(0, ...rows.map((r) => Math.abs(r.change ?? 0))) * 1.1);
+
+  // The right column: the values before and after, with the arrows between, each in a column as wide as its widest.
+  const arrow = NOTE_ARROW_WIDTH;
+  const beforeWidth = textWidth(rows.map((r) => r.beforeText));
+  const afterWidth = textWidth(rows.map((r) => r.afterText));
+
+  return {
+    animationDuration: 300,
+    textStyle: c.text,
+    grid: { left: 8, right: 12, top: 8, bottom: 4, containLabel: true },
+    tooltip: {
+      ...c.tooltip,
+      trigger: "axis",
+      axisPointer: { type: "shadow", shadowStyle: { color: "rgba(127,127,127,0.08)" } },
+      formatter: (params: { dataIndex: number }[]) => {
+        const r = rows[params[0]?.dataIndex ?? 0];
+        if (!r) return "";
+
+        const change = r.change == null ? "–" : signedPercent(r.change);
+        return tooltipRows(r.label, [{ color: tones[r.tone], name: `${r.beforeText} → ${r.afterText}`, value: change }]);
+      },
+    },
+    xAxis: {
+      type: "value",
+      min: -scale,
+      max: scale,
+      interval: scale / 2,
+      splitLine: c.splitLine,
+      axisLabel: { ...c.axisLabel, formatter: axisPercent },
+    },
+    yAxis: [
+      {
+        type: "category",
+        data: labels,
+        inverse: true,
+        axisLine: { show: false, onZero: false },
+        axisTick: { show: false },
+        axisLabel: { color: c.ink, fontSize: 12, margin: 12 },
+      },
+      {
+        type: "category",
+        data: rows.map((r) => r.label),
+        inverse: true,
+        position: "right",
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          margin: 12,
+          fontSize: 12,
+          formatter: (_: string, i: number) => {
+            const r = rows[i];
+            return r ? `{b|${r.beforeText}}{a|}{c|${r.afterText}}` : "";
+          },
+          // All three share one line height and sit on its middle, so the drawn arrow is level with the values.
+          rich: {
+            b: { width: beforeWidth, align: "right", verticalAlign: "middle", lineHeight: NOTE_ARROW_HEIGHT, color: c.muted, fontSize: 12 },
+            a: {
+              width: arrow,
+              height: NOTE_ARROW_HEIGHT,
+              lineHeight: NOTE_ARROW_HEIGHT,
+              align: "center",
+              verticalAlign: "middle",
+              backgroundColor: { image: noteArrowImage(c.muted) },
+            },
+            c: { width: afterWidth, align: "left", verticalAlign: "middle", lineHeight: NOTE_ARROW_HEIGHT, color: c.ink, fontSize: 12, fontWeight: 500 },
+          },
+        },
+      },
+    ],
+    series: [
+      {
+        type: "bar",
+        // A row with nothing to compare with has no bar: a zero one draws nothing and keeps the row in the tooltip.
+        data: rows.map((r) => ({
+          value: r.change ?? 0,
+          itemStyle: { color: tones[r.tone], borderRadius: (r.change ?? 0) < 0 ? [3, 0, 0, 3] : [0, 3, 3, 0] },
+          label: {
+            show: r.change != null,
+            position: (r.change ?? 0) < 0 ? "left" : "right",
+            formatter: () => (r.change == null ? "" : signedPercent(r.change)),
+          },
+        })),
+        barMaxWidth: 14,
+        // Each row's track, so it reads across from its label to its values.
+        showBackground: true,
+        backgroundStyle: { color: cssVar("--surface-2"), borderRadius: 3 },
+        label: { show: true, color: c.ink2, fontSize: 11, fontWeight: 500, distance: 6 },
+        markLine: {
+          silent: true,
+          symbol: "none",
+          animation: false,
+          label: { show: false },
+          lineStyle: { color: c.ink2, width: 1, type: "solid" },
+          data: [{ xAxis: 0 }],
+        },
+        z: 3,
+      },
     ],
   };
 }

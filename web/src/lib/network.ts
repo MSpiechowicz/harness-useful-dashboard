@@ -62,7 +62,9 @@ export function settle(
 ): void {
   const pad = 24;
   const left = pad;
-  const right = Math.max(left + 100, width - 130);
+  // Room on the right for the names of the points nearest the edge: less of it on a narrow card, so the points
+  // themselves keep most of the width.
+  const right = Math.max(left + 100, width - Math.min(130, width * 0.15));
   const top = pad;
   const bottom = Math.max(top + 100, height - pad);
   const cx = (left + right) / 2;
@@ -74,7 +76,10 @@ export function settle(
     p.y = cy + Math.sin(a) * (bottom - top) * 0.35;
   });
   const at = new Map(points.map((p) => [p.id, p]));
-  const rest = Math.min(right - left, (bottom - top) * 2) / 4;
+  // The distance points settle at: a quarter of the box, but at least the room each point has when the box is
+  // shared out evenly, so a narrow card with many points spreads them over all of it instead of a knot in the middle.
+  const share = Math.sqrt(((right - left) * (bottom - top)) / Math.max(1, points.length)) * 0.75;
+  const rest = Math.max(Math.min(right - left, (bottom - top) * 2) / 4, share);
   const STEPS = 400;
   for (let step = 0; step < STEPS; step++) {
     const cool = 1 - step / STEPS;

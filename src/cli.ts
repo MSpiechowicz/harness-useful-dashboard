@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { configPath, ensureAppDataDir } from "./core/paths.ts";
 import { configKeyPatch, loadConfig, resolveDbPath, updateConfig } from "./core/config.ts";
-import { openDb } from "./core/db.ts";
+import { NewerSchemaError, openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
 import { fallbackLine, gather, parseInput, render, useColor } from "./core/statusline.ts";
 import { REPORT_COMMANDS, type ReportCommand, runReport } from "./core/reportCli.ts";
@@ -68,6 +68,14 @@ Report options (today, report, limits):
   --warn <pct>      limits: the warning threshold for limits and budgets (default 80)
   Numbers are as fresh as the last scan. Exit code 2 means bad options or no database.
 `;
+
+/** What a command that would write the database says when a newer app migrated it, and one that would read it too. */
+const NEWER_DATABASE = "This database was upgraded by a newer version of Harness Dashboard. Update the app.";
+
+/** An error as the terminal shows it: a newer database gets a plain instruction instead of schema numbers. */
+function errorText(err: unknown): string {
+  return err instanceof NewerSchemaError ? NEWER_DATABASE : (err as Error).message;
+}
 
 interface Args {
   cmd: string;
@@ -151,6 +159,7 @@ async function serve(args: Args): Promise<void> {
   const url = `http://localhost:${server.port}`;
   console.log(`${BIN_NAME} ${VERSION}`);
   console.log(`  database: ${app.dbPath}`);
+  if (app.readOnly) console.log(`  read-only: ${NEWER_DATABASE}`);
   console.log(`  listening: ${url}`);
   // Without a window to open, this is how to get in: the API only answers a browser that came through this link.
   if (openMode === "none") console.log(`  open: ${signInUrl(url, token)}`);
@@ -247,7 +256,7 @@ async function report(cmd: ReportCommand, args: Args, dbFlag: string | undefined
     process.stdout.write(out);
     process.exitCode = code;
   } catch (err) {
-    console.error(`error: ${(err as Error).message}`);
+    console.error(`error: ${errorText(err)}`);
     process.exitCode = err instanceof InputError ? 2 : 1;
   }
 }
@@ -263,7 +272,7 @@ function digest(args: Args, dbFlag: string | undefined): void {
     if (wrote) console.error(`Wrote ${wrote}`);
     else process.stdout.write(out);
   } catch (err) {
-    console.error(`error: ${(err as Error).message}`);
+    console.error(`error: ${errorText(err)}`);
     process.exitCode = err instanceof InputError ? 2 : 1;
   }
 }
@@ -360,7 +369,7 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((err) => {
-    console.error(`error: ${(err as Error).message}`);
+    console.error(`error: ${errorText(err)}`);
     process.exit(1);
   });
 }

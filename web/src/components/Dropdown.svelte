@@ -6,6 +6,8 @@
   interface Option {
     value: V;
     label: string;
+    /** What the trigger shows for this option, when shorter than its place in the list. */
+    short?: string;
   }
   interface Props {
     value: V;
@@ -27,8 +29,10 @@
     up?: boolean;
     /** With `prefix`, an empty value (no filter) shows just the label, not "Label: All": it fits in every language. */
     labelWhenEmpty?: boolean;
+    /** With `prefix` and `labelWhenEmpty`, a chosen value shows alone, without the label before it. */
+    bareValue?: boolean;
   }
-  let { value = $bindable(), options, label, prefix = false, active = false, searchAt = 9, class: cls = "", onchange, stretch = false, full = false, up = false, labelWhenEmpty = false }: Props = $props();
+  let { value = $bindable(), options, label, prefix = false, active = false, searchAt = 9, class: cls = "", onchange, stretch = false, full = false, up = false, labelWhenEmpty = false, bareValue = false }: Props = $props();
 
   let open = $state(false);
   let query = $state("");
@@ -159,18 +163,18 @@
     <span class="min-w-0 truncate">
       {#if prefix && labelWhenEmpty && value === ""}<span class="text-ink-2">{label}</span>
       {:else}
-      {#if prefix}<span class="text-muted">{label}:</span>{/if}
+      {#if prefix && !(bareValue && labelWhenEmpty)}<span class="text-muted">{label}:</span>{/if}
       {#if !searchable && !stretch && selected}
         <!-- Short lists stack every option in one cell, only the chosen one visible: the button keeps the widest
              option's width, so picking another never shifts the controls beside it. Long lists and stretched
              dropdowns get their width from the layout instead. -->
         <span class="inline-grid align-bottom">
           {#each options as o (o.value)}
-            <span class="[grid-area:1/1] text-left {o.value !== value ? 'invisible' : active ? 'text-accent-ink' : ''}" aria-hidden={o.value !== value}>{o.label}</span>
+            <span class="[grid-area:1/1] text-left {o.value !== value ? 'invisible' : active ? 'text-accent-ink' : ''}" aria-hidden={o.value !== value}>{o.short ?? o.label}</span>
           {/each}
         </span>
       {:else}
-        <span class={active ? "text-accent-ink" : ""}>{selected?.label ?? value}</span>
+        <span class={active ? "text-accent-ink" : ""}>{selected?.short ?? selected?.label ?? value}</span>
       {/if}
       {/if}
     </span>

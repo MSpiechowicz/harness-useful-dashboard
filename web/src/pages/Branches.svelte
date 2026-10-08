@@ -33,7 +33,14 @@
     added: number;
     removed: number;
     costPer100: number | null;
+    // Newer servers only: commits and pull requests found in the sessions of the branch.
+    commits?: number;
+    prs?: number;
+    costPerCommit?: number | null;
+    costPerPr?: number | null;
   }
+  /** A row with the git figures settled, so an older server's rows read as no commits. */
+  type Row = BranchRow & { commits: number; prs: number; costPerCommit: number | null; costPerPr: number | null };
   interface BranchesData {
     total: { cost: number; tokens: number };
     rows: BranchRow[];
@@ -60,7 +67,11 @@
 
   const NONE = "(none)";
   const isWork = (r: BranchRow) => !r.longLived && r.branch !== NONE;
-  const rows = $derived((d.data?.rows ?? []).filter((r) => scope === "all" || isWork(r)));
+  const rows = $derived<Row[]>(
+    (d.data?.rows ?? [])
+      .map((r) => ({ ...r, commits: r.commits ?? 0, prs: r.prs ?? 0, costPerCommit: r.costPerCommit ?? null, costPerPr: r.costPerPr ?? null }))
+      .filter((r) => scope === "all" || isWork(r)),
+  );
   const shownCost = $derived(rows.reduce((a, r) => a + r.cost, 0));
   const median = $derived.by(() => {
     const costs = rows.map((r) => r.cost).sort((a, b) => a - b);
@@ -100,7 +111,7 @@
   const maxSize = $derived(Math.max(1, ...sizes.map((x) => x.n)));
   const branchName = (r: { branch: string }) => (r.branch === NONE ? t("branches.noBranch") : r.branch);
 
-  type Sort = "cost" | "tokens" | "sessions" | "days" | "lines" | "per100" | "recent" | "branch";
+  type Sort = "cost" | "tokens" | "sessions" | "days" | "lines" | "per100" | "commits" | "prs" | "perCommit" | "recent" | "branch";
   let sort = $state<Sort>("cost");
   let asc = $state(false);
   const SORTS = $derived<{ value: Sort; label: string; asc?: boolean }[]>([
@@ -110,14 +121,23 @@
     { value: "days", label: t("branches.days") },
     { value: "lines", label: t("col.lines") },
     { value: "per100", label: t("col.per100"), asc: true },
+    { value: "commits", label: t("col.commits") },
+    { value: "prs", label: t("col.prs") },
+    { value: "perCommit", label: t("col.perCommit"), asc: true },
     { value: "recent", label: t("sort.recent") },
     { value: "branch", label: t("col.branch"), asc: true },
   ]);
   const sorted = $derived.by(() => {
     const dir = asc ? 1 : -1;
-    // A branch without lines has no cost per line: it sorts last either way.
-    const value = (r: BranchRow) =>
-      sort === "recent" ? r.lastTs : sort === "branch" ? r.branch : sort === "lines" ? r.added + r.removed : sort === "per100" ? (r.costPer100 ?? (asc ? Infinity : -Infinity)) : r[sort];
+    // A branch without lines has no cost per line, and one without commits no cost per commit: they sort last either way.
+    const missing = asc ? Infinity : -Infinity;
+    const value = (r: Row) =>
+      sort === "recent" ? r.lastTs
+      : sort === "branch" ? r.branch
+      : sort === "lines" ? r.added + r.removed
+      : sort === "per100" ? (r.costPer100 ?? missing)
+      : sort === "perCommit" ? (r.costPerCommit ?? missing)
+      : r[sort];
     return [...rows].sort((a, b) => {
       const x = value(a);
       const y = value(b);
@@ -128,7 +148,7 @@
     if (sort === k) asc = !asc;
     else {
       sort = k;
-      asc = k === "branch" || k === "per100";
+      asc = k === "branch" || k === "per100" || k === "perCommit";
     }
   }
   const dir = (k: Sort) => (sort === k ? (asc ? "ascending" : "descending") : undefined);
@@ -199,7 +219,7 @@
 
       <TableCard title={t("branches.all")} subtitle={t("branches.allHint")} rows={sorted} searchText={(r) => `${r.branch} ${r.projectLabel}`} sorts={SORTS} bind:sortKey={sort} bind:asc exportName="branches">
         {#snippet children(view)}
-          <table class="data fixed-cols" use:resizableColumns={"branches"}>
+          <table class="data fixed-cols" use:resizableColumns={"branches-v2"}>
             <colgroup>
               <col />
               <col class="w-44" />
@@ -208,6 +228,9 @@
               <col class="w-24" />
               <col class="w-28" />
               <col class="w-28" />
+              <col class="w-24" />
+              <col class="w-20" />
+              <col class="w-32" />
               <col class="w-44" />
               <col class="w-28" />
             </colgroup>
@@ -220,6 +243,9 @@
                 <SortTh num label={t("col.tokens")} sort={dir("tokens")} onclick={() => sortBy("tokens")} />
                 <SortTh num label={t("col.lines")} sort={dir("lines")} onclick={() => sortBy("lines")} />
                 <SortTh num label={t("col.per100")} sort={dir("per100")} onclick={() => sortBy("per100")} />
+                <SortTh num label={t("col.commits")} sort={dir("commits")} onclick={() => sortBy("commits")} />
+                <SortTh num label={t("col.prs")} sort={dir("prs")} onclick={() => sortBy("prs")} />
+                <SortTh num label={t("col.perCommit")} sort={dir("perCommit")} onclick={() => sortBy("perCommit")} />
                 <SortTh num label={t("col.cost")} sort={dir("cost")} onclick={() => sortBy("cost")} />
                 <SortTh num label={t("col.lastSeen")} sort={dir("recent")} onclick={() => sortBy("recent")} />
               </tr>
@@ -239,6 +265,9 @@
                   <td class="num text-ink-2">{compact(r.tokens)}</td>
                   <td class="num text-ink-2" title={t("lines.addedRemoved", { added: integer(r.added), removed: integer(r.removed) })}>{r.added + r.removed ? compact(r.added + r.removed) : "–"}</td>
                   <td class="num text-ink-2">{r.costPer100 != null ? usd(r.costPer100) : "–"}</td>
+                  <td class="num text-ink-2">{r.commits ? integer(r.commits) : "–"}</td>
+                  <td class="num text-ink-2">{r.prs ? integer(r.prs) : "–"}</td>
+                  <td class="num text-ink-2" title={r.costPerPr != null ? t("branches.perPr", { cost: usd(r.costPerPr) }) : undefined}>{r.costPerCommit != null ? usd(r.costPerCommit) : "–"}</td>
                   <td class="num"><ValueBar label={usd(r.cost)} fraction={r.cost / maxTop} /></td>
                   <td class="num text-ink-2">{relative(r.lastTs)}</td>
                 </tr>

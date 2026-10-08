@@ -2,10 +2,13 @@ import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
 import { patchLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
+import { emitGitEvents, vcsCall } from "./vcs.ts";
 
 interface CodexState {
   threadId: string | null;
   cwd: string | null;
+  /** The branch the session started on (session_meta), for a commit whose output doesn't name one. */
+  branch?: string | null;
   model: string | null;
   agent: string | null;
   parentId: string | null;
@@ -127,6 +130,7 @@ export const codexParser: LineParser<CodexState> = {
         if (state.threadId) continue;
         state.threadId = p.id ?? p.session_id ?? null;
         state.cwd = p.cwd ?? state.cwd;
+        state.branch = typeof p.git?.branch === "string" ? p.git.branch : null;
         const sub = agentFromSource(p.source);
         state.agent = sub.agent;
         state.parentId = sub.parentId ?? (sub.agent ? p.parent_thread_id ?? null : null);
@@ -248,6 +252,15 @@ export const codexParser: LineParser<CodexState> = {
         }
 
         const outcome = { provider: "codex" as const, sessionId, ts: ts ?? Date.now(), project: state.cwd, model: state.model, agent, effort: state.effort ?? null };
+        // A shell command that worked and commits or opens a PR: what its output says came of it.
+        const shellGit = (x: Record<string, any>, callId: string) => {
+          const vcs = vcsCall(x.command ?? commandOf(x), ctx.promptTextLimit);
+          if (!vcs) return;
+          const output = [x.aggregated_output, x.stdout, x.formatted_output].find((v) => typeof v === "string" && v);
+          const call = { provider: "codex" as const, sessionId, ts: outcome.ts, project: state.cwd, agent, branch: state.branch ?? null, callId: `${sessionId}:${callId}` };
+          emitGitEvents(sink, vcs, output, call, ctx.promptTextLimit);
+        };
+
         if (p.type === "item_completed" && TOOL_ITEMS.has(p.item?.type)) {
           state.itemOutcomes = true;
           const kind = ITEM_OUTCOME[p.item.status];
@@ -260,6 +273,10 @@ export const codexParser: LineParser<CodexState> = {
               tool: call.tool,
               ...failureOf(kind, call.tool, call.error, call.input, ctx.promptTextLimit),
             });
+          }
+          const exitCode = p.item.exit_code;
+          if (kind === "tool_ok" && p.item.type === "CommandExecution" && (exitCode == null || exitCode === 0)) {
+            shellGit(p.item, p.item.id ?? `o${offset}`);
           }
           continue;
         }
@@ -276,6 +293,7 @@ export const codexParser: LineParser<CodexState> = {
             tool: call.tool,
             ...failureOf(kind, call.tool, call.error, call.input, ctx.promptTextLimit),
           });
+          if (!failed && p.type === "exec_command_end") shellGit(p, p.call_id ?? `o${offset}`);
           continue;
         }
         // A failed model request: "error" ends the turn, "stream_error" is an attempt Codex retries ("Reconnecting… 2/5").

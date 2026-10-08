@@ -8,6 +8,7 @@
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
   import ThemeToggle from "./components/ThemeToggle.svelte";
+  import ReadOnlyBanner from "./components/ReadOnlyBanner.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
   import { time } from "./lib/format.ts";
   import { i18n, t, type MessageKey } from "./lib/i18n.svelte.ts";
@@ -359,6 +360,7 @@
 
   <!-- Main -->
   <div class="flex min-w-0 flex-1 flex-col">
+    <ReadOnlyBanner />
     <!-- On every page, so content starts at the same height. Where the filters don't apply it is an empty row. -->
     <header class="sticky top-0 z-20 border-b border-line bg-page/85 backdrop-blur">
       <!-- Top-aligned: when the filters wrap onto more lines, the menu button stays level with the first one. -->

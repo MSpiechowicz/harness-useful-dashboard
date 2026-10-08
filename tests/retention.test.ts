@@ -10,6 +10,7 @@ import { DbWriter } from "../src/core/ingest/writer.ts";
 import { PriceBook } from "../src/core/pricing.ts";
 import { Queries, sessionTitle } from "../src/core/queries.ts";
 import { compact, dbSize, detailCutoff, trimDetail, trimDue } from "../src/core/retention.ts";
+import { rollupDue } from "../src/core/rollup.ts";
 import { App } from "../src/server/app.ts";
 import { createHandler } from "../src/server/http.ts";
 import { memDb, tempDir } from "./helpers.ts";
@@ -105,6 +106,24 @@ describe("detail retention", () => {
     }
     // The session keeps its title from the first prompt.
     expect(col(db, `SELECT ${sessionTitle("s")} AS title FROM sessions s WHERE s.id = 'claude:old'`)).toEqual([{ title: `first ${LONG}`.slice(0, 160) }]);
+  });
+
+  test("commit subjects of this host older than the cutoff go, the commits stay", async () => {
+    const { db, prices } = seed();
+    const commit = (w: DbWriter, sha: string, ts: number) =>
+      w.gitEvent({ kind: "commit", provider: "claude", sessionId: "claude:old", ts, project: "/work/alpha", agent: "main", branch: "feat", callId: null, sha, subject: `Subject ${sha}` });
+    const me = new DbWriter(db, prices, ME);
+    commit(me, "aaaaaaa", OLD);
+    commit(me, "bbbbbbb", NEW);
+    commit(new DbWriter(db, prices, OTHER), "ccccccc", OLD);
+
+    const r = await trimDetail(db, ME.host, 3, { now: NOW });
+    expect(r.gitEvents).toBe(1);
+    expect(col(db, "SELECT sha, subject FROM git_events ORDER BY sha")).toEqual([
+      { sha: "aaaaaaa", subject: null },
+      { sha: "bbbbbbb", subject: "Subject bbbbbbb" },
+      { sha: "ccccccc", subject: "Subject ccccccc" },
+    ]);
   });
 
   test("is idempotent and runs once a day per setting", async () => {
@@ -226,6 +245,21 @@ describe("compact route", () => {
     expect(await ok.json()).toMatchObject({ freeBytes: 0, incremental: true });
     const size = await req("/api/db/size", { cookie: `hd_auth_4317=${token}` }, "GET");
     expect(((await size.json()) as { bytes: number }).bytes).toBeGreaterThan(0);
+  });
+
+  test("the outcome rollup runs in the background once a day, and Compact waits for it", async () => {
+    const db = app.db;
+    const { host } = app.identity;
+    const old = Date.now() - 30 * DAY;
+    const insert = db.prepare("INSERT INTO outcomes (id, provider, session_id, ts, host, kind, tool) VALUES (?, 'claude', 'claude:r1', ?, ?, 'tool_ok', 'Bash')");
+    for (let i = 0; i < 3; i++) insert.run(`r${i}`, old + i, host);
+    db.query("DELETE FROM meta WHERE key = ?").run(`outcome_rollup:${host}`);
+
+    app.rollupIfDue();
+    await app.compactDb();
+    expect(col(db, "SELECT COUNT(*) AS n FROM outcomes WHERE session_id = 'claude:r1'")).toEqual([{ n: 0 }]);
+    expect(col(db, "SELECT n FROM outcome_days WHERE session_id = 'claude:r1'")).toEqual([{ n: 3 }]);
+    expect(rollupDue(db, host)).toBe(false);
   });
 
   test("a retention setting saved through the API trims in the background", async () => {

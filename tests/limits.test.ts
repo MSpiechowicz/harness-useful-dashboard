@@ -109,6 +109,41 @@ describe("asking sparingly", () => {
   });
 });
 
+describe("the readings kept", () => {
+  test("fresh readings go into the history, unless the database is read-only once the providers answered", async () => {
+    let answered = false;
+    const make = () =>
+      new LimitsCache({
+        now: () => NOW,
+        home: "/home/me",
+        env: {},
+        platform: "linux",
+        readFile: (p: string) => (p === join("/home/me", ".claude", ".credentials.json") ? JSON.stringify({ claudeAiOauth: { accessToken: "t", expiresAt: NOW + 24 * HOUR } }) : null),
+        fetch: (async () => {
+          answered = true;
+          return Response.json({ five_hour: { utilization: 20, resets_at: null } });
+        }) as unknown as typeof fetch,
+      });
+    const on = { claude: true, omp: false, codex: false };
+    const readings = (db: ReturnType<typeof memDb>) => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM limit_readings").get()!.n;
+
+    // Writable when asked, read-only by the time the answer came.
+    const readOnly = memDb();
+    let askedAfterAnswer = false;
+    const shown = await make().get(readOnly, ID.host, on, false, undefined, () => {
+      askedAfterAnswer = answered;
+      return false;
+    });
+    expect(askedAfterAnswer).toBe(true);
+    expect(shown.reports.map((r) => r.provider)).toEqual(["claude"]);
+    expect(readings(readOnly)).toBe(0);
+
+    const writable = memDb();
+    await make().get(writable, ID.host, on);
+    expect(readings(writable)).toBeGreaterThan(0);
+  });
+});
+
 describe("after a restart", () => {
   test("a first answer of 'too often' shows the last stored reading, not nothing", async () => {
     const db = memDb();

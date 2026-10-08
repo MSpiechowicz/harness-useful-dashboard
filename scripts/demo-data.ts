@@ -1,6 +1,7 @@
 /**
  * Writes a database of made-up usage for screenshots and demos: three people on a shared database, six projects,
- * Claude Code, Codex and omp sessions over the last ten weeks, and a busy last hour for the Live view.
+ * Claude Code, Codex and omp sessions over the last ten weeks with their commits, PRs and compactions, two chart notes,
+ * and a busy last hour for the Live view.
  * Nothing in it comes from a real machine.
  *
  *   bun scripts/demo-data.ts /tmp/demo.db
@@ -182,11 +183,51 @@ const API_ERRORS: Partial<Record<Provider, [weight: number, message: string][]>>
 };
 function demoApiError(provider: Provider, drifting: boolean) {
   const options = API_ERRORS[provider] ?? API_ERRORS.claude!;
-  if (apiRand() >= (drifting ? 0.03 : 0.012)) return null;
+  // The drifting model fails several times as often lately, enough for the drift view to flag its API error rate.
+  if (apiRand() >= (drifting ? 0.08 : 0.012)) return null;
   let r = apiRand() * options.reduce((a, [w]) => a + w, 0);
   const message = options.find(([w]) => (r -= w) < 0)?.[1] ?? options[0]![1];
   return apiErrorOf(null, null, message, 2000);
 }
+
+/** A small seeded generator for each later addition, so adding one leaves the rest of the picture as it was. */
+function seeded(start: number): () => number {
+  let s = start;
+  return () => {
+    s = (Math.imul(s, 1103515245) + 12345) | 0;
+    return ((s >>> 0) % 1_000_003) / 1_000_003;
+  };
+}
+
+/**
+ * Commits and pull requests the agents made: mostly on feature branches, now and then on main, from the harnesses
+ * whose logs show them. One PR per feature branch once it has a few commits.
+ */
+const gitRand = seeded(23);
+const GIT_PROVIDERS = new Set<Provider>(["claude", "codex", "omp", "opencode", "gemini", "copilot"]);
+const GITHUB_ORG = "demo";
+const COMMIT_SUBJECTS: Record<string, string[]> = {
+  main: ["Bump version to 2.4.1", "Update the changelog", "Fix a typo in the README", "Pin the Node version in CI"],
+  "feat/prepaid-credits": ["Add the prepaid credits table", "Apply credits before card charges", "Show remaining credits on invoices", "Cover credit expiry with tests"],
+  "fix/checkout-flake": ["Wait for the cart total before asserting", "Stub the payment iframe in tests", "Retry the coupon step once on CI"],
+  "feat/dark-mode": ["Add dark mode color tokens", "Follow the system theme by default", "Fix the contrast of disabled buttons"],
+  "chore/deps": ["Bump dependencies", "Update the lockfile", "Drop an unused lodash import"],
+  "feat/search": ["Add keyboard navigation to search", "Debounce search queries", "Highlight matches in the results"],
+  "fix/rounding": ["Round invoice totals half to even", "Store amounts in cents", "Add a test for the one-cent drift"],
+};
+/** Per project and branch: commits so far and whether its PR is open. Per repository: the next PR number. */
+const branchGit = new Map<string, { commits: number; pr: boolean }>();
+const nextPr = new Map<string, number>();
+
+const repoOf = (project: string) => `github.com/${GITHUB_ORG}/${project.split("/").pop()}`;
+const sha = () => Array.from({ length: 5 }, () => Math.floor(gitRand() * 0xffffffff).toString(16).padStart(8, "0")).join("");
+
+/**
+ * Compactions in long Claude Code sessions: automatic ones when the context nears the window (200k or 1M), and now
+ * and then a manual /compact between prompts. Some logs leave out the tokens after.
+ */
+const compactRand = seeded(31);
+const compactInt = (lo: number, hi: number) => Math.floor(lo + compactRand() * (hi - lo + 1));
 
 /** Who works where, with what: each person has their own tools and habits. */
 const PEOPLE = [
@@ -234,6 +275,61 @@ const db = openDb(out, { isDefaultPath: false });
 const prices = PriceBook.fromDb(db);
 const writers = new Map(PEOPLE.map((p) => [p.user, new DbWriter(db, prices, { user: p.user, host: p.host })]));
 
+/** Where a session works, for the commits, PRs and compactions it adds. */
+interface SessionPlace {
+  w: DbWriter;
+  provider: Provider;
+  sessionId: string;
+  project: string;
+  branch: string;
+  model: string;
+}
+
+/** A commit on the session's branch, with the next subject of that branch's story. */
+function demoCommit(at: SessionPlace, ts: number) {
+  const key = `${at.project}\t${at.branch}`;
+  const state = branchGit.get(key) ?? { commits: 0, pr: false };
+  branchGit.set(key, state);
+  const subjects = COMMIT_SUBJECTS[at.branch] ?? COMMIT_SUBJECTS.main!;
+
+  at.w.gitEvent({
+    kind: "commit", provider: at.provider, sessionId: at.sessionId, ts, project: at.project, agent: "main", branch: at.branch,
+    callId: null, sha: sha(), subject: subjects[state.commits % subjects.length],
+  });
+  state.commits++;
+}
+
+/** The PR of a feature branch, opened by a session that ends on it once the branch has a few commits. */
+function demoPr(at: SessionPlace, ts: number) {
+  const state = branchGit.get(`${at.project}\t${at.branch}`);
+  if (at.branch === "main" || !state || state.pr || state.commits < 2) return;
+  if (gitRand() >= 0.6) return;
+
+  // People open PRs by hand too, so the numbers skip a few.
+  const repo = repoOf(at.project);
+  const number = nextPr.get(repo) ?? 100 + Math.floor(gitRand() * 300);
+  nextPr.set(repo, number + 1 + Math.floor(gitRand() * 4));
+
+  at.w.gitEvent({
+    kind: "pr", provider: at.provider, sessionId: at.sessionId, ts, project: at.project, agent: "main", branch: at.branch,
+    callId: null, repo, number, url: `https://${repo}/pull/${number}`,
+  });
+  state.pr = true;
+}
+
+/** A compaction at `ts` of a context `pre` tokens long: returns the context left and how long it took. */
+function demoCompaction(at: SessionPlace, ts: number, trigger: "auto" | "manual", pre: number): { post: number; took: number } {
+  const post = compactInt(15_000, 25_000);
+  const took = (trigger === "auto" ? compactInt(25, 90) : compactInt(15, 60)) * 1000;
+  const postLogged = compactRand() < 0.85;
+
+  at.w.compaction({
+    id: `${at.sessionId}:${ts}:compact`, provider: at.provider, sessionId: at.sessionId, ts, project: at.project, model: at.model,
+    agent: "main", trigger, preTokens: pre, postTokens: postLogged ? post : null, durationMs: took,
+  });
+  return { post, took };
+}
+
 /** One session: prompts one after another, each answered by a run of model calls with tool calls in between. */
 function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts?: number; pace?: number; provider?: Provider; until?: number } = {}): number {
   const w = writers.get(person.user)!;
@@ -254,9 +350,27 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
   let ts = start;
   let context = int(8_000, 20_000);
   const first = pick(PROMPTS);
-  w.session({ id: sessionId, provider, nativeId: native, project: project.path, title: first, gitBranch: pick(BRANCHES), client: provider, clientVersion, startedAt: start });
+  const branch = pick(BRANCHES);
+  w.session({ id: sessionId, provider, nativeId: native, project: project.path, title: first, gitBranch: branch, client: provider, clientVersion, startedAt: start });
+
+  const place: SessionPlace = { w, provider, sessionId, project: project.path, branch, model };
+  const commits = GIT_PROVIDERS.has(provider);
+  // Claude Code compacts on its own a little before the context window (200k, or 1M on some models) is full.
+  const compacts = provider === "claude";
+  let autoCompactAt = Infinity;
+  if (compacts) {
+    const window = compactRand() < 0.5 && !model.includes("haiku") ? 1_000_000 : 200_000;
+    autoCompactAt = window * (0.78 + compactRand() * 0.1);
+  }
 
   for (let p = 0; p < prompts && !(opts.until && ts >= opts.until); p++) {
+    // Now and then the user compacts a long context by hand before the next prompt.
+    if (compacts && p > 0 && context >= 150_000 && compactRand() < 0.15) {
+      const { post, took } = demoCompaction(place, ts, "manual", context);
+      context = post;
+      ts += took;
+    }
+
     const promptId = `${sessionId}:p${p}`;
     const skill = rand() < 0.12 ? pick(SKILLS) : null;
     w.prompt({ id: promptId, sessionId, provider, ts, text: p === 0 ? first : pick(PROMPTS), skill, isCommand: false });
@@ -282,6 +396,11 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
       });
       context += write + output;
       w.responseMeta({ usageId, startTs: started, endTs: ts, ttftMs: provider === "omp" || provider === "pi" ? Math.round(ttft * 1000) : null, effort });
+      if (compacts && context >= autoCompactAt) {
+        const { post, took } = demoCompaction(place, ts + 1_000, "auto", context);
+        context = post;
+        ts += 1_000 + took;
+      }
       const tools = int(0, 3);
       for (let k = 0; k < tools; k++) {
         const tool = pick(TOOLS, TOOLS.map((x) => x.w));
@@ -293,6 +412,8 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
       }
     }
     if (rand() < (drifting ? 0.06 : 0.025)) w.outcome({ id: `${promptId}:interrupt`, provider, sessionId, ts, project: project.path, model, agent: "main", effort, kind: "interrupt" });
+    // Some answers end with a commit: often on a feature branch, rarely straight on main.
+    if (commits && gitRand() < (branch === "main" ? 0.04 : 0.14)) demoCommit(place, ts);
     // Now and then a prompt hands work to a subagent with its own, smaller context.
     if (provider === "claude" && rand() < 0.25) {
       const agent = pick(AGENTS);
@@ -316,6 +437,7 @@ function session(person: (typeof PEOPLE)[number], start: number, opts: { prompts
     // Time to read the answer and write the next prompt.
     ts += int(1, 12) * MINUTE * pace;
   }
+  if (commits && !(opts.until && ts > opts.until)) demoPr(place, ts);
   w.session({ id: sessionId, provider, nativeId: native, endedAt: ts });
   return ts;
 }
@@ -394,6 +516,13 @@ db.transaction(() => {
   // Codex's own reading of its plan limits, as it logs them.
   writers.get("sam")!.limit({ provider: "codex", windowId: "primary", windowMinutes: 300, usedPercent: 38, resetsAt: NOW + 2 * HOUR + 40 * MINUTE, plan: "pro", ts: NOW - 2 * MINUTE });
   writers.get("sam")!.limit({ provider: "codex", windowId: "secondary", windowMinutes: 10_080, usedPercent: 61, resetsAt: NOW + 3 * DAY, plan: "pro", ts: NOW - 2 * MINUTE });
+  // A few all-day Claude Code sessions whose contexts grow long enough to compact near a 1M window. Drawn last, so
+  // everything above stays as it was.
+  for (const daysAgo of [12, 27, 45]) {
+    const day = new Date(NOW - daysAgo * DAY);
+    day.setHours(9, 0, 0, 0);
+    session(PEOPLE[0]!, day.getTime(), { provider: "claude", prompts: 28 });
+  }
 })();
 resolveSpawnRefs(db);
 // Tags and notes: a client per project, billable and experiment on some sessions, one note.
@@ -406,6 +535,16 @@ db.exec(`
   INSERT OR IGNORE INTO session_notes(session_id, note, updated_at)
     SELECT id, 'Checkout rewrite for the spring campaign. Bill to the Acme retainer.', ${NOW} FROM sessions WHERE project = '/Users/demo/code/storefront' AND parent_session_id IS NULL ORDER BY started_at DESC LIMIT 1;
 `);
+// Chart notes on Trends: day notes far enough back that the 7, 14 and (for the first) 30 day windows have data on both
+// sides. A day note sits at its local midnight.
+const noteRow = db.prepare("INSERT INTO chart_notes (id, ts, day, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)");
+for (const [daysAgo, text] of [[33, "Switched default model to Sonnet 5.5"], [16, "Trimmed the review skill"]] as const) {
+  const midnight = new Date(NOW - daysAgo * DAY);
+  midnight.setHours(0, 0, 0, 0);
+  const day = `${midnight.getFullYear()}-${String(midnight.getMonth() + 1).padStart(2, "0")}-${String(midnight.getDate()).padStart(2, "0")}`;
+  const created = midnight.getTime() + 17 * HOUR;
+  noteRow.run(crypto.randomUUID(), midnight.getTime(), day, text, created, created);
+}
 // AI session labels: a kind for seven in ten root sessions, and an AI title for those the harness left without one.
 db.exec(`
   INSERT OR IGNORE INTO session_labels(session_id, title, kind, model, created_at)

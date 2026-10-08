@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { branchDetail, branches, branchId, parseBranchId } from "../src/core/branches.ts";
-import { friction } from "../src/core/friction.ts";
+import { friction, frictionTotals } from "../src/core/friction.ts";
 import type { UsageRecord } from "../src/core/ingest/types.ts";
 import { DbWriter } from "../src/core/ingest/writer.ts";
 import type { LimitReport } from "../src/core/limits.ts";
@@ -87,6 +87,36 @@ describe("friction", () => {
     // The subagent's interrupt counts toward the session that started it.
     expect(f.sessions).toHaveLength(1);
     expect(f.sessions[0]!).toMatchObject({ id: "claude:s1", errors: 1, rejected: 1, interrupts: 1 });
+  });
+
+  test("a session is listed by its failures and its subagents', whichever logged them", () => {
+    const { db, w } = seed();
+    const base = { provider: "claude" as const, ts: T0, project: "/work/alpha", model: "claude-sonnet-4-5", agent: "main" };
+    w.outcome({ ...base, id: "e1", sessionId: "claude:s1", kind: "tool_error" });
+    // The subagent's calls all went well: the session still counts its parent's failure.
+    for (let i = 0; i < 3; i++) w.outcome({ ...base, id: `a${i}`, sessionId: "claude:a1", agent: "Explore", kind: "tool_ok" });
+    const f = friction(db, {}, "day");
+    expect(f.sessions).toHaveLength(1);
+    expect(f.sessions[0]!).toMatchObject({ id: "claude:s1", ok: 3, errors: 1 });
+  });
+
+  test("totals of a range: tool calls, their error rate, and failed model requests against responses", () => {
+    const { db, w } = seed();
+    const base = { provider: "claude" as const, sessionId: "claude:s1", ts: T0, project: "/work/alpha", model: "claude-sonnet-4-5", agent: "main" };
+    w.outcome({ ...base, id: "t1", kind: "tool_ok" });
+    w.outcome({ ...base, id: "t2", kind: "tool_error" });
+    w.outcome({ ...base, id: "x1", kind: "interrupt" });
+    w.outcome({ ...base, id: "e1", kind: "api_error", reason: "overloaded" });
+    // Successful calls rolled up into a day count as many as the row says.
+    db.query("INSERT INTO outcome_days (ts, host, provider, session_id, project, user, model, agent, tool, kind, n) VALUES (?, ?, 'claude', 'claude:s1', '/work/alpha', ?, 'claude-sonnet-4-5', 'main', 'Bash', 'tool_ok', 6)").run(T0 - 3 * DAY, ID.host, ID.user);
+    const all = frictionTotals(db, {});
+    expect(all).toEqual({ ok: 7, errors: 1, rejected: 0, interrupts: 1, errorRate: 1 / 8, apiErrors: 1, requests: 5, apiErrorRate: 1 / 6 });
+    const f = friction(db, {}, "day");
+    expect({ ok: f.totals.ok, errors: f.totals.errors, apiErrors: f.apiErrors.total, rate: f.apiErrors.rate }).toEqual({ ok: 7, errors: 1, apiErrors: 1, rate: 1 / 6 });
+    expect(f.tools.find((t) => t.key === "Bash")!.ok).toBe(6);
+    // Filters apply as everywhere, the skill filter not at all.
+    expect(frictionTotals(db, { from: T0 - DAY, skill: "ignored" })).toMatchObject({ ok: 1, errors: 1, apiErrors: 1, requests: 5 });
+    expect(frictionTotals(db, { model: "gpt-6" })).toMatchObject({ ok: 0, errorRate: null, apiErrors: 0, requests: 1, apiErrorRate: 0 });
   });
 });
 

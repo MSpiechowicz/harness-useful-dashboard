@@ -95,6 +95,17 @@ export function normalizeProjects(db: Database, host: string, resolveFn: (p: str
       db.query("UPDATE sessions SET project = ? WHERE host = ? AND project = ?").run(to, host, from);
       db.query("UPDATE outcomes SET project = ? WHERE host = ? AND project = ?").run(to, host, from);
       db.query("UPDATE tool_calls SET project = ? WHERE project = ? AND session_id IN (SELECT id FROM sessions WHERE host = ?)").run(to, from, host);
+      db.query("UPDATE outcome_days SET project = ? WHERE host = ? AND project = ?").run(to, host, from);
+      db.query("UPDATE compactions SET project = ? WHERE host = ? AND project = ?").run(to, host, from);
+      // A commit is keyed by its project and sha (DbWriter.gitEvent): it moves to the key the next scan gives it. One
+      // already under that key (read again since) is the same commit, so the old row goes.
+      db.query(
+        `UPDATE OR IGNORE git_events SET project = $to,
+           id = CASE WHEN kind = 'commit' AND sha IS NOT NULL AND id = 'commit:' || $from || ':' || sha
+                     THEN 'commit:' || COALESCE($to, '') || ':' || sha ELSE id END
+         WHERE host = $host AND project = $from`,
+      ).run({ to, from, host });
+      db.query("DELETE FROM git_events WHERE host = ? AND project = ?").run(host, from);
     }
   })();
   return changed;

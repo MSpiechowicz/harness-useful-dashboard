@@ -1,18 +1,22 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { ChartArea, ChartColumn } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import Empty from "../components/Empty.svelte";
   import Kpi from "../components/Kpi.svelte";
+  import NoteCompare from "../components/NoteCompare.svelte";
+  import NotesCard from "../components/NotesCard.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import UsageChart from "../components/UsageChart.svelte";
-  import { apiUrl, settled, useFetch, type LinesSeries, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
-  import { cumulativeChart, seriesLabel, timeSeriesChart, trendAverage } from "../lib/charts.ts";
+  import { apiUrl, settled, useFetch, type LinesSeries, type Note, type Summary, type TimeSeries } from "../lib/api.svelte.ts";
+  import { chartNotes, cumulativeChart, seriesLabel, timeSeriesChart, trendAverage } from "../lib/charts.ts";
   import { bucketLabel, compact, dayWithYear, days, integer, metricValue, usd } from "../lib/format.ts";
   import { seriesRows } from "../lib/export.ts";
   import { t } from "../lib/i18n.svelte.ts";
+  import { bucketDay } from "../lib/noteBuckets.ts";
   import { store } from "../lib/state.svelte.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
@@ -29,6 +33,24 @@
   const series = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: effBucket, group, metric: valueKind }));
   const daily = useFetch<TimeSeries>(() => apiUrl("/api/timeseries", { bucket: "day", group: "none", metric: store.metric }));
   const summary = useFetch<Summary>(() => apiUrl("/api/summary"));
+
+  // Notes in the range, marked on the usage chart. The chart picks a note by its rule, and a day for the next note by a click.
+  const noteList = useFetch<{ notes: Note[] }>(() => apiUrl("/api/notes"));
+  const notes = $derived(noteList.data?.notes ?? []);
+  const marks = $derived(series.data ? chartNotes(series.data.buckets, effBucket, notes) : []);
+  let noteDay = $state<{ day: string; n: number }>();
+  let compareEl = $state<HTMLDivElement>();
+
+  function pickNote(id: string) {
+    store.note = id;
+  }
+
+  // From the chart the card is below the fold, so it is brought into view.
+  async function pickNoteOnChart(id: string) {
+    pickNote(id);
+    await tick();
+    compareEl?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
 
   const totalsPerBucket = $derived(series.data ? series.data.buckets.map((_, i) => series.data!.series.reduce((a, s) => a + (s.data[i] ?? 0), 0)) : []);
 
@@ -121,9 +143,15 @@
           {/if}
         {/snippet}
         {#if series.data}
-          <UsageChart ts={series.data} dim={group} bucket={effBucket} metric={store.metric} {valueKind} {kind} {average} height={380} loading={series.loading} />
+          <UsageChart ts={series.data} dim={group} bucket={effBucket} metric={store.metric} {valueKind} {kind} {average} height={380} loading={series.loading} notes={marks} onnote={pickNoteOnChart} onbucket={(b) => (noteDay = { day: bucketDay(b, effBucket), n: (noteDay?.n ?? 0) + 1 })} />
         {/if}
       </Card>
+
+      <NotesCard {notes} selected={store.note} onselect={pickNote} pick={noteDay} loadFailed={!!noteList.error} />
+
+      {#if store.note}
+        <div bind:this={compareEl}><NoteCompare id={store.note} onclose={() => pickNote("")} /></div>
+      {/if}
 
       <Card title={t("chart.cumulative")} subtitle={t(`metric.${valueKind}`)}>
         {#snippet actions()}

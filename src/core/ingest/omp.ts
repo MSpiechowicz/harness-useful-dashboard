@@ -2,6 +2,7 @@ import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
 import { countLines, diffLines, type LineCount, numberedDiffLines, sumLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
+import { emitGitEvents, vcsCall } from "./vcs.ts";
 
 /**
  * pi and omp (oh-my-pi, a fork of pi) write the same session format:
@@ -252,6 +253,10 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
           });
           const lines = kind === "tool_ok" && tool === "edit" ? resultLines(m.details) : null;
           if (lines) sink.editLines?.({ toolId: id, ...lines });
+          if (kind === "tool_ok" && call.vcs) {
+            // The session logs no branch: a commit's is the one its output names.
+            emitGitEvents(sink, call.vcs, textOf(m.content), { provider: harness, sessionId, ts, project: state.cwd, agent, branch: null, callId: id }, ctx.promptTextLimit);
+          }
           continue;
         }
         if (m.role !== "assistant") continue;
@@ -268,7 +273,9 @@ function piFamilyParser(harness: PiHarness): LineParser<OmpState> {
               : FILE_TOOLS.has(c.name) && path ? filePaths(path) : [];
           // One row per call; a patch over several files adds a row for each further file.
           const callId = harness === "pi" && c.id ? `pi:${c.id}` : `${sessionId}:${c.id ?? `${entry}:${i}`}`;
-          if (c.id) rememberCall((state.calls ??= {}), callId, c.name, inputSummary(c.arguments, ctx.promptTextLimit) ?? (ctx.promptTextLimit > 0 ? (files[0] ?? null) : null));
+          // A shell call that commits or opens a PR is flagged, so its result is read for them.
+          const input = inputSummary(c.arguments, ctx.promptTextLimit) ?? (ctx.promptTextLimit > 0 ? (files[0] ?? null) : null);
+          if (c.id) rememberCall((state.calls ??= {}), callId, c.name, input, vcsCall(c.arguments?.command, ctx.promptTextLimit));
           // Only a call on a file: omp's write also sends to its own devices (xd://lsp, …).
           const lines = files.length ? piEditLines(c.name, c.arguments ?? {}) : null;
           (files.length ? files : [null]).forEach((filePath, n) =>

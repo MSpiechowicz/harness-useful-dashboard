@@ -5,6 +5,7 @@ import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary } from "../failures.ts";
 import { countLines, diffLines, type LineCount, patchLines, sumLines, unifiedDiffLines } from "./lines.ts";
 import { type IngestSink, num, type Provider, truncate } from "./types.ts";
+import { emitGitEvents, vcsCall } from "./vcs.ts";
 
 /**
  * OpenCode keeps its sessions in a SQLite database in its data folder (~/.local/share/opencode/opencode.db, or
@@ -256,6 +257,14 @@ export function ingestOpencode(path: string, sink: IngestSink, opts: { since: nu
               ? [input.filePath as string]
               : [];
         const callId = oc(typeof p.callID === "string" ? p.callID : p.id);
+        // A shell command that worked (bash reports its exit code in its metadata) and commits or opens a PR. OpenCode
+        // logs no branch: a commit's is the one its output names.
+        const vcs = status === "completed" ? vcsCall(input.command, opts.promptTextLimit) : null;
+        const exit = p.state?.metadata?.exit;
+        if (vcs && (exit == null || exit === 0)) {
+          const at = typeof p.state?.time?.end === "number" ? p.state.time.end : ts;
+          emitGitEvents(sink, vcs, p.state?.output, { provider: flavor.provider, sessionId, ts: at, project, agent, branch: null, callId }, opts.promptTextLimit);
+        }
         // A failed edit changed nothing.
         const lines = status === "completed" ? opencodeEditLines(p.tool, input, p.state?.metadata) : null;
         (files.length ? files : [null]).forEach((filePath, n) =>

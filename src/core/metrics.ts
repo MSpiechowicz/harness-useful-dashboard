@@ -2,10 +2,11 @@ import type { Database } from "bun:sqlite";
 import { storedApiClass } from "./apiErrors.ts";
 import { type BudgetConfig, budgetStatus, windowName } from "./budgets.ts";
 import { memo } from "./cache.ts";
+import { hasTable } from "./db.ts";
 import { storedReason } from "./failures.ts";
 import { type LimitSource, storedReports } from "./limits.ts";
 import { normalizeModel } from "./models.ts";
-import { projectLabel, type Queries } from "./queries.ts";
+import { type LiveStatus, projectLabel, type Queries } from "./queries.ts";
 import { tagUsage } from "./tagUsage.ts";
 import { UNTAGGED } from "./tags.ts";
 
@@ -95,8 +96,10 @@ function computeCounters(db: Database, projectLabels: boolean): string {
   const calls = new Sums();
   const failures = new Sums();
   const OUTCOME = { tool_ok: "ok", tool_error: "error", tool_rejected: "declined" } as const;
+  // Successful calls older than a week are daily counts (rollup.ts): the view has both, each row with its count.
+  const outcomes = hasTable(db, "outcome_days") ? "SELECT provider, tool, kind, reason, SUM(n) AS n FROM outcome_counts" : "SELECT provider, tool, kind, reason, COUNT(*) AS n FROM outcomes";
   for (const r of all<{ provider: string; tool: string | null; kind: keyof typeof OUTCOME; reason: string | null; n: number }>(
-    `SELECT provider, tool, kind, reason, COUNT(*) AS n FROM outcomes WHERE kind IN ('tool_ok', 'tool_error', 'tool_rejected') GROUP BY provider, tool, kind, reason`,
+    `${outcomes} WHERE kind IN ('tool_ok', 'tool_error', 'tool_rejected') GROUP BY provider, tool, kind, reason`,
   )) {
     const tool = r.tool ?? "unknown";
     calls.add({ provider: r.provider, tool, outcome: OUTCOME[r.kind] }, r.n);
@@ -150,6 +153,8 @@ export interface MetricsInput {
   version: string;
   /** When the last scan finished, epoch ms. */
   lastScanAt: number | null;
+  /** This machine's open Claude sessions by Claude Code's registry (claudeRegistry.ts), null when it can't tell. */
+  claudeLive?: Set<string> | null;
   now?: number;
 }
 
@@ -189,8 +194,8 @@ export function metricsText(i: MetricsInput): string {
   });
   // Sessions of the last hour by what they are doing: the Live view's own count, kept for 15 seconds.
   const status = memo(i.db, "metrics:live", () => {
-    const counts = { working: 0, idle: 0, error: 0 };
-    for (const s of i.queries.live({}, 60, now).sessions) counts[s.status]++;
+    const counts: Record<LiveStatus, number> = { working: 0, idle: 0, error: 0, closed: 0 };
+    for (const s of i.queries.live({}, 60, now, { host: i.host, claudeLive: i.claudeLive ?? null }).sessions) counts[s.status]++;
     return counts;
   }, 15_000);
   return (

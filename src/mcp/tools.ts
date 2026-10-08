@@ -7,7 +7,7 @@ import type { BudgetConfig } from "../core/budgets.ts";
 import { per100, sessionLines } from "../core/changes.ts";
 import { friction } from "../core/friction.ts";
 import type { PriceBook } from "../core/pricing.ts";
-import { type Dimension, type Queries, relativeTo } from "../core/queries.ts";
+import { type Dimension, type GitPr, prUrl, type Queries, relativeTo } from "../core/queries.ts";
 import {
   budgetRows, filtersOf, filtersOut, InputError, iso, limitWindows, openReadOnly, RANGES, type Range, rangeOut, ratio, resolveRange, usd,
 } from "../core/reports.ts";
@@ -63,6 +63,7 @@ const clip = (s: string | null | undefined, n: number) => {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
+const pullRequestOut = (p: GitPr) => ({ number: p.number, url: prUrl(p.url) });
 const tokensOf = (t: { tokens: number; input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }) => ({
   total: t.tokens,
   input: t.input,
@@ -279,7 +280,7 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
     name: "session_cost",
     title: "Session cost",
     description:
-      "Cost and tokens of one agent session, its subagents included. Without session_id it takes the current Claude Code session when known, else the latest session in the working directory's project. Accepts Claude Code's session id as it is or as claude:<id>.",
+      "Cost and tokens of one agent session, its subagents included, with its commits, pull requests and context compactions. Without session_id it takes the current Claude Code session when known, else the latest session in the working directory's project. Accepts Claude Code's session id as it is or as claude:<id>.",
     inputSchema: {
       type: "object",
       properties: {
@@ -336,6 +337,10 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
         prompts: d.prompts.length,
         subagents: { count: children.length, costUsd: usd(children.reduce((a, c) => a + c.cost, 0)), tokens: children.reduce((a, c) => a + c.tokens, 0) },
         models: (d.models as { key: string | null; cost: number; tokens: number }[]).slice(0, 5).map((m) => ({ model: m.key ?? "(none)", costUsd: usd(m.cost), tokens: m.tokens })),
+        commits: d.git.commitCount,
+        pullRequestCount: d.git.prCount,
+        pullRequests: d.git.prs.slice(0, 10).map(pullRequestOut),
+        compactions: { count: d.compactions.length, estimatedCostUsd: usd(d.compactions.reduce((a, c) => a + c.costUsd, 0)) },
         note: COST_NOTE,
       };
     },
@@ -345,7 +350,7 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
     name: "branch_cost",
     title: "Branch cost",
     description:
-      "What the work on one git branch cost over its whole life: cost, tokens, sessions, models, the latest sessions and the files changed most. Without branch it takes the branch checked out in the working directory.",
+      "What the work on one git branch cost over its whole life: cost, tokens, sessions, models, commits and pull requests with the cost per each, the latest sessions and the files changed most. Without branch it takes the branch checked out in the working directory.",
     inputSchema: {
       type: "object",
       properties: {
@@ -378,6 +383,10 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
         firstActivity: iso(d.totals.firstTs),
         lastActivity: iso(d.totals.lastTs),
         linesChanged: { added: d.lines.added, removed: d.lines.removed, files: d.lines.files, costPer100LinesUsd: usd(d.lines.costPer100) },
+        commits: d.totals.commits,
+        pullRequests: d.prs.slice(0, 10).map(pullRequestOut),
+        costPerCommitUsd: usd(d.totals.commits > 0 ? d.totals.cost / d.totals.commits : null),
+        costPerPullRequestUsd: usd(d.totals.prs > 0 ? d.totals.cost / d.totals.prs : null),
         models: d.models.slice(0, 5).map((m) => ({ model: m.key, costUsd: usd(m.cost), tokens: m.tokens, linesChanged: m.added + m.removed || undefined })),
         latestSessions: d.sessions.slice(0, 10).map((s) => ({
           id: s.id,

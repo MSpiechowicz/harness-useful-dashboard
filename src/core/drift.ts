@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { hasTable } from "./db.ts";
 import { type Filters, whereClause } from "./queries.ts";
 
 /**
@@ -6,8 +7,8 @@ import { type Filters, whereClause } from "./queries.ts";
  * call or prompt, so a change in how much was done does not read as a change in the model. A metric is flagged when
  * the recent window falls outside the range its days usually spread over in the baseline.
  */
-export type DriftMetric = "speed" | "ttft" | "toolErrors" | "interrupts" | "steps" | "output";
-export const DRIFT_METRICS: DriftMetric[] = ["speed", "ttft", "toolErrors", "interrupts", "steps", "output"];
+export type DriftMetric = "speed" | "ttft" | "toolErrors" | "apiErrors" | "interrupts" | "steps" | "output";
+export const DRIFT_METRICS: DriftMetric[] = ["speed", "ttft", "toolErrors", "apiErrors", "interrupts", "steps", "output"];
 
 export const RECENT_DAYS = 7;
 export const BASELINE_DAYS = 28;
@@ -33,6 +34,7 @@ const HIGHER_IS_BETTER: Record<DriftMetric, boolean | null> = {
   speed: true,
   ttft: false,
   toolErrors: false,
+  apiErrors: false,
   interrupts: false,
   steps: null,
   output: null,
@@ -97,6 +99,8 @@ interface OutcomeRow {
   model: string;
   provider: string;
   kind: string;
+  /** Outcomes the row stands for: more than one for successful calls rolled up into a day (rollup.ts). */
+  n: number;
 }
 
 /** Samples of one metric, by local day: values for a median, or a numerator and denominator for a rate. */
@@ -235,6 +239,7 @@ function samplesFor(responses: ResponseRow[], outcomes: OutcomeRow[]): { samples
     output: median(),
     steps: median(),
     toolErrors: { kind: "rate", scale: 100, days: new Map() },
+    apiErrors: { kind: "rate", scale: 100, days: new Map() },
     interrupts: { kind: "rate", scale: 100, days: new Map() },
   };
   const providers = Object.fromEntries(DRIFT_METRICS.map((m) => [m, new Set<string>()])) as Record<DriftMetric, Set<string>>;
@@ -257,6 +262,9 @@ function samplesFor(responses: ResponseRow[], outcomes: OutcomeRow[]): { samples
       pushTo(values("ttft"), day, r.ttft_ms / 1000);
       providers.ttft.add(r.provider);
     }
+    // A failed model request is one more request: the rate is failures out of responses plus failures.
+    addRate(rates("apiErrors"), day, 0, 1);
+    providers.apiErrors.add(r.provider);
     if (r.agent === "main" && r.prompt_id) {
       const p = prompts.get(r.prompt_id);
       if (p) p.steps++;
@@ -271,11 +279,14 @@ function samplesFor(responses: ResponseRow[], outcomes: OutcomeRow[]): { samples
   for (const o of outcomes) {
     const day = dayKey(o.ts);
     if (o.kind === "interrupt") {
-      addRate(rates("interrupts"), day, 1, 0);
+      addRate(rates("interrupts"), day, o.n, 0);
       providers.interrupts.add(o.provider);
     } else if (o.kind === "tool_ok" || o.kind === "tool_error") {
-      addRate(rates("toolErrors"), day, o.kind === "tool_error" ? 1 : 0, 1);
+      addRate(rates("toolErrors"), day, o.kind === "tool_error" ? o.n : 0, o.n);
       providers.toolErrors.add(o.provider);
+    } else if (o.kind === "api_error") {
+      addRate(rates("apiErrors"), day, o.n, o.n);
+      providers.apiErrors.add(o.provider);
     }
   }
   return { samples, providers };
@@ -309,7 +320,8 @@ export function drift(db: Database, f: Filters, opts: { model?: string | null; e
   // The model is chosen on this page. Outcomes carry no skill, so that filter applies to responses only.
   const scope: Filters = { ...f, from, to, model: undefined };
   const u = whereClause(scope, "u");
-  const uWhere = `${u.sql ? `${u.sql} AND` : "WHERE"} u.model IS NOT NULL${effort ? " AND m.effort = $effort" : ""}`;
+  // `<synthetic>` is no model: Claude Code's name for the messages it writes itself, API errors among them.
+  const uWhere = `${u.sql ? `${u.sql} AND` : "WHERE"} u.model IS NOT NULL AND u.model <> '<synthetic>'${effort ? " AND m.effort = $effort" : ""}`;
   const responses = db
     .query<ResponseRow, any>(
       `SELECT u.ts, u.model, u.provider, u.prompt_id, u.agent, u.output_tokens, m.start_ts, m.end_ts, m.ttft_ms
@@ -317,9 +329,12 @@ export function drift(db: Database, f: Filters, opts: { model?: string | null; e
     )
     .all({ ...u.params, ...(effort ? { effort } : {}) });
   const o = whereClause({ ...scope, skill: undefined }, "o");
-  const oWhere = `${o.sql ? `${o.sql} AND` : "WHERE"} o.model IS NOT NULL${effort ? " AND o.effort = $effort" : ""}`;
+  const oWhere = `${o.sql ? `${o.sql} AND` : "WHERE"} o.model IS NOT NULL AND o.model <> '<synthetic>'${effort ? " AND o.effort = $effort" : ""}`;
+  // Successful calls older than a week are daily counts (rollup.ts): the view has both, each row with its count. A
+  // reader of an older database (never migrated) has the rows alone.
+  const outcomeSource = hasTable(db, "outcome_days") ? "SELECT o.ts, o.model, o.provider, o.kind, o.n FROM outcome_counts o" : "SELECT o.ts, o.model, o.provider, o.kind, 1 AS n FROM outcomes o";
   const outcomes = db
-    .query<OutcomeRow, any>(`SELECT o.ts, o.model, o.provider, o.kind FROM outcomes o ${oWhere}`)
+    .query<OutcomeRow, any>(`${outcomeSource} ${oWhere}`)
     .all({ ...o.params, ...(effort ? { effort } : {}) });
 
   const recentDays = new Set(dayList(recentFrom, to));

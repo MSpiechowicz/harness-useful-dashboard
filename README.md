@@ -15,19 +15,23 @@ Made with demo data. [Download the full-quality video](docs/video/harness-dashbo
 - **Who used what**: where the money goes from tool to model to project in one flow chart, every project side by side on
   one scale, and on each breakdown page a network of what used what, with lights running along the busiest links
 - **Trends**: hourly/daily/weekly/monthly series, a 7-day moving average, cumulative spend, peak day and a 30-day projection
+- **Chart notes**: mark a day on the usage chart, then compare the days before and after it
 - **Per-prompt cost analytics**: what each request really consumed, call by call, including the subagents it spawned, and
   in a session how much context each prompt added
 - **Tool and file heatmaps**: tools × projects, tools × hour of day, and the files that get read or edited most
 - **Subagent attribution**: Claude Code subagents, Codex spawned/guardian threads, OpenCode subagent sessions, Gemini CLI subagent chats and omp subagents are tied back to the spawning prompt or parent session
 - **Billed via**: which plan or account usage ran through (a ChatGPT plan, GitHub Copilot with its premium requests, an API key)
 - **Cache analytics**: hit rate over time, money saved by caching, and what cache writes cost
-- **Branches**: what each piece of work cost, per git branch, with its sessions and the files it changed
+- **What-if pricing**: what a range would have cost on another model
+- **Compactions**: when Claude Code compacted a session, how much context that dropped and what it cost
+- **Branches**: what each piece of work cost, per git branch, with its sessions, the files it changed, and the commits and pull requests the agents made on it
 - **Lines changed**: the lines the agents' edits added and removed, per project, branch, model, provider, session and day, and what 100 changed lines cost
 - **Time**: how long the agents worked, how many sessions ran at once, and the cost per active hour
 - **Friction**: failed and declined tool calls and interrupted prompts, by tool, model and session
+- **Model drift**: whether a model got slower, clumsier or more error-prone than it usually is, API errors included
 - **Plans**: what each subscription is worth at API prices against what you pay, and how full its limits got over time
 - **Rule-based tips**: low cache hit rate, context bloat, premium models on small prompts, tool loops, spikes, and more
-- **Live view**: tokens per minute as you work, the sessions running right now, and how much of your plan limits is left
+- **Live view**: tokens per minute as you work, the sessions running now and the ones that closed, and how much of your plan limits is left
   (Claude's 5-hour and weekly limits, Codex, and every plan omp is logged in to, such as GitHub Copilot)
 - **Budgets and alerts**: daily, monthly and per-project spending caps, with desktop notifications at 80% and 100% and when a plan limit is 80% used
 - **Export**: every table and chart's data as CSV or JSON, following the current filters
@@ -198,7 +202,7 @@ through it sees the page but none of your data.
 | Roo Code | its folder in VS Code's extension storage (`…/globalStorage/rooveterinaryinc.roo-cline`, also the forks) | task folders: a row per model call with the cost Roo worked out, prompts, tools and subtasks |
 | Kilo Code | its folder in VS Code's extension storage (`…/globalStorage/kilocode.kilo-code`, also the forks) and `~/.local/share/kilo` | task folders of Kilo Code up to 5.x and Kilo Code 7's database: a row per model call with the cost Kilo worked out |
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/` (or `$GEMINI_CLI_HOME/.gemini`) | per-response usage with cached and thinking tokens, prompts, tools and their errors, subagent chats, session summaries as titles. The project comes from the folder's `.project_root`. Chats from before v0.39 (one JSON file each) are read too |
-| GitHub Copilot CLI | `~/.copilot/session-state/<id>/events.jsonl` (or `$COPILOT_HOME`) | prompts, tools and their errors, and the tokens and premium requests per model and agent that Copilot writes when a session ends, as one row per model on that moment. Copilot logs no tokens per call, and a session that never ended cleanly has none. Billed through GitHub Copilot, cost shown at API prices |
+| GitHub Copilot CLI | `~/.copilot/session-state/<id>/events.jsonl` and `~/.copilot/session-store.db` (or `$COPILOT_HOME`) | prompts, tools and their errors, and the tokens and premium requests per model and agent that Copilot writes when a session ends, as one row per model on that moment. When `session-store.db` exists, its `assistant_usage_events` table gives the tokens of each call, opened read-only. A session with rows there keeps only its premium requests from the end-of-session totals, so nothing is counted twice. GitHub does not document that database, so support is best effort and was tested with made-up data only. A session whose store holds only some of its calls is undercounted. Without the file, or for a session that never ended cleanly, there are no tokens per call. Compactions Copilot runs itself show up as compactions. Billed through GitHub Copilot, cost shown at API prices |
 | Cursor | cursor.com, asked with the login the Cursor editor keeps on the machine (`~/.config/Cursor/User/globalStorage/state.vscdb`, macOS `~/Library/Application Support/Cursor/…`, Windows `%APPDATA%\Cursor\…`), or the CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Turn on **Settings → Sync Cursor usage** (off by default) to fetch it every 6 hours, or import the CSV in **Settings** or with `import-cursor`. A row per model call with its tokens and the cost Cursor charged. A call that is both synced and imported counts once. The login is read from Cursor's database each time (read-only), never stored, logged or renewed, and sent to cursor.com only. An expired one is reported until Cursor signs in again |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
@@ -393,8 +397,8 @@ writes, or makes a network request, and needs no sign-in. It finds the database 
 |---|---|
 | `usage_summary` | Cost, tokens by type, sessions, prompts and cache hit rate for a range (`today`, `7d`, `30d`, `month`, `all` or `custom`), compared with the period before |
 | `breakdown` | Cost and tokens by project, model, provider, user, skill or agent |
-| `session_cost` | One session with its subagents, and the lines their edits changed. Without an id, the current Claude Code session when known, else the latest one in the working directory |
-| `branch_cost` | A git branch over its whole life, with the lines changed on it and the cost per 100 of them. Without a name, the branch checked out in the working directory |
+| `session_cost` | One session with its subagents, the lines their edits changed, its commits and pull requests with the cost per commit and per PR, and its compactions. Without an id, the current Claude Code session when known, else the latest one in the working directory |
+| `branch_cost` | A git branch over its whole life, with the lines changed on it and the cost per 100 of them, its commits and pull requests with the cost per commit and per PR. Without a name, the branch checked out in the working directory |
 | `limits` | The latest stored plan-limit readings, with the share used, the reset time and their age |
 | `budget_status` | Today's and this month's spend against the caps from **Settings → Budgets and alerts** |
 | `failures` | Why tool calls failed, the tools that fail most, and the latest errors as stored (redacted, shortened) |
@@ -404,26 +408,26 @@ Times are ISO 8601. Costs are USD at API-equivalent prices. Range tools also fil
 
 Every harness the dashboard reads can use it. Each one keeps its MCP servers in its own settings, so add it once per
 harness you use. The dashboard keeps nothing for the MCP server: removing it from a harness is all there is to undo,
-and the dashboard works the same with or without it. The entry is called `harness` below, any name works.
+and the dashboard works the same with or without it. The entry is called `harness-dashboard` below, which is the name harnesses then list. Any name works.
 
 **Claude Code**
 
 ```sh
-claude mcp add --scope user harness -- harness-dashboard mcp   # add
-claude mcp remove --scope user harness                        # remove
+claude mcp add --scope user harness-dashboard -- harness-dashboard mcp   # add
+claude mcp remove --scope user harness-dashboard                     # remove
 ```
 
 **Codex**
 
 ```sh
-codex mcp add harness -- harness-dashboard mcp   # add
-codex mcp remove harness                         # remove
+codex mcp add harness-dashboard -- harness-dashboard mcp   # add
+codex mcp remove harness-dashboard                       # remove
 ```
 
 Or by hand in `~/.codex/config.toml` (remove the table to take it out again):
 
 ```toml
-[mcp_servers.harness]
+[mcp_servers.harness-dashboard]
 command = "harness-dashboard"
 args = ["mcp"]
 ```
@@ -433,7 +437,7 @@ args = ["mcp"]
 ```json
 {
   "mcpServers": {
-    "harness": { "command": "harness-dashboard", "args": ["mcp"] }
+    "harness-dashboard": { "command": "harness-dashboard", "args": ["mcp"] }
   }
 }
 ```
@@ -446,8 +450,8 @@ omp above. Older ones need the adapter first: `pi install npm:pi-mcp-adapter`. T
 **Gemini CLI**
 
 ```sh
-gemini mcp add --scope user harness harness-dashboard mcp   # add
-gemini mcp remove --scope user harness                     # remove
+gemini mcp add --scope user harness-dashboard harness-dashboard mcp   # add
+gemini mcp remove --scope user harness-dashboard                   # remove
 ```
 
 Or by hand in `~/.gemini/settings.json`, under `mcpServers`, with the same entry as omp above.
@@ -457,12 +461,12 @@ Or by hand in `~/.gemini/settings.json`, under `mcpServers`, with the same entry
 ```json
 {
   "mcpServers": {
-    "harness": { "type": "local", "command": "harness-dashboard", "args": ["mcp"], "tools": ["*"] }
+    "harness-dashboard": { "type": "local", "command": "harness-dashboard", "args": ["mcp"], "tools": ["*"] }
   }
 }
 ```
 
-To remove it: `copilot mcp remove harness`, or delete the entry.
+To remove it: `copilot mcp remove harness-dashboard`, or delete the entry.
 
 **OpenCode** (`~/.config/opencode/opencode.json`, or `opencode.json` in a project) and **Kilo Code** 7
 (`~/.config/kilo/kilo.jsonc`, or `kilo.jsonc` in a project):
@@ -470,7 +474,7 @@ To remove it: `copilot mcp remove harness`, or delete the entry.
 ```json
 {
   "mcp": {
-    "harness": { "type": "local", "command": ["harness-dashboard", "mcp"] }
+    "harness-dashboard": { "type": "local", "command": ["harness-dashboard", "mcp"] }
   }
 }
 ```
@@ -490,7 +494,7 @@ remove it, delete the entry.
 ```json
 {
   "context_servers": {
-    "harness": { "command": "harness-dashboard", "args": ["mcp"], "env": {} }
+    "harness-dashboard": { "command": "harness-dashboard", "args": ["mcp"], "env": {} }
   }
 }
 ```
@@ -522,6 +526,28 @@ across tags can be higher than the overall total.
 Tags and notes are kept in the database, never trimmed by retention. On a shared database every machine sees them.
 Secrets in a note are removed when it is saved.
 
+### Chart notes and before and after
+
+On **Trends**, mark a day (or a moment) with a one-line note of up to 200 characters, such as a new model, a changed
+prompt or a switch of plan. It shows as a marker on the usage chart. Notes live in the database, so every machine on a
+shared database sees them.
+
+Pick a note to compare the 7, 14 or 30 days before it with the same number of days after it: cost, prompts, cost per
+prompt, tokens per prompt, cache hit rate, tool error rate and API error rate. The comparison follows the current
+filters, so you can look at one project or model.
+
+### Commits and pull requests
+
+**Branches** shows the commits and pull requests made on each branch, and the cost per commit. They come from the
+agents' own logs, so no git process runs and no repository is read. Claude Code's PR links count, and so do successful
+`git commit` and `gh pr create` runs in Claude Code, Codex, omp, pi, OpenCode and Kilo Code 7, and on a best effort basis
+in Gemini CLI and Copilot CLI. Cline, Roo Code, Kilo Code up to 5.x, Zed and Cursor are not covered.
+
+Commits in throwaway repositories (scripts that run `git init` or `mktemp`, or work under a temp folder) and runs that
+had nothing to commit are ignored. A quiet `git commit -q` still counts. A commit made by hand in a terminal is not seen.
+The branch page lists its commits and pull requests with links, and a session's page lists its pull requests. A commit
+links to GitHub only when its branch has a GitHub pull request.
+
 ### Shared database (iCloud, Dropbox, network share)
 
 In **Settings → Database**, pick one of the synced folders found on the machine (iCloud Drive, Dropbox, OneDrive, Google
@@ -534,6 +560,10 @@ Leave *Copy the history of this machine* on for a new database to keep usage who
 choose the same folder on every other machine. Each machine ingests its own logs into the shared file,
 tagged with your user name and host name, so **Users** shows everyone side by side. Ingest bookkeeping is kept per host, and
 usage rows are deduplicated by message id, so machines never double count.
+
+When a newer version of the app upgrades a shared database, an older app that opens it does so read-only and says to
+update. Upgrade every machine. After this upgrade each machine re-reads its logs once on its first start, to fill in the
+commits, pull requests and compactions.
 
 For non-default paths the database uses SQLite's rollback journal instead of WAL, because WAL doesn't work on
 network or synced filesystems. Sync services don't lock files across machines, so avoid scanning from two machines at the
@@ -621,8 +651,13 @@ own data, so read this endpoint with a REST sensor instead, sending the token in
 
 ### Database size
 
-Two months of heavy use come to about 250 MB, mostly one row per tool call and per tool result with its indexes. In
-**Settings → Database**, *Keep details for* (off by default) trims older detail once a day: prompt text (each session keeps
+Two months of heavy use come to about 250 MB, mostly one row per tool call and per tool result with its indexes. To keep
+that in check, successful tool results older than 7 days are folded into daily counts per session. Every total stays the
+same. In the hourly charts, the successful calls of a folded day land at midnight. Each machine folds its own rows and
+leaves the rows of other machines on a shared database alone. A database from before this version gives the space back
+with **Settings → Compact**.
+
+In **Settings → Database**, *Keep details for* (off by default) trims older detail once a day: prompt text (each session keeps
 the start of its first prompt as its title), error messages, file paths and response times. Usage rows are never touched,
 so totals, costs, trends and budgets stay exactly the same. Prompts, Files, Friction and Time show less for older dates.
 The setting is per machine and only trims rows that machine ingested, so on a shared database each machine decides for
@@ -678,10 +713,28 @@ databases, and older ones after one Compact, give the space that trimming frees 
   response, tool call or prompt, so doing more or less work doesn't read as a change. A median is flagged when the last
   days fall outside the range its days usually spread over (median ± 3 median absolute deviations) and it moved at least
   10%. A rate is flagged when its counts differ by 3 standard errors and it moved at least 20%. Each window needs 50
-  samples. Response time is exact for omp, pi and OpenCode. For Claude Code and Codex it runs from the last input the
-  model got to the end of its response. Tool calls the user or the harness stopped don't count as errors. Client
+  samples. The API error rate is the share of model requests that failed per model and day, judged by the same rate rule
+  as tool errors, and the `<synthetic>` placeholder rows are left out. Response time is exact for omp, pi and OpenCode.
+  For Claude Code and Codex it runs from the last input the model got to the end of its response. Tool calls the user or the harness stopped don't count as errors. Client
   updates are marked on the charts, since a new harness version can change these numbers too. Cursor's export has
   none of this.
+- **Compactions.** Claude Code writes a record each time it compacts a session. The dashboard keeps its trigger (auto or
+  manual), the tokens before and after, the duration and an estimated cost. The estimate prices the tokens before as
+  cache reads and the tokens after as output, at the session's model. It is never added to the spend totals.
+  Compactions show as markers on the session's context chart, in a list on its page and as a column in **Sessions**. The summary Claude Code writes after a compaction no longer
+  counts as a prompt, so prompt counts drop slightly. The **Tips** page suggests a change when a range has 5 or more
+  compactions costing at least $1.
+- **Commits and pull requests.** Read from what the agents logged, as described under Commits and pull requests above.
+  **Cost per commit** is all spend on the branch divided by its commits. A commit subject is stored only when prompt text
+  is kept, and pull request links are stored with the pull request.
+- **Live status.** A session is working, idle or closed. A Claude Code session on this machine is closed as soon as its
+  process is gone, which the dashboard learns from `~/.claude/sessions/<pid>.json`. Every other session is closed after
+  30 minutes without activity. Closed sessions are grey and don't count in **Sessions idle**. The process check is off on
+  Windows for now.
+- **What-if pricing.** On **Models**, the range is priced again as if each call had gone to another model, and set
+  against the actual cost, per current model, with an export. Costs the provider reported (Cursor, Cline, Roo Code and
+  Kilo Code) are priced again from tokens too, so both sides compare list prices. Token counts are taken as they are,
+  though makers' tokenizers differ, so the same text can be more or fewer tokens on another model.
 
 ### Colors
 
@@ -707,7 +760,12 @@ so other accounts on the machine can't read your usage. It rejects requests whos
 (DNS-rebinding protection) and requests a browser marks as coming from another site, requires a custom header on
 state-changing requests (CSRF protection), and sends a Content-Security-Policy that forbids other pages to frame the
 app. Updates install only when the binary matches the release's `checksums.txt`. Prompt text is stored truncated to 2,000 characters so you can recognise
-expensive prompts. API keys, tokens and private keys in it are replaced with `[redacted]` before anything is stored. Set **Stored prompt length** to `0` to keep no prompt text at all.
+expensive prompts. API keys, tokens and private keys in it are replaced with `[redacted]` before anything is stored. Set **Stored prompt length** to `0` to keep no prompt text at all. Commit subjects are stored only when prompt text is kept. The
+URLs of pull requests the agents opened are stored.
+
+A few files outside the agents' logs are read, all on this machine. For Live, the files `~/.claude/sessions/*.json` are
+read for the process id and session id only, never the `.key` files next to them. Copilot's `session-store.db` is opened
+read-only.
 
 The app makes three kinds of outbound request, and never sends your usage in any: the optional update check against
 the GitHub releases API, while the Live view is open the plan-limit checks: with Anthropic, ChatGPT and GitHub,

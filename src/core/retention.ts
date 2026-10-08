@@ -9,6 +9,7 @@ import { getMeta, setMeta } from "./db.ts";
  * - file paths and subagent briefs on tool calls (Files is empty for those days, tool counts stay)
  * - error messages and inputs on outcomes (Friction keeps its counts and classes, not the messages)
  * - subagent briefs on sessions
+ * - commit subjects (the commits and pull requests themselves stay, with their counts and links)
  * - response times and effort (response_meta, Time and Model drift have nothing for those days)
  *
  * The setting is per machine (config.json), and so is what it trims: only the rows this host ingested. On a shared
@@ -70,6 +71,7 @@ export interface TrimResult {
   outcomes: number;
   sessions: number;
   responseMeta: number;
+  gitEvents: number;
   /** Transactions committed. */
   batches: number;
   /** Pages an incremental vacuum gave back to the disk. */
@@ -78,13 +80,20 @@ export interface TrimResult {
   done: boolean;
 }
 
-export interface TrimOptions {
+/** How a background job that works in steps (trimming, the outcome rollup) lets the server breathe. */
+export interface StepOptions {
+  /** Called between steps: the server answers requests there. */
+  pause?: () => Promise<void>;
+  /** Asked between steps: true ends the run early (the database was switched or closed). */
+  stop?: () => boolean;
+}
+
+/** The default pause between steps: one turn of the event loop. */
+export const nextTick = () => new Promise<void>((r) => setTimeout(r, 0));
+
+export interface TrimOptions extends StepOptions {
   now?: number;
   batch?: number;
-  /** Called between batches: the server answers requests there. */
-  pause?: () => Promise<void>;
-  /** Asked between batches: true ends the run early (the database was switched or closed). */
-  stop?: () => boolean;
 }
 
 /**
@@ -95,9 +104,9 @@ export interface TrimOptions {
 export async function trimDetail(db: Database, host: string, months: number, opts: TrimOptions = {}): Promise<TrimResult> {
   const now = opts.now ?? Date.now();
   const n = opts.batch ?? TRIM_BATCH;
-  const pause = opts.pause ?? (() => new Promise<void>((r) => setTimeout(r, 0)));
+  const pause = opts.pause ?? nextTick;
   const stop = opts.stop ?? (() => false);
-  const result: TrimResult = { prompts: 0, toolCalls: 0, outcomes: 0, sessions: 0, responseMeta: 0, batches: 0, freedPages: 0, done: true };
+  const result: TrimResult = { prompts: 0, toolCalls: 0, outcomes: 0, sessions: 0, responseMeta: 0, gitEvents: 0, batches: 0, freedPages: 0, done: true };
   const cutoff = detailCutoff(months, now);
   if (cutoff == null) {
     if (note(db, host)) db.query("DELETE FROM meta WHERE key = ?").run(metaKey(host));
@@ -112,7 +121,7 @@ export async function trimDetail(db: Database, host: string, months: number, opt
   // Each step reads the next rows in time order (keyset on ts and rowid, so a batch never reads the rows of the one
   // before), then changes those that still hold detail in one transaction.
   type Row = { rid: number; ts: number; dirty: number };
-  const steps: { key: "prompts" | "toolCalls" | "outcomes" | "responseMeta" | "sessions"; select: string; update: string; from: number }[] = [
+  const steps: { key: "prompts" | "toolCalls" | "outcomes" | "responseMeta" | "sessions" | "gitEvents"; select: string; update: string; from: number }[] = [
     {
       key: "prompts",
       select: `SELECT p.rowid AS rid, p.ts, (length(p.text) > ${TITLE_CHARS} OR p.id IS NOT ${firstPrompt("p")}) AS dirty
@@ -156,6 +165,13 @@ export async function trimDetail(db: Database, host: string, months: number, opt
       update: "UPDATE sessions SET brief = NULL WHERE rowid = $rid",
       from: 0,
     },
+    {
+      key: "gitEvents",
+      select: `SELECT rowid AS rid, ts, (subject IS NOT NULL) AS dirty FROM git_events
+               WHERE host = $host AND (ts, rowid) > ($ts, $rid) AND ts < $cutoff ORDER BY ts, rowid LIMIT $n`,
+      update: "UPDATE git_events SET subject = NULL WHERE rowid = $rid",
+      from,
+    },
   ];
 
   for (const step of steps) {
@@ -195,8 +211,8 @@ function firstPrompt(alias: string): string {
  * Gives free pages back to the disk a step at a time, when the database is in incremental auto-vacuum mode (new ones
  * are, see openDb, older ones after Compact). Otherwise the pages stay free inside the file for new rows.
  */
-export async function vacuumFree(db: Database, opts: { pause?: () => Promise<void>; stop?: () => boolean } = {}): Promise<number> {
-  const pause = opts.pause ?? (() => new Promise<void>((r) => setTimeout(r, 0)));
+export async function vacuumFree(db: Database, opts: StepOptions = {}): Promise<number> {
+  const pause = opts.pause ?? nextTick;
   if (pragma(db, "auto_vacuum") !== 2) return 0;
   let freed = 0;
   while (!opts.stop?.()) {

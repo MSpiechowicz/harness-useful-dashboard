@@ -116,4 +116,45 @@ describe("Copilot CLI ingest", () => {
     expect(db.query<any, []>("SELECT count(*) AS n FROM tool_calls").get()).toEqual({ n: 3 });
     expect(db.query<any, []>("SELECT count(*) AS n FROM prompts").get()).toEqual({ n: 1 });
   });
+
+  test("shell calls that commit or open a pull request are counted from their output", async () => {
+    const root = tempDir();
+    const shell = (id: string, command: string) => ({ toolCallId: id, name: "bash", arguments: { command } });
+    writeJsonl(eventsFile(root), [
+      start(),
+      ev("user.message", "2026-10-06T10:00:05.000Z", { content: "Commit and open a PR" }),
+      ev("assistant.message", "2026-10-06T10:00:08.000Z", {
+        model: "claude-sonnet-4.5",
+        toolRequests: [
+          shell("c1", 'git add -A && git commit -m "Add health endpoint"'),
+          shell("c2", "git commit -m 'Nothing staged'"),
+          shell("c3", "git -C /home/u/my-app commit --amend --no-edit"),
+          shell("p1", "gh pr create --fill"),
+          shell("x1", "echo git commit"),
+          // None: a throwaway repository with and without a sha, nothing to commit, a PR without a URL.
+          shell("s1", 'tmp=$(mktemp -d) && git init -q "$tmp" && cd "$tmp" && git commit -q --allow-empty -m baseline'),
+          shell("s2", "cd /tmp/probe && git commit -m 'fix: example'"),
+          shell("n1", "git commit -am wip || true"),
+          shell("w1", "gh pr create --web"),
+        ],
+      }),
+      ev("tool.execution_complete", "2026-10-06T10:00:09.000Z", { toolCallId: "c1", success: true, result: { content: "[feature/health 1a2b3c4] Add health endpoint\n 1 file changed" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:10.000Z", { toolCallId: "c2", success: false, error: { message: "nothing to commit, working tree clean" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:11.000Z", { toolCallId: "c3", success: true, result: { content: "ok" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:12.000Z", { toolCallId: "p1", success: true, result: { content: "https://github.com/acme/my-app/pull/42\n" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:13.000Z", { toolCallId: "x1", success: true, result: { content: "[main 9f9f9f9] not a commit" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:14.000Z", { toolCallId: "s1", success: true, result: { content: "" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:15.000Z", { toolCallId: "s2", success: true, result: { content: "[main 5555555] fix: example" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:16.000Z", { toolCallId: "n1", success: true, result: { content: "On branch main\nnothing to commit, working tree clean" } }),
+      ev("tool.execution_complete", "2026-10-06T10:00:17.000Z", { toolCallId: "w1", success: true, result: { content: "Opening https://github.com/acme/my-app/compare/main...feature in your browser." } }),
+    ]);
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    expect(db.query<any, []>("SELECT kind, provider, session_id, project, branch, sha, subject, repo, number FROM git_events ORDER BY ts").all()).toEqual([
+      { kind: "commit", provider: "copilot", session_id: `copilot:${SID}`, project: "/home/u/my-app", branch: "feature/health", sha: "1a2b3c4", subject: "Add health endpoint", repo: null, number: null },
+      // A commit whose output names no sha still counts, on the session's branch.
+      { kind: "commit", provider: "copilot", session_id: `copilot:${SID}`, project: "/home/u/my-app", branch: "main", sha: null, subject: null, repo: null, number: null },
+      { kind: "pr", provider: "copilot", session_id: `copilot:${SID}`, project: "/home/u/my-app", branch: "main", sha: null, subject: null, repo: "github.com/acme/my-app", number: 42 },
+    ]);
+  });
 });

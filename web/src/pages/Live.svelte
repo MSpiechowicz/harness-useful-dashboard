@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Ban, ChevronDown, ChevronUp, CircleStop, CircleX, Gauge, MessageSquareText, ServerCrash } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
+  import HarnessChips from "../components/HarnessChips.svelte";
   import Chart from "../components/Chart.svelte";
   import Link from "../components/Link.svelte";
   import Kpi from "../components/Kpi.svelte";
@@ -13,7 +14,6 @@
   import Dropdown from "../components/Dropdown.svelte";
   import { rateChart, type RateKind } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
-  import { PROVIDER_NAMES, PROVIDERS } from "../lib/palette.ts";
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
@@ -35,7 +35,7 @@
     firstTs: number;
     lastTs: number;
     gitBranch: string | null;
-    status: "working" | "idle" | "error";
+    status: "working" | "idle" | "error" | "closed";
     lastTool: string | null;
     lastFile: string | null;
     activeSubagents: number;
@@ -71,7 +71,7 @@
     messages: number;
     firstTs: number;
     lastTs: number;
-    status: "working" | "idle" | "error";
+    status: "working" | "idle" | "error" | "closed";
     lastTool: string | null;
     lastFile: string | null;
     errors: number;
@@ -211,7 +211,7 @@
   const statusCount = $derived(
     (data.data?.sessions ?? []).reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()),
   );
-  const STATUS_COLOR = { working: "var(--status-good)", error: "var(--status-critical)", idle: "var(--muted)" } as const;
+  const STATUS_COLOR = { working: "var(--status-good)", error: "var(--status-critical)", idle: "var(--muted)", closed: "var(--muted)" } as const;
   const today = $derived(data.data?.today);
   // The activity table: newest first, or grouped by what happened (failures first).
   type FeedSort = "recent" | "kind";
@@ -255,7 +255,7 @@
   let runsOpen = $state<Record<string, boolean>>({});
   const showRuns = (s: LiveSession) => s.runs.length > 0 && (runsOpen[s.id] ?? s.runs.some((r) => r.status === "working"));
   // A finished subagent is done, not waiting for a prompt like an idle session.
-  const runStatus = (r: LiveRun) => t(r.status === "idle" ? "live.status.done" : `live.status.${r.status}`);
+  const runStatus = (r: LiveRun) => t(r.status === "idle" || r.status === "closed" ? "live.status.done" : `live.status.${r.status}`);
   const runTarget = (s: LiveSession, r: LiveRun) => r.sessionId ?? s.id;
   // A model without its snapshot date ("claude-haiku-4-5-20251001" → "claude-haiku-4-5"). The full id is in the tooltip.
   const skillName = (k: string) => k.slice(k.lastIndexOf(":") + 1);
@@ -284,7 +284,7 @@
 {/snippet}
 
 <!-- A status dot. Working, it pings green like the sidebar's connection dot: the session is running right now. An idle
-     session pings amber: it waits for your next prompt. A subagent that is done stays still in grey. -->
+     session pings amber: it waits for your next prompt. A subagent that is done, or a session that was closed, stays still in grey. -->
 {#snippet statusDot(status: keyof typeof STATUS_COLOR, run = false)}
   {@const color = status === "idle" && !run ? "var(--status-warning)" : STATUS_COLOR[status]}
   <span class="relative flex size-2 shrink-0">
@@ -369,19 +369,7 @@
 
     <Card title={t("live.harnessLegend")} subtitle={t("live.harnessLegendHint")}>
       <!-- Pull the chips left by their padding + border so the first dot lines up with the title. -->
-      <ul class="-ml-[11px] flex flex-wrap items-center gap-2">
-        {#each PROVIDERS as p (p)}
-          {@const n = toolCounts.get(p) ?? 0}
-          <li
-            class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs {n ? 'border-line bg-surface-2 text-ink' : 'border-transparent text-muted'}"
-            title={n ? t("live.toolSessions", { n }) : undefined}
-          >
-            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", p)}></span>
-            {PROVIDER_NAMES[p]}
-            {#if n}<span class="tabular text-ink-2">{n}</span>{/if}
-          </li>
-        {/each}
-      </ul>
+      <HarnessChips counts={toolCounts} title={(n) => t("live.toolSessions", { n })} class="-ml-[11px]" />
     </Card>
 
     <TableCard

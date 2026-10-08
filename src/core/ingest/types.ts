@@ -56,6 +56,11 @@ export interface UsageRecord {
   premiumRequests?: number;
   /** Overrides the ingesting machine's identity (e.g. team CSV exports). */
   user?: string | null;
+  /**
+   * A session's totals rather than one call (Copilot session.shutdown). Once the session has calls of its own (read
+   * from Copilot's session store), it keeps only its premium requests: the calls carry the tokens.
+   */
+  rollup?: boolean;
 }
 
 export interface ToolRecord {
@@ -148,6 +153,67 @@ export interface OutcomeRecord {
   status?: number | null;
 }
 
+/** A commit or a pull request (ingest/vcs.ts). */
+export type VcsKind = "commit" | "pr";
+/**
+ * What a shell command an agent ran does to version control: it commits, opens a PR, or both (ingest/vcs.ts). With
+ * what the command tells of a commit that prints no `[branch sha]` line, it is a VcsCommit.
+ */
+export type VcsIntent = VcsKind | "both" | VcsCommit;
+
+/** A command that commits, with what it tells of its commits beyond the output's `[branch sha]` lines. */
+export interface VcsCommit {
+  does: "commit" | "both";
+  /** It ran `git log --oneline` (or a `%h %s` format) after this many of its commits: the log's first lines are them. */
+  log?: number;
+  /** Its first commit's message, first line only, already cut to the prompt text limit (absent when no text is kept). */
+  subject?: string;
+}
+
+/**
+ * A commit or pull request an agent made, read from its tool output. Keyed by the commit's project and sha or the PR's
+ * repository and number when known, else by the call that made it. The command itself is never kept.
+ */
+export interface GitEventRecord {
+  kind: VcsKind;
+  provider: Provider;
+  sessionId: string;
+  ts: number;
+  /** The working directory, mapped to its project by the writer. */
+  project: string | null;
+  agent: string;
+  branch: string | null;
+  /** The tool call that made it, the key when nothing better is known. */
+  callId: string | null;
+  sha?: string | null;
+  /** A commit's subject, already cut to the prompt text limit (null when no text is kept). */
+  subject?: string | null;
+  /** A PR's repository as "<host>/<owner>/<repo>". */
+  repo?: string | null;
+  number?: number | null;
+  url?: string | null;
+}
+
+/** A session's context compacted: the tokens before and after, and what it took. */
+export interface CompactionRecord {
+  /** "<session id>:<uuid ?? ts>:compact" */
+  id: string;
+  provider: Provider;
+  sessionId: string;
+  ts: number;
+  project: string | null;
+  /** The model the session was running, whose rates price the compaction. */
+  model: string | null;
+  agent: string;
+  /** "manual", "auto". */
+  trigger: string | null;
+  preTokens: number | null;
+  postTokens: number | null;
+  durationMs: number | null;
+  /** Provider-reported cost; when set it is used instead of the estimate. */
+  costUsd?: number | null;
+}
+
 export interface IngestSink {
   session(s: SessionRecord): void;
   prompt(p: PromptRecord): void;
@@ -157,6 +223,12 @@ export interface IngestSink {
   responseMeta?(m: ResponseMetaRecord): void;
   outcome?(o: OutcomeRecord): void;
   editLines?(e: EditLinesRecord): void;
+  gitEvent?(e: GitEventRecord): void;
+  compaction?(c: CompactionRecord): void;
+  /** A record stored as a prompt that is none (a compact summary): it goes, and what pointed at it points at `previous`. */
+  notPrompt?(id: string, previous: string | null): void;
+  /** A session's calls were read one by one: its rollup rows (`UsageRecord.rollup`) keep only their premium requests. */
+  supersedeRollups?(sessionId: string): void;
 }
 
 export interface FileContext {

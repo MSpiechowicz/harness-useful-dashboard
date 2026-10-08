@@ -1,14 +1,31 @@
 import type { Database, Statement } from "bun:sqlite";
 import type { PriceBook } from "../pricing.ts";
+import { withoutSnapshotDate } from "../models.ts";
 import { readingParams, readingStatement } from "../plans.ts";
 import { projectResolver } from "../project.ts";
-import type { EditLinesRecord, IngestSink, LimitRecord, OutcomeRecord, PromptRecord, ResponseMetaRecord, SessionRecord, ToolRecord, UsageRecord } from "./types.ts";
+import { localDayStart, rollupCutoff } from "../rollup.ts";
+import type {
+  CompactionRecord,
+  EditLinesRecord,
+  GitEventRecord,
+  IngestSink,
+  LimitRecord,
+  OutcomeRecord,
+  PromptRecord,
+  ResponseMetaRecord,
+  SessionRecord,
+  ToolRecord,
+  UsageRecord,
+} from "./types.ts";
 
 export interface WriterStats {
   usage: number;
   prompts: number;
   tools: number;
 }
+
+/** The longest branch name a commit or pull request keeps, whatever source read it. */
+const MAX_BRANCH = 200;
 
 /** IngestSink that upserts into SQLite. Callers wrap usage in a transaction. */
 export class DbWriter implements IngestSink {
@@ -26,6 +43,15 @@ export class DbWriter implements IngestSink {
   private sLines: Statement;
   private sFailedLines: Statement;
   private sReading: Statement;
+  private sRolledDay: Statement;
+  private sHasCalls: Statement;
+  private sSupersede: Statement;
+  private sGitEvent: Statement;
+  private sDropGitEvent: Statement;
+  private sCompaction: Statement;
+  private sDropPrompt: Statement;
+  private sMoveUsage: Statement;
+  private sMoveTools: Statement;
 
   constructor(
     db: Database,
@@ -36,6 +62,11 @@ export class DbWriter implements IngestSink {
      * rescan would otherwise bring them back each time, only for the next trim to take them out again.
      */
     private detailBefore = 0,
+    /**
+     * Successful tool calls older than this (epoch ms) may be rolled up into daily counts already (rollup.ts): a rescan
+     * must not write them again next to their count.
+     */
+    private rollupBefore = rollupCutoff(),
   ) {
     this.sSession = db.prepare(`
       INSERT INTO sessions (id, provider, native_id, project, user, host, title, git_branch, client, client_version,
@@ -141,6 +172,62 @@ export class DbWriter implements IngestSink {
         status = COALESCE(excluded.status, outcomes.status)
     `);
     this.sOutcomeTool = db.prepare("UPDATE outcomes SET tool = $tool WHERE id = $id AND tool IS NULL");
+    this.sRolledDay = db.prepare("SELECT 1 FROM outcome_days WHERE session_id = $sessionId AND ts = $day AND host = $host LIMIT 1");
+
+    // A session's own calls from Copilot's session store are keyed "<session>:u:…", its shutdown totals "…|…". The
+    // totals give up their tokens only once there are calls to carry them.
+    const hasCalls = "SELECT 1 FROM usage WHERE id > $sessionId || ':u:' AND id < $sessionId || ':u;' LIMIT 1";
+    this.sHasCalls = db.prepare(hasCalls);
+    this.sSupersede = db.prepare(`
+      UPDATE usage SET input_tokens = 0, output_tokens = 0, cache_read_tokens = 0, cache_write_tokens = 0,
+                       cache_write_1h_tokens = 0, reasoning_tokens = 0, total_tokens = 0, cost_usd = 0
+      WHERE session_id = $sessionId AND provider = 'copilot' AND instr(id, '|') > 0 AND total_tokens > 0
+        AND EXISTS (${hasCalls})
+    `);
+
+    // The same commit or PR seen again (a rescan, another session that pushed it) keeps the first sighting.
+    const first = (col: string) => `CASE WHEN excluded.ts < git_events.ts THEN excluded.${col} ELSE git_events.${col} END`;
+    this.sGitEvent = db.prepare(`
+      INSERT INTO git_events (id, kind, provider, session_id, ts, project, user, host, agent, branch, sha, subject, repo,
+                              number, url)
+      VALUES ($id, $kind, $provider, $sessionId, $ts, $project, $user, $host, $agent, $branch, $sha, $subject, $repo,
+              $number, $url)
+      ON CONFLICT(id) DO UPDATE SET
+        provider   = ${first("provider")},
+        session_id = ${first("session_id")},
+        agent      = ${first("agent")},
+        ts         = MIN(git_events.ts, excluded.ts),
+        project    = COALESCE(git_events.project, excluded.project),
+        user       = COALESCE(git_events.user, excluded.user),
+        branch     = COALESCE(git_events.branch, excluded.branch),
+        sha        = COALESCE(git_events.sha, excluded.sha),
+        subject    = COALESCE(git_events.subject, excluded.subject),
+        repo       = COALESCE(git_events.repo, excluded.repo),
+        number     = COALESCE(git_events.number, excluded.number),
+        url        = COALESCE(git_events.url, excluded.url)
+    `);
+
+    this.sDropGitEvent = db.prepare("DELETE FROM git_events WHERE id = $id");
+
+    // A reported cost is never replaced by an estimate.
+    this.sCompaction = db.prepare(`
+      INSERT INTO compactions (id, provider, session_id, ts, project, user, host, model, agent, trigger, pre_tokens,
+                               post_tokens, duration_ms, cost_usd, estimated)
+      VALUES ($id, $provider, $sessionId, $ts, $project, $user, $host, $model, $agent, $trigger, $preTokens,
+              $postTokens, $durationMs, $cost, $estimated)
+      ON CONFLICT(id) DO UPDATE SET
+        model       = COALESCE(compactions.model, excluded.model),
+        trigger     = COALESCE(excluded.trigger, compactions.trigger),
+        pre_tokens  = COALESCE(excluded.pre_tokens, compactions.pre_tokens),
+        post_tokens = COALESCE(excluded.post_tokens, compactions.post_tokens),
+        duration_ms = COALESCE(excluded.duration_ms, compactions.duration_ms),
+        cost_usd    = CASE WHEN compactions.estimated = 0 AND excluded.estimated = 1 THEN compactions.cost_usd ELSE excluded.cost_usd END,
+        estimated   = MIN(compactions.estimated, excluded.estimated)
+    `);
+
+    this.sDropPrompt = db.prepare("DELETE FROM prompts WHERE id = $id");
+    this.sMoveUsage = db.prepare("UPDATE usage SET prompt_id = $previous WHERE prompt_id = $id");
+    this.sMoveTools = db.prepare("UPDATE tool_calls SET prompt_id = $previous WHERE prompt_id = $id");
   }
 
   session(s: SessionRecord): void {
@@ -177,8 +264,13 @@ export class DbWriter implements IngestSink {
   }
 
   usage(u: UsageRecord): void {
+    // Totals of a session whose calls were read one by one keep only their premium requests: the calls carry the tokens.
+    const superseded = u.rollup === true && this.sHasCalls.get({ sessionId: u.sessionId }) != null;
+    if (superseded) u = { ...u, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, costUsd: 0 };
+
     const total = u.input + u.output + u.cacheRead + u.cacheWrite + u.cacheWrite1h;
-    if (total === 0) return;
+    if (total === 0 && !superseded) return;
+
     const priced = this.prices.cost(
       u.model,
       { input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, cacheWrite1h: u.cacheWrite1h },
@@ -194,7 +286,7 @@ export class DbWriter implements IngestSink {
       project: this.project(u.project),
       user: u.user ?? this.identity.user,
       host: this.identity.host,
-      model: u.model,
+      model: withoutSnapshotDate(u.model),
       skill: u.skill,
       agent: u.agent,
       isSubagent: u.isSubagent ? 1 : 0,
@@ -212,7 +304,13 @@ export class DbWriter implements IngestSink {
       billing: u.billing ?? null,
       premiumRequests: u.premiumRequests ?? 0,
     });
+    // The upsert keeps the larger counts of a row written before the session's calls came in.
+    if (superseded) this.supersedeRollups(u.sessionId);
     this.stats.usage++;
+  }
+
+  supersedeRollups(sessionId: string): void {
+    this.sSupersede.run({ sessionId });
   }
 
   tool(t: ToolRecord): void {
@@ -232,7 +330,7 @@ export class DbWriter implements IngestSink {
       spawnRef: t.spawnRef ?? null,
       brief: this.isOld(t.ts) ? null : (t.brief ?? null),
       callId: t.id.replace(/:f\d+$/, ""),
-      model: t.model ?? null,
+      model: withoutSnapshotDate(t.model ?? null),
       // Counts, not detail: kept however old the call is.
       linesAdded: t.linesAdded ?? null,
       linesRemoved: t.linesAdded != null ? (t.linesRemoved ?? 0) : null,
@@ -254,6 +352,12 @@ export class DbWriter implements IngestSink {
   }
 
   outcome(o: OutcomeRecord): void {
+    // A successful call of a session-day already counted in outcome_days (rollup.ts) is in that count.
+    if (o.kind === "tool_ok" && o.ts < this.rollupBefore) {
+      const rolled = this.sRolledDay.get({ sessionId: o.sessionId, day: localDayStart(o.ts), host: this.identity.host });
+      if (rolled) return;
+    }
+
     this.sOutcome.run({
       id: o.id,
       provider: o.provider,
@@ -262,7 +366,7 @@ export class DbWriter implements IngestSink {
       project: this.project(o.project),
       user: this.identity.user,
       host: this.identity.host,
-      model: o.model,
+      model: withoutSnapshotDate(o.model),
       agent: o.agent,
       effort: o.effort ?? null,
       kind: o.kind,
@@ -279,6 +383,79 @@ export class DbWriter implements IngestSink {
   editLines(e: EditLinesRecord): void {
     if (e.added == null) this.sFailedLines.run({ id: e.toolId });
     else this.sLines.run({ id: e.toolId, added: e.added, removed: e.removed ?? 0 });
+  }
+
+  /**
+   * A commit keyed by its project and sha, a PR by its repository and number, else either by the call that made it.
+   * One known by neither is dropped. The subject is detail, kept only when newer than the detail cutoff.
+   */
+  gitEvent(e: GitEventRecord): void {
+    const project = this.project(e.project);
+    let id: string | null;
+    if (e.kind === "commit") id = e.sha ? `commit:${project ?? ""}:${e.sha}` : e.callId ? `commit:${e.callId}` : null;
+    else id = e.repo && e.number != null ? `pr:${e.repo.toLowerCase()}#${e.number}` : e.callId ? `pr:${e.callId}` : null;
+    if (!id) return;
+
+    // A commit read before without its sha (keyed by its call) is this one: one row, under its sha.
+    if (e.kind === "commit" && e.sha && e.callId) this.sDropGitEvent.run({ id: `commit:${e.callId}` });
+
+    this.sGitEvent.run({
+      id,
+      kind: e.kind,
+      provider: e.provider,
+      sessionId: e.sessionId,
+      ts: e.ts,
+      project,
+      user: this.identity.user,
+      host: this.identity.host,
+      agent: e.agent,
+      branch: e.branch?.slice(0, MAX_BRANCH) ?? null,
+      sha: e.sha ?? null,
+      subject: this.isOld(e.ts) ? null : (e.subject ?? null),
+      repo: e.repo ?? null,
+      number: e.number ?? null,
+      url: e.url ?? null,
+    });
+  }
+
+  /**
+   * A compaction's cost, unless the harness reports one, is an estimate: the context read once at the cache-read rate
+   * and the summary written at the output rate, at the model's prices. recomputeCosts re-prices it.
+   */
+  compaction(c: CompactionRecord): void {
+    const reported = c.costUsd != null && Number.isFinite(c.costUsd);
+    const r = this.prices.rates(c.model);
+    const estimate = ((c.preTokens ?? 0) * r.cacheRead + (c.postTokens ?? 0) * r.output) / 1_000_000;
+
+    this.sCompaction.run({
+      id: c.id,
+      provider: c.provider,
+      sessionId: c.sessionId,
+      ts: c.ts,
+      project: this.project(c.project),
+      user: this.identity.user,
+      host: this.identity.host,
+      model: withoutSnapshotDate(c.model),
+      agent: c.agent,
+      trigger: c.trigger,
+      preTokens: c.preTokens,
+      postTokens: c.postTokens,
+      durationMs: c.durationMs,
+      cost: reported ? c.costUsd! : estimate,
+      estimated: reported ? 0 : 1,
+    });
+  }
+
+  /**
+   * A record stored as a prompt that is none: it goes, and the usage and tool calls it had move to `previous`. A prompt
+   * named as its own previous one stays as it is: dropping it would leave its usage pointing at nothing.
+   */
+  notPrompt(id: string, previous: string | null): void {
+    if (id === previous) return;
+
+    this.sDropPrompt.run({ id });
+    this.sMoveUsage.run({ id, previous });
+    this.sMoveTools.run({ id, previous });
   }
 
   /** Whether a record is older than the detail kept. */
@@ -326,7 +503,8 @@ export function resolveSpawnRefs(db: Database): void {
 }
 
 /**
- * Re-prices every usage row (after pricing edits). Provider-reported costs (Cursor, Cline, Roo Code, Kilo Code) are kept.
+ * Re-prices every usage row (after pricing edits), and the estimated compaction costs. Provider-reported costs (Cursor,
+ * Cline, Roo Code, Kilo Code) are kept.
  * Cost is linear in the token counts, so each model (and fast mode) is one UPDATE with its rates: the same sum in the
  * same order as PriceBook.cost, rather than every row read into JS and written back one by one.
  */
@@ -338,12 +516,22 @@ export function recomputeCosts(db: Database, prices: PriceBook): number {
                       cost_estimated = ?
      WHERE model IS ? AND (speed IS 'fast') = ? AND ${repriced}`,
   );
+  const compactionModels = db.query<{ model: string | null }, []>("SELECT DISTINCT model FROM compactions WHERE estimated = 1").all();
+  const updCompaction = db.prepare(
+    "UPDATE compactions SET cost_usd = (COALESCE(pre_tokens, 0) * ? + COALESCE(post_tokens, 0) * ?) / 1000000.0 WHERE model IS ? AND estimated = 1",
+  );
   let updated = 0;
   db.transaction(() => {
     for (const { model } of models) {
       const r = prices.rates(model);
       const rates = [r.input, r.output, r.cacheRead, r.cacheWrite, r.cacheWrite1h];
       for (const fast of [0, 1]) updated += upd.run(...rates, fast ? 2 : 1, r.estimated ? 1 : 0, model, fast).changes;
+    }
+
+    // Estimated compaction costs (CompactionRecord), the same sum as DbWriter.compaction. Not counted in what is returned.
+    for (const { model } of compactionModels) {
+      const r = prices.rates(model);
+      updCompaction.run(r.cacheRead, r.output, model);
     }
   })();
   return updated;

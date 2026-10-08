@@ -20,6 +20,15 @@ export function normalizeModel(model: string | null | undefined): string {
   return m || "unknown";
 }
 
+/**
+ * A model id without its snapshot date ("claude-haiku-4-5-20251001", Vertex's "claude-haiku-4-5@20251001"), as it is
+ * stored and shown: the date tells two releases of one model apart, never two models, and harnesses that report the
+ * plain alias would otherwise split one model in two. Everything else stays as the harness wrote it.
+ */
+export function withoutSnapshotDate<T extends string | null | undefined>(model: T): T {
+  return (typeof model === "string" ? model.replace(/[-@]\d{8}$/, "") : model) as T;
+}
+
 export type Maker = "anthropic" | "openai";
 
 const MAKERS: [RegExp, Maker][] = [

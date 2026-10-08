@@ -1,6 +1,7 @@
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
 import { countLines, diffLines, type LineCount, patchLines, unifiedDiffLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
+import { emitGitEvents, vcsCall } from "./vcs.ts";
 
 /**
  * GitHub Copilot CLI logs each session as events, one JSON object per line, in
@@ -12,6 +13,8 @@ import { type FileContext, type IngestSink, type LineParser, num, parseTs, Sessi
  * agent so far. A resumed session's next shutdown counts on from the one before (same sessionStartTime), so only what
  * grew since becomes a row. A session that ended without a shutdown (a crash, a kill) has no tokens on disk.
  * Copilot bills premium requests, not tokens: the rows are billed through "github-copilot" and priced API-equivalent.
+ * Newer versions also keep every model call in session-store.db (copilotStore.ts): a session found there has its
+ * tokens from those calls, and its shutdown rows keep only their premium requests.
  */
 
 interface Totals {
@@ -26,6 +29,7 @@ interface Totals {
 interface CopilotState {
   sessionId: string | null;
   cwd: string | null;
+  branch?: string | null;
   model: string | null;
   promptId: string | null;
   /** The model of the last answer, which the tool results that follow belong to. */
@@ -39,6 +43,8 @@ interface CopilotState {
 const SESSION_RE = /session-state[\\/]([^\\/]+)[\\/]events\.jsonl$/;
 /** Tools whose `path` argument is the file they work on. */
 const FILE_TOOLS = new Set(["view", "create", "edit", "str_replace", "str_replace_editor", "insert", "write", "read"]);
+/** Tools that run a shell command (`command`), whose output may report a commit or a pull request. */
+const SHELL_TOOLS = new Set(["bash", "shell", "powershell"]);
 /** Failed calls the user turned down or stopped rather than ones that went wrong. */
 const STOPPED_RE = /^(?:rejected|denied|cancell?ed|aborted)$|\b(?:user )?(?:rejected|denied|declined)\b|\bcancell?ed by the user\b/i;
 
@@ -58,6 +64,11 @@ export function copilotEditLines(tool: string, args: Record<string, any>): LineC
     default:
       return null;
   }
+}
+
+/** A model as priced: long-context variants ("-1m", "-1m-internal") are priced as their model. */
+export function copilotModel(name: string): string {
+  return name.replace(/-1m(-internal)?$/, "");
 }
 
 const KEYS = ["input", "output", "cacheRead", "cacheWrite", "reasoning", "premium"] as const;
@@ -102,6 +113,7 @@ export const copilotParser: LineParser<CopilotState> = {
           const c = d.context ?? {};
           state.cwd = (typeof c.cwd === "string" && c.cwd) || (typeof c.gitRoot === "string" && c.gitRoot) || state.cwd;
           if (typeof d.selectedModel === "string") state.model = d.selectedModel;
+          if (typeof c.branch === "string" && c.branch) state.branch = c.branch;
           sessions.touch(
             {
               ...base,
@@ -132,7 +144,8 @@ export const copilotParser: LineParser<CopilotState> = {
             if (typeof r?.toolCallId !== "string" || typeof r.name !== "string") continue;
             const args = r.arguments && typeof r.arguments === "object" ? r.arguments : {};
             const id = `${sessionId}:${r.toolCallId}`;
-            rememberCall((state.calls ??= {}), id, r.name, inputSummary(args, ctx.promptTextLimit));
+            const vcs = SHELL_TOOLS.has(r.name) ? vcsCall(args.command, ctx.promptTextLimit, r.name === "powershell" ? "windows" : "posix") : null;
+            rememberCall((state.calls ??= {}), id, r.name, inputSummary(args, ctx.promptTextLimit), vcs);
             const path = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
             const lines = copilotEditLines(r.name, args);
             sink.tool({
@@ -164,6 +177,12 @@ export const copilotParser: LineParser<CopilotState> = {
           const diff = d.result?.detailedContent;
           const exact = kind === "tool_ok" && typeof diff === "string" && diff.includes("@@") ? unifiedDiffLines(diff) : null;
           if (exact) sink.editLines?.({ toolId: id, ...exact });
+          // A commit or PR the call made, read from its result's text, else its detailed text.
+          if (kind === "tool_ok" && call.vcs) {
+            const output = typeof d.result?.content === "string" ? d.result.content : d.result?.detailedContent;
+            const gitCall = { provider: "copilot" as const, sessionId, ts, project: state.cwd, agent, branch: state.branch ?? null, callId: id };
+            emitGitEvents(sink, call.vcs, output, gitCall, ctx.promptTextLimit);
+          }
           break;
         }
         case "abort":
@@ -196,7 +215,7 @@ function shutdown(rec: Record<string, any>, d: Record<string, any>, ts: number, 
     const metrics = a?.modelMetrics && typeof a.modelMetrics === "object" ? (a.modelMetrics as Record<string, any>) : {};
     for (const [name, m] of Object.entries(metrics)) {
       // "auto" is whichever model the session was on. Long-context variants are priced as their model.
-      const model = (name === "auto" && typeof d.currentModel === "string" ? d.currentModel : name).replace(/-1m(-internal)?$/, "");
+      const model = copilotModel(name === "auto" && typeof d.currentModel === "string" ? d.currentModel : name);
       const key = `${agentKey}|${name}`;
       const cur = totalsOf(m);
       const prev = totals[key];
@@ -230,6 +249,8 @@ function shutdown(rec: Record<string, any>, d: Record<string, any>, ts: number, 
       reasoning: r.delta.reasoning,
       billing: "github-copilot",
       premiumRequests: r.delta.premium,
+      // Session totals: once the session's calls are read from the store, only the premium requests are kept.
+      rollup: true,
     });
   }
 }

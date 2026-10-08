@@ -27,18 +27,31 @@ export function redact(text: string): string {
   return out;
 }
 
-/** Bumped when SECRETS learns new shapes: text stored before is gone over once more. */
-const REDACT_VERSION = 1;
+/**
+ * Bumped when SECRETS learns new shapes or another column holds text: what is stored is gone over once more. 2 added
+ * commit subjects and chart notes.
+ */
+const REDACT_VERSION = 2;
+
+/** The stored text redaction goes over, by table and column. */
+const STORED_TEXT = [
+  ["prompts", "text"],
+  ["sessions", "brief"],
+  ["outcomes", "detail"],
+  ["outcomes", "input"],
+  ["git_events", "subject"],
+  ["chart_notes", "text"],
+] as const;
 
 /**
- * Goes over the prompt text and subagent briefs stored before redaction existed (or before it knew today's shapes).
- * Once per database, by version, so machines sharing one don't repeat it.
+ * Goes over the prompt text, subagent briefs, error text, commit subjects and chart notes stored before redaction
+ * existed (or before it knew today's shapes). Once per database, by version, so machines sharing one don't repeat it.
  */
 export function redactStored(db: Database): number {
   if (Number(getMeta(db, "redacted") ?? 0) >= REDACT_VERSION) return 0;
   let changed = 0;
   db.transaction(() => {
-    for (const [table, column] of [["prompts", "text"], ["sessions", "brief"], ["outcomes", "detail"], ["outcomes", "input"]] as const) {
+    for (const [table, column] of STORED_TEXT) {
       const rows = db.query<{ id: string; v: string }, []>(`SELECT id, ${column} AS v FROM ${table} WHERE ${column} IS NOT NULL`).all();
       const upd = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
       for (const r of rows) {

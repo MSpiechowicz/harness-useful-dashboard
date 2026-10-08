@@ -1,5 +1,5 @@
 import { redact } from "./redact.ts";
-import { truncate } from "./ingest/types.ts";
+import { truncate, type VcsIntent } from "./ingest/types.ts";
 
 /**
  * Why a tool call failed, in a few classes the friction view groups by. Worked out from the tool's error output while
@@ -134,24 +134,26 @@ export function inputSummary(input: unknown, textLimit = INPUT_LIMIT): string | 
 }
 
 /**
- * The calls still waiting for their results, by id: the tool and what it was given. Kept in a parser's state between
- * chunks, the last few only (results follow their calls closely).
+ * The calls still waiting for their results, by id: the tool, what it was given and whether it commits or opens a pull
+ * request or both (ingest/vcs.ts vcsIntent, so its output is read for them). Kept in a parser's state between chunks,
+ * the last few only (results follow their calls closely). States saved without the third element, or before "both"
+ * existed, are still read.
  */
-export type PendingCalls = Record<string, [tool: string, input: string | null]>;
+export type PendingCalls = Record<string, [tool: string, input: string | null, vcs?: VcsIntent]>;
 
-export function rememberCall(calls: PendingCalls, id: string, tool: string, input: string | null, keep = 64): void {
+export function rememberCall(calls: PendingCalls, id: string, tool: string, input: string | null, vcs: VcsIntent | null = null, keep = 64): void {
   delete calls[id];
-  calls[id] = [tool, input];
+  calls[id] = vcs ? [tool, input, vcs] : [tool, input];
   const keys = Object.keys(calls);
   for (const k of keys.slice(0, Math.max(0, keys.length - keep))) delete calls[k];
 }
 
 /** Takes the call a result belongs to, once it is in. */
-export function takeCall(calls: PendingCalls | undefined, id: string): { tool: string | null; input: string | null } {
+export function takeCall(calls: PendingCalls | undefined, id: string): { tool: string | null; input: string | null; vcs: VcsIntent | null } {
   const c = calls?.[id];
-  if (!c) return { tool: null, input: null };
+  if (!c) return { tool: null, input: null, vcs: null };
   delete calls![id];
-  return { tool: c[0], input: c[1] };
+  return { tool: c[0], input: c[1], vcs: c[2] ?? null };
 }
 
 /**

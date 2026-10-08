@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { failureOf, inputSummary } from "../failures.ts";
 import { countLines, diffLines, type LineCount, unifiedDiffLines } from "./lines.ts";
 import { type FileContext, type IngestSink, type LineParser, num, parseTs, SessionAccumulator, truncate } from "./types.ts";
+import { emitGitEvents, vcsCall } from "./vcs.ts";
 
 /**
  * Gemini CLI records each chat under ~/.gemini/tmp/<project>/chats/ (or $GEMINI_CLI_HOME/.gemini):
@@ -105,6 +106,26 @@ function resultText(call: Record<string, any>): string {
   return typeof call.resultDisplay === "string" ? call.resultDisplay : "";
 }
 
+/** The exit code line run_shell_command adds to its result. */
+const EXIT_CODE_RE = /^Exit Code: (\d+)\r?$/gm;
+
+/**
+ * What a shell command printed and how it exited, from run_shell_command's result. Older versions (and newer ones in
+ * debug mode) wrap the output in "Command: …", "Directory: …", "Output: …", "Error: …", "Exit Code: …" lines, newer
+ * ones give the output itself and add "Exit Code: n" only when it is not 0. The exit code is the last such line, after
+ * anything the command printed. The command line itself is dropped.
+ */
+function shellResult(text: string): { output: string; exitCode: number | null } {
+  const codes = [...text.matchAll(EXIT_CODE_RE)];
+  const exitCode = codes.length ? Number(codes[codes.length - 1]![1]) : null;
+  if (!text.startsWith("Command: ")) return { output: text, exitCode };
+
+  const start = text.indexOf("\nOutput: ");
+  const body = start < 0 ? "" : text.slice(start + "\nOutput: ".length);
+  const end = body.lastIndexOf("\nError: ");
+  return { output: end < 0 ? body : body.slice(0, end), exitCode };
+}
+
 /** Reads one record: the header, a `$set`, or a message. */
 function record(rec: Record<string, any>, ctx: { promptTextLimit: number }, state: GeminiState, sink: IngestSink, sessions: SessionAccumulator): void {
   const sid = () => `gemini:${state.sessionId}`;
@@ -195,6 +216,14 @@ function record(rec: Record<string, any>, ctx: { promptTextLimit: number }, stat
     });
     const exact = kind === "tool_ok" && lines ? resultLines(call.resultDisplay) : null;
     if (exact) sink.editLines?.({ toolId: id, ...exact });
+
+    // A shell command that worked and commits or opens a PR. The chat logs no branch: a commit's is the one its output
+    // names.
+    const vcs = kind === "tool_ok" && call.name === "run_shell_command" ? vcsCall(args.command, ctx.promptTextLimit) : null;
+    const shell = vcs ? shellResult(resultText(call)) : null;
+    if (vcs && shell && (shell.exitCode == null || shell.exitCode === 0)) {
+      emitGitEvents(sink, vcs, shell.output, { provider: "gemini", sessionId, ts: at, project: state.cwd, agent, branch: null, callId: id }, ctx.promptTextLimit);
+    }
   }
 
   const t = rec.tokens;

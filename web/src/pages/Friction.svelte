@@ -3,6 +3,7 @@
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Empty from "../components/Empty.svelte";
+  import HarnessChips from "../components/HarnessChips.svelte";
   import Link from "../components/Link.svelte";
   import Kpi from "../components/Kpi.svelte";
   import PageHeader from "../components/PageHeader.svelte";
@@ -12,10 +13,10 @@
   import ViewGate from "../components/ViewGate.svelte";
   import { apiUrl, settled, useFetch } from "../lib/api.svelte.ts";
   import { apiErrorChart, frictionChart } from "../lib/charts.ts";
-  import { colorFor, rankKeys } from "../lib/colors.svelte.ts";
-  import { compact, dateTime, decimal, entityLabel, percent, relative } from "../lib/format.ts";
+  import { colorFor, cssVar } from "../lib/colors.svelte.ts";
+  import { compact, dateTime, decimal, entityLabel, integer, percent, relative } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
-  import { PROVIDER_NAMES, type Provider } from "../lib/palette.ts";
+  import { FAMILIES, OTHER, PROVIDER_NAMES, type Provider } from "../lib/palette.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
@@ -41,7 +42,6 @@
   }
   /** Failed model requests (rate limits, overloads, timeouts, …), counted apart from the tool calls above. */
   type ApiClass = "rate_limit" | "overloaded" | "server_error" | "timeout" | "network" | "auth" | "billing" | "context_length" | "other";
-  const API_CLASSES: ApiClass[] = ["rate_limit", "overloaded", "server_error", "timeout", "network", "auth", "billing", "context_length", "other"];
   interface ApiError {
     id: string;
     ts: number;
@@ -84,6 +84,30 @@
   const option = $derived.by(() => (void store.dark, d.data ? frictionChart(d.data.series, store.bucket) : null));
   const rate = (v: number | null) => (v == null ? "–" : percent(v, v < 0.1 ? 1 : 0));
   // Codex names its tool results apart from its tool calls: their outcomes can't be put to a tool.
+  // "Why calls failed" shows each cause and tool as a number of failures or as a share of all failures.
+  let reasonUnit = $state<"count" | "share">(storedUnit());
+  function storedUnit(): "count" | "share" {
+    try {
+      return localStorage.getItem("hd.frictionReasonUnit") === "share" ? "share" : "count";
+    } catch {
+      return "count";
+    }
+  }
+  function pickUnit(u: "count" | "share") {
+    reasonUnit = u;
+    try {
+      localStorage.setItem("hd.frictionReasonUnit", u);
+    } catch {
+      /* not kept */
+    }
+  }
+  // A part of a cause's failures (the cause itself, or one of its tools) as a share of all failures.
+  const shareOf = (n: number, r: { count: number; share: number }) => {
+    const x = r.count ? (r.share * n) / r.count : 0;
+    // A few failures among thousands would round to "0.0%", as if there were none.
+    if (n > 0 && x < 0.0005) return `<${percent(0.001, 1)}`;
+    return percent(x, x < 0.1 ? 1 : 0);
+  };
   const toolName = (key: string) => (key === "(none)" ? t("friction.unlinked") : key.replace(/^mcp__(.+?)__/, "$1:"));
 
   // Models with enough tool calls for a rate to mean something, worst first.
@@ -163,13 +187,41 @@
   });
   const titleOf = (s: { id: string; title: string | null }) => s.title ?? s.id.split(":").pop()?.slice(0, 13) ?? s.id;
 
-  // API errors: each class keeps its color whatever the range shows, "other" in grey.
-  rankKeys("apiError", API_CLASSES);
+  // API errors: each cause has a color of its own, the same in every range, chosen so causes that come together stay
+  // apart: amber for rate limits, red for server errors, blue for sign-in, and no green, which would read as success.
   const api = $derived(d.data?.apiErrors);
   const apiLabel = (c: ApiClass) => t(`friction.api.${c}`);
-  const apiOption = $derived.by(() =>
-    (void store.dark, api?.total ? apiErrorChart(api.buckets, api.series, store.bucket, (k) => apiLabel(k as ApiClass), (k) => colorFor("apiError", k)) : null),
-  );
+  function apiColor(c: string): string {
+    const m = store.dark ? "dark" : "light";
+    const colors: Record<ApiClass, string> = {
+      rate_limit: cssVar("--status-warning"),
+      overloaded: FAMILIES.pink[m][0],
+      server_error: cssVar("--bad-ink"),
+      timeout: FAMILIES.sky[m][0],
+      network: FAMILIES.violet[m][0],
+      auth: cssVar("--seq-5"),
+      billing: FAMILIES.teal[m][0],
+      context_length: FAMILIES.gold[m][0],
+      other: OTHER[m][0]!,
+    };
+    return colors[c as ApiClass] ?? colors.other;
+  }
+  // The chart starts a few days before the first error in the range rather than on its first day: errors are rare,
+  // and weeks without any squeezed the days that had them into a corner. At least two weeks stay on screen.
+  const API_MIN_BUCKETS = 14;
+  const apiFrom = $derived.by(() => {
+    if (!api?.total) return 0;
+    const first = api.buckets.findIndex((_, i) => api.series.some((s) => s.data[i]));
+    return Math.max(0, Math.min(first - 2, api.buckets.length - API_MIN_BUCKETS));
+  });
+  const apiOption = $derived.by(() => {
+    void store.dark;
+    if (!api?.total) return null;
+    const series = api.series.map((s) => ({ ...s, data: s.data.slice(apiFrom) }));
+    return apiErrorChart(api.buckets.slice(apiFrom), series, store.bucket, (k) => apiLabel(k as ApiClass), apiColor);
+  });
+  // A rate under 0.1% would round to "0.0%", as if there were none.
+  const apiRate = (v: number | null) => (v == null ? "–" : v > 0 && v < 0.0005 ? `<${percent(0.001, 1)}` : rate(v));
   const maxApiModel = $derived(Math.max(1, ...(api?.models ?? []).map((m) => m.count)));
   type ApiSort = "recent" | "reason" | "model";
   let apiSort = $state<ApiSort>("recent");
@@ -183,6 +235,12 @@
     if (apiSort === "reason") return rows.sort((a, b) => apiLabel(a.reason).localeCompare(apiLabel(b.reason)) || b.ts - a.ts);
     if (apiSort === "model") return rows.sort((a, b) => (a.model ?? "").localeCompare(b.model ?? "") || b.ts - a.ts);
     return rows;
+  });
+  // How many of the listed errors each harness had, for the legend above the list.
+  const apiHarnesses = $derived.by(() => {
+    const n = new Map<string, number>();
+    for (const e of api?.recent ?? []) n.set(e.provider, (n.get(e.provider) ?? 0) + 1);
+    return n;
   });
   const apiStatus = (e: ApiError) => (e.status ? t("friction.api.status", { code: e.status }) : null);
 </script>
@@ -232,6 +290,14 @@
         exportName={reasons.length ? "friction-reasons" : undefined}
         exportRows={() => reasons.map((r) => ({ reason: r.reason, label: reasonLabel(r.reason), calls: r.count, share: r.share, tools: r.tools.map((x) => `${x.tool} ${x.count}`).join(", ") }))}
       >
+        {#snippet actions()}
+          {#if reasons.length}
+            <div class="seg" role="radiogroup" aria-label={t("friction.reasonUnit")}>
+              <button role="radio" aria-checked={reasonUnit === "count"} onclick={() => pickUnit("count")}>{t("friction.reasonUnit.count")}</button>
+              <button role="radio" aria-checked={reasonUnit === "share"} onclick={() => pickUnit("share")}>{t("friction.reasonUnit.share")}</button>
+            </div>
+          {/if}
+        {/snippet}
         {#if reasons.length}
           <!-- At most one entry per cause (a fixed set of nine) with its top three tools, so the card never grows with
                the data. Bars in the data color: every entry here is a failure, red would say nothing. Declined in grey. -->
@@ -240,21 +306,28 @@
               <li>
                 <button
                   type="button"
-                  class="group grid w-full grid-cols-[minmax(0,1fr)_auto_2.75rem] items-baseline gap-x-3 gap-y-1 rounded-lg px-2 py-2 text-left hover:bg-surface-2"
+                  class="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1 rounded-lg px-2 py-2 text-left hover:bg-surface-2"
                   title={t("friction.reasonFilter")}
                   onclick={() => showReason(r.reason)}
                 >
                   <span class="truncate text-[13px] text-ink-2 group-hover:text-ink">{reasonLabel(r.reason)}</span>
-                  <span class="tabular text-right text-[13px] font-medium text-ink">{compact(r.count)}</span>
-                  <span class="tabular text-right text-xs text-muted">{percent(r.share, r.share < 0.1 ? 1 : 0)}</span>
-                  <span class="col-span-3 h-1.5 overflow-hidden rounded-full bg-surface-3">
+                  <span class="tabular text-right text-[13px] font-medium text-ink" title={t("friction.reasonCount", { n: integer(r.count), share: percent(r.share, 1) })}>{reasonUnit === "share" ? shareOf(r.count, r) : compact(r.count)}</span>
+                  <span class="col-span-2 h-1.5 overflow-hidden rounded-full bg-surface-3">
                     <span
                       class="block h-full rounded-full"
                       style:width="{Math.max(0.5, (r.count / maxReason) * 100)}%"
                       style:background={r.reason === "rejected" ? "var(--muted)" : "var(--data)"}
                     ></span>
                   </span>
-                  <span class="col-span-3 truncate text-xs text-muted">{r.tools.map((x) => `${toolName(x.tool)} ${compact(x.count)}`).join(" · ")}</span>
+                  <!-- The tools that failed most with this cause, a chip each with its count of failures. One line: the
+                       chips that don't fit are cut off rather than wrap, so every entry keeps its height. -->
+                  <span class="col-span-2 mt-0.5 flex min-w-0 gap-1.5 overflow-hidden">
+                    {#each r.tools as x (x.tool)}
+                      <span class="inline-flex shrink-0 items-baseline gap-1 rounded bg-surface-2 px-1.5 py-px text-[11px] text-muted" title={t("friction.reasonToolCount", { tool: toolName(x.tool), n: integer(x.count), share: shareOf(x.count, r) })}>
+                        {toolName(x.tool)}<span class="tabular font-medium text-ink-2">{reasonUnit === "share" ? shareOf(x.count, r) : compact(x.count)}</span>
+                      </span>
+                    {/each}
+                  </span>
                 </button>
               </li>
             {/each}
@@ -436,7 +509,7 @@
         <div class="grid gap-5 xl:grid-cols-3">
           <Card
             title={t("friction.api.overTime")}
-            subtitle={t("friction.api.overTimeHint", { rate: rate(api.rate) })}
+            subtitle={t("friction.api.overTimeHint", { n: integer(api.total), all: compact(api.requests + api.total), rate: apiRate(api.rate) })}
             class="xl:col-span-2"
             exportName="friction-api-errors-by-class"
             exportRows={() => api.classes.map((c) => ({ class: c.cls, label: apiLabel(c.cls), errors: c.count, share: c.share }))}
@@ -452,13 +525,11 @@
             <ul class="flex flex-col gap-3" class:loading-dim={d.loading}>
               {#each api.models.slice(0, 8) as m (`${m.provider}|${m.model}`)}
                 <li class="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1.5" title="{m.provider} · {m.model} · {apiLabel(m.topClass)}">
-                  <span class="flex min-w-0 items-center gap-2">
-                    <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", m.provider)}></span>
-                    <span class="truncate text-[13px] text-ink-2">{m.model === "(none)" ? m.provider : entityLabel("model", m.model, m.model)}</span>
-                  </span>
+                  <!-- As in "Error rate by model": the model's own color on its bar, the harness named below it. -->
+                  <span class="truncate text-[13px] text-ink-2">{entityLabel("model", m.model, m.model)}</span>
                   <span class="tabular text-right text-[13px] font-medium text-ink">{compact(m.count)}</span>
                   <span class="col-span-2 h-1.5 overflow-hidden rounded-full bg-surface-3">
-                    <span class="block h-full rounded-full" style:width="{Math.max(0.5, (m.count / maxApiModel) * 100)}%" style:background="var(--data)"></span>
+                    <span class="block h-full rounded-full" style:width="{Math.max(0.5, (m.count / maxApiModel) * 100)}%" style:background={colorFor("model", m.model)}></span>
                   </span>
                   <span class="col-span-2 truncate text-xs text-muted">{PROVIDER_NAMES[m.provider as Provider] ?? m.provider} · {apiLabel(m.topClass)}</span>
                 </li>
@@ -467,6 +538,11 @@
           </Card>
         </div>
 
+        <!-- What the squares before the models stand for, as on Live: the harness each request came from. -->
+        <Card title={t("live.harnessLegend")} subtitle={t("friction.api.harnessHint")}>
+          <!-- Pull the chips left by their padding + border so the first square lines up with the title. -->
+          <HarnessChips counts={apiHarnesses} title={(n) => t("friction.api.harnessErrors", { n })} class="-ml-[11px]" />
+        </Card>
         <TableCard
           title={t("friction.api.recent")}
           subtitle={t("friction.api.recentHint", { n: compact(api.recent.length) })}
@@ -504,7 +580,7 @@
                     <td>
                       <span class="flex min-w-0 items-center gap-2" title="{e.provider} · {e.model ?? ''}">
                         <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", e.provider)}></span>
-                        <span class="truncate text-ink">{e.model ? entityLabel("model", e.model, e.model) : e.provider}</span>
+                        {#if e.model}<span class="truncate text-ink">{entityLabel("model", e.model, e.model)}</span>{:else}<span class="text-muted">–</span>{/if}
                       </span>
                     </td>
                     <td>

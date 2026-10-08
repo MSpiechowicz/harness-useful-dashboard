@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { homedir } from "node:os";
 import { memo } from "./cache.ts";
+import { hasTable } from "./db.ts";
 import { storedApiClass } from "./apiErrors.ts";
 import { storedReason } from "./failures.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
@@ -148,6 +149,123 @@ export function projectLabel(path: string | null): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/** A commit found in an agent's transcript. `url` only when its branch has a pull request on github.com. */
+export interface GitCommit {
+  id: string;
+  ts: number;
+  branch: string | null;
+  sha: string | null;
+  subject: string | null;
+  project: string | null;
+  sessionId: string;
+  provider: string;
+  url: string | null;
+}
+
+/** A pull request found in an agent's transcript. `repo` is "<host>/<owner>/<repo>". */
+export interface GitPr {
+  id: string;
+  ts: number;
+  repo: string | null;
+  number: number | null;
+  url: string | null;
+  branch: string | null;
+  sessionId: string;
+  provider: string;
+}
+
+/** A session's context compaction. `estimated`: its cost is worked out from its tokens, not reported. */
+export interface Compaction {
+  id: string;
+  ts: number;
+  trigger: string | null;
+  preTokens: number | null;
+  postTokens: number | null;
+  durationMs: number | null;
+  costUsd: number;
+  estimated: boolean;
+  model: string | null;
+  agent: string;
+}
+
+/** How many commits and pull requests a list shows at most. Counts are never capped. */
+export const GIT_LIST_LIMIT = 200;
+
+const GITHUB_REPO = /^github\.com\/[\w.-]+\/[\w.-]+$/;
+const SHA = /^[0-9a-f]{7,40}$/i;
+/** A pull request's page: https, a host, an owner, a repository and a number. No sign-in, query or fragment. */
+const PR_URL = /^https:\/\/[a-z0-9.-]+(?::\d+)?\/([\w.-]+)\/([\w.-]+)\/pull\/\d+$/;
+
+/**
+ * A stored pull request link as it may be shown or followed, else null: the store holds what a transcript said. An
+ * owner or repository of "." or ".." would lead elsewhere once resolved. Other names may start with a dot (".github").
+ */
+export function prUrl(url: string | null | undefined): string | null {
+  const m = url != null ? PR_URL.exec(url) : null;
+  if (!m) return null;
+
+  const dots = (segment: string) => segment === "." || segment === "..";
+  return dots(m[1]!) || dots(m[2]!) ? null : url!;
+}
+
+/** How many commits and pull requests match `cond` (over `git_events g`): never capped like the lists. */
+export function gitCounts(db: Database, cond: string, params: Params): { commitCount: number; prCount: number } {
+  if (!hasTable(db, "git_events")) return { commitCount: 0, prCount: 0 };
+
+  return db
+    .query<{ commitCount: number; prCount: number }, Params>(
+      `SELECT COALESCE(SUM(g.kind = 'commit'), 0) AS commitCount, COALESCE(SUM(g.kind = 'pr'), 0) AS prCount FROM git_events g WHERE ${cond}`,
+    )
+    .get(params)!;
+}
+
+/**
+ * The commits and pull requests that match `cond` (over `git_events g`), newest first. A commit links to GitHub only
+ * when its branch already has a pull request there: the repository isn't known otherwise. A pull request links only to
+ * a plain https page of it (prUrl).
+ */
+export function gitEvents(db: Database, cond: string, params: Params, limit = GIT_LIST_LIMIT): { commits: GitCommit[]; prs: GitPr[] } {
+  if (!hasTable(db, "git_events")) return { commits: [], prs: [] };
+
+  const commits = db
+    .query<Omit<GitCommit, "url"> & { prRepo: string | null }, Params>(
+      `SELECT g.id, g.ts, g.branch, g.sha, g.subject, g.project, g.session_id AS sessionId, g.provider,
+              (SELECT p.repo FROM git_events p
+               WHERE p.kind = 'pr' AND p.branch = g.branch AND p.project IS g.project AND p.repo LIKE 'github.com/%'
+               ORDER BY p.ts DESC LIMIT 1) AS prRepo
+       FROM git_events g WHERE g.kind = 'commit' AND ${cond} ORDER BY g.ts DESC LIMIT ${limit}`,
+    )
+    .all(params)
+    .map(({ prRepo, ...c }) => {
+      const linked = prRepo != null && GITHUB_REPO.test(prRepo) && c.sha != null && SHA.test(c.sha);
+      return { ...c, url: linked ? `https://${prRepo}/commit/${c.sha}` : null };
+    });
+
+  const prs = db
+    .query<GitPr, Params>(
+      `SELECT g.id, g.ts, g.repo, g.number, g.url, g.branch, g.session_id AS sessionId, g.provider
+       FROM git_events g WHERE g.kind = 'pr' AND ${cond} ORDER BY g.ts DESC LIMIT ${limit}`,
+    )
+    .all(params)
+    .map((p) => ({ ...p, url: prUrl(p.url) }));
+
+  return { commits, prs };
+}
+
+/** A session's compactions, oldest first. */
+export function sessionCompactions(db: Database, sessionId: string): Compaction[] {
+  if (!hasTable(db, "compactions")) return [];
+
+  return db
+    .query<Omit<Compaction, "estimated"> & { estimated: number }, Params>(
+      `SELECT id, ts, trigger, pre_tokens AS preTokens, post_tokens AS postTokens, duration_ms AS durationMs, cost_usd AS costUsd,
+              estimated, model, agent
+       FROM compactions WHERE session_id = $id ORDER BY ts`,
+    )
+    .all({ id: sessionId })
+    .map((c) => ({ ...c, estimated: c.estimated !== 0 }));
+}
+
 const HOUR_MS = 3_600_000;
 /** Where the precomputed offsets start. Older times, and times past their end, take SQLite's 'localtime'. */
 const ZONE_FROM = Date.UTC(2015, 0, 1);
@@ -227,7 +345,7 @@ function dimExpr(dim: Dimension | SeriesGroup): string {
   }
 }
 
-export type LiveStatus = "working" | "idle" | "error";
+export type LiveStatus = "working" | "idle" | "error" | "closed";
 
 /**
  * What a session is doing, from its main agent's last response: calls still coming in, or a tool running, is
@@ -242,6 +360,39 @@ export function liveStatus(lastTs: number, lastStop: string | null, now: number)
   if (quiet <= 10 * 60_000 && lastStop === "error") return "error";
   if (quiet <= 10 * 60_000 && (lastStop === "tool_use" || lastStop === "toolUse")) return "working";
   return "idle";
+}
+
+export interface SessionStatusInput {
+  provider: string;
+  /** The machine the session ran on, and the one asking. */
+  host: string | null;
+  thisHost: string | null;
+  /** The harness's own session id: Claude Code's registry names sessions by it. */
+  nativeId: string | null;
+  lastTs: number;
+  now: number;
+  /** The Claude Code sessions running on this machine (claudeRegistry.ts), or null when there is no registry to read. */
+  registry: Set<string> | null;
+}
+
+/** Quiet this long, a session that isn't judged by the registry is closed. */
+const CLOSED_AFTER_MS = 30 * 60_000;
+/** Activity this recent always keeps a session open: the registry may lag a session that just started. */
+const RECENT_MS = 90_000;
+
+/**
+ * Whether a session has ended, on top of what it was last doing (`base`, from liveStatus). A Claude Code session of
+ * this machine is closed once its process is gone from Claude Code's registry. Any other session, or every one when
+ * there is no registry, is closed after 30 minutes without activity.
+ */
+export function sessionStatus(base: LiveStatus, s: SessionStatusInput): LiveStatus {
+  const quiet = s.now - s.lastTs;
+  if (quiet < RECENT_MS) return base;
+
+  const registry = s.provider === "claude" && s.thisHost != null && s.host === s.thisHost ? s.registry : null;
+  if (registry) return s.nativeId != null && registry.has(s.nativeId) ? base : "closed";
+
+  return quiet > CLOSED_AFTER_MS ? "closed" : base;
 }
 
 export class Queries {
@@ -576,7 +727,7 @@ export class Queries {
    * The last `minutes` minute by minute, for the Live view: tokens per minute by provider, and the sessions with
    * activity in that time. A subagent's usage counts toward the session that started it, as one line.
    */
-  live(f: Filters, minutes: number, now = Date.now()) {
+  live(f: Filters, minutes: number, now = Date.now(), opts?: { host: string; claudeLive: Set<string> | null }) {
     const MINUTE = 60_000;
     const first = Math.floor(now / MINUTE) - minutes + 1;
     const w = whereClause({ ...f, from: first * MINUTE, to: undefined });
@@ -598,13 +749,14 @@ export class Queries {
     const sessions = this.all<{
       id: string; title: string | null; project: string | null; provider: string; gitBranch: string | null;
       tokens: number; cost: number; messages: number; subagents: number; model: string | null; firstTs: number; lastTs: number;
-      ownTokens: number; ownCost: number;
+      ownTokens: number; ownCost: number; host: string | null; nativeId: string | null;
     }>(
       `WITH active AS (
          SELECT DISTINCT COALESCE(s.parent_session_id, u.session_id) AS id
          FROM usage u LEFT JOIN sessions s ON s.id = u.session_id ${w.sql}
        )
        SELECT a.id, ${sessionTitle("root")} AS title, root.project, root.provider, root.git_branch AS gitBranch,
+              root.host, root.native_id AS nativeId,
               COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost, COUNT(u.id) AS messages,
               COUNT(DISTINCT CASE WHEN u.session_id <> a.id THEN u.session_id END) AS subagents,
               COALESCE(SUM(CASE WHEN u.session_id = a.id AND u.agent = 'main' THEN u.total_tokens END), 0) AS ownTokens,
@@ -623,7 +775,7 @@ export class Queries {
     // tool errors and its main agent's skills in the window. A session's subagents are its child sessions (omp, Codex) or other agents in it (Claude).
     const tree = "(u.session_id = $id OR u.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id))";
     const tags = tagsForSessions(this.db, sessions.map((r) => r.id));
-    const detailed = sessions.map((r) => {
+    const detailed = sessions.map(({ host, nativeId, ...r }) => {
       const p = { id: r.id, from, recent: now - 3 * MINUTE };
       const lastStop = this.get<{ stop: string | null }>(
         `SELECT m.stop_reason AS stop FROM usage u LEFT JOIN response_meta m ON m.usage_id = u.id
@@ -663,7 +815,9 @@ export class Queries {
         skills,
         tags: tags.get(r.id) ?? [],
         effort,
-        status: liveStatus(r.lastTs, lastStop, now),
+        status: sessionStatus(liveStatus(r.lastTs, lastStop, now), {
+          provider: r.provider, host, thisHost: opts?.host ?? null, nativeId, lastTs: r.lastTs, now, registry: opts?.claudeLive ?? null,
+        }),
         lastTool: tool?.tool ?? null,
         lastFile: tool?.file ? relativeTo(tool.file, r.project) : null,
         activeSubagents: active,
@@ -769,10 +923,29 @@ export class Queries {
     )!.n;
     const tags = tagsForSessions(this.db, rows.map((r) => r.id));
     const labels = labelsForSessions(this.db, rows.map((r) => r.id));
+    const compactions = this.compactionCounts(rows.map((r) => r.id));
     return {
       total: count,
-      rows: rows.map((r) => ({ ...r, projectLabel: projectLabel(r.project as string | null), tags: tags.get(r.id) ?? [], kind: labels.get(r.id)?.kind ?? null, aiTitle: labels.get(r.id)?.aiTitle ?? false })),
+      rows: rows.map((r) => ({
+        ...r,
+        projectLabel: projectLabel(r.project as string | null),
+        tags: tags.get(r.id) ?? [],
+        kind: labels.get(r.id)?.kind ?? null,
+        aiTitle: labels.get(r.id)?.aiTitle ?? false,
+        compactions: compactions.get(r.id) ?? 0,
+      })),
     };
+  }
+
+  /** How many times each of these sessions compacted its context: counted for the rows of one page only. */
+  private compactionCounts(ids: string[]): Map<string, number> {
+    if (!ids.length || !hasTable(this.db, "compactions")) return new Map();
+
+    const rows = this.all<{ id: string; n: number }>(
+      `SELECT session_id AS id, COUNT(*) AS n FROM compactions WHERE session_id IN (SELECT value FROM json_each($ids)) GROUP BY session_id`,
+      { ids: JSON.stringify(ids) },
+    );
+    return new Map(rows.map((r) => [r.id, r.n]));
   }
 
   sessionDetail(id: string) {
@@ -824,7 +997,11 @@ export class Queries {
        FROM sessions s LEFT JOIN usage u ON u.session_id = s.id WHERE s.parent_session_id = $id GROUP BY s.id ORDER BY cost DESC`,
       { id },
     );
-    return { session, totals, prompts, timeline, models, agents, tools, files, children };
+    // Commits and pull requests of the session and its subagents' sessions, and its own compactions.
+    const gitCond = "(g.session_id = $id OR g.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id))";
+    const git = { ...gitCounts(this.db, gitCond, { id }), ...gitEvents(this.db, gitCond, { id }) };
+    const compactions = sessionCompactions(this.db, id);
+    return { session, totals, prompts, timeline, models, agents, tools, files, children, compactions, git };
   }
 
   /** Every prompt's cost, tokens and provider in the range: the prompts page's cost distribution and Pareto curve. */

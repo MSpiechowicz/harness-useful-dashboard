@@ -9,7 +9,10 @@
     /** Grow to fill the card's height (`height` is then the least it gets), e.g. to match the card beside it. */
     fill?: boolean;
     dim?: boolean;
-    onclick?: (params: { name: string; dataIndex: number; seriesName?: string; value: unknown; data?: unknown }) => void;
+    /** `componentType` tells what was clicked ("series", "markLine"…), `data` is the clicked item as the option gave it. */
+    onclick?: (params: { name: string; dataIndex: number; seriesName?: string; value: unknown; data?: unknown; componentType?: string; componentIndex?: number }) => void;
+    /** A click anywhere in the plot of a category chart, even on empty space: the index of the category under it. */
+    onpoint?: (index: number) => void;
     /**
      * For charts whose legend entries aren't ECharts series of their own (e.g. custom-drawn groups):
      * the parent hides entries by rebuilding the option, and tells the legend which ones are off.
@@ -22,7 +25,7 @@
      */
     label?: string;
   }
-  let { option, height = 280, fill = false, dim = false, onclick, legendOff, onlegend, label }: Props = $props();
+  let { option, height = 280, fill = false, dim = false, onclick, onpoint, legendOff, onlegend, label }: Props = $props();
   const cardTitle = getContext<(() => string | undefined) | undefined>("card-title");
   const name = $derived(label ?? cardTitle?.());
   /** Highlight-one charts mark their highlighted entry (see htmlLegend); the others read as selectable. */
@@ -79,11 +82,27 @@
     chart = echarts.init(el!, undefined, { renderer: "canvas" });
     chart.setOption(prepared(option, []), { notMerge: true });
     chart.on("click", (p) => onclick?.(p as never));
+    chart.getZr().on("click", (e: { offsetX: number; offsetY: number }) => {
+      if (!onpoint || !chart) return;
+      const at = [e.offsetX, e.offsetY];
+      if (!chart.containPixel("grid", at)) return;
+      const index = chart.convertFromPixel({ gridIndex: 0 }, at)[0];
+      if (index !== undefined && Number.isFinite(index)) onpoint(Math.round(index));
+    });
     chart.on("legendselectchanged", (e) => {
       const selected = (e as { selected: Record<string, boolean> }).selected;
       off = Object.fromEntries(Object.entries(selected).map(([k, v]) => [k, !v]));
     });
-    const ro = new ResizeObserver(() => chart?.resize());
+    // Resizes are batched to one per frame and skipped while the box has no size (a collapsed column on a narrow
+    // window). Resizing straight from the observer can land while ECharts is still drawing, and the new size can
+    // move the layout and fire the observer again: an endless loop that froze the page.
+    let frame = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (chart && el && el.clientWidth > 0 && el.clientHeight > 0) chart.resize();
+      });
+    });
     ro.observe(el!);
     // The print layout is narrower than the screen (no sidebar, the paper's width), and a ResizeObserver doesn't
     // run before the browser takes the page: the canvas would be cut off at the paper's edge. It is resized as soon
@@ -96,6 +115,7 @@
       print.removeEventListener("change", fit);
       window.removeEventListener("afterprint", fit);
       ro.disconnect();
+      cancelAnimationFrame(frame);
       chart?.dispose();
       chart = null;
     };
@@ -103,7 +123,7 @@
 
   $effect(() => {
     const opt = option;
-    if (!chart) return;
+    if (!chart || chart.isDisposed()) return;
     const hidden = untrack(() => Object.keys(off).filter((k) => off[k]));
     const drawn = prepared(opt, hidden);
     chart.setOption(drawn, { notMerge: true });
@@ -139,9 +159,9 @@
     <!-- The chart is drawn in a layer that takes the space the card gives it but adds none: otherwise its canvas
          would push the card taller, which would grow the canvas again. -->
     <div class="relative min-h-0 w-full flex-1" style:min-height={typeof height === "number" ? `${height}px` : height}>
-      <div bind:this={el} class="absolute inset-0" class:cursor-pointer={!!onclick} role={name ? "img" : undefined} aria-label={name}></div>
+      <div bind:this={el} class="absolute inset-0" class:cursor-pointer={!!onclick || !!onpoint} role={name ? "img" : undefined} aria-label={name}></div>
     </div>
   {:else}
-    <div bind:this={el} class="w-full" class:cursor-pointer={!!onclick} role={name ? "img" : undefined} aria-label={name} style:height={typeof height === "number" ? `${height}px` : height}></div>
+    <div bind:this={el} class="w-full" class:cursor-pointer={!!onclick || !!onpoint} role={name ? "img" : undefined} aria-label={name} style:height={typeof height === "number" ? `${height}px` : height}></div>
   {/if}
 </div>

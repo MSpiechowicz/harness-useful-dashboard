@@ -150,7 +150,7 @@ describe("HTTP API", () => {
   });
 
   test("serves JSON endpoints", async () => {
-    for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/files", "/api/files/hotspots?project=%2Fwork%2Falpha", "/api/files/list?q=a", "/api/prompts/stats?metric=tokens", "/api/cache", "/api/drift", "/api/tips", "/api/filters", "/api/settings", "/api/pricing"]) {
+    for (const path of ["/api/status", "/api/summary", "/api/timeseries?group=model", "/api/breakdown?dim=model", "/api/heatmap", "/api/calendar", "/api/sessions", "/api/prompts", "/api/tools", "/api/files", "/api/files/hotspots?project=%2Fwork%2Falpha", "/api/files/list?q=a", "/api/prompts/stats?metric=tokens", "/api/cache", "/api/drift", "/api/tips", "/api/filters", "/api/settings", "/api/pricing", "/api/notes", "/api/whatif?candidate=gpt-5&model=claude-opus-5-5"]) {
       const res = await get(path);
       expect(res.status, path).toBe(200);
       expect(res.headers.get("content-type")).toContain("application/json");

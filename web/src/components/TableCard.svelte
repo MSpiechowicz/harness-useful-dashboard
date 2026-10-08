@@ -39,6 +39,12 @@
     exportAll?: () => Promise<T[]>;
     /** The exported rows made from the card's rows, when a table shows more than one line a row (Live's subagents). */
     exportRows?: (rows: T[]) => unknown[];
+    /** Extra buttons for the header, after the search, sort and export (such as an add button). */
+    actions?: Snippet;
+    /** Content between the header and the table, shown also while there are no rows (such as an add form). */
+    above?: Snippet;
+    /** What the card says when it has no rows and no search is on. */
+    emptyTitle?: string;
     /** The table for the current page: rows to sort, and which slice of them to show. */
     children: Snippet<[{ rows: T[]; offset: number; limit: number | undefined }]>;
   }
@@ -59,6 +65,9 @@
     exportName,
     exportAll,
     exportRows,
+    actions: extraActions,
+    above,
+    emptyTitle,
     children,
   }: Props = $props();
 
@@ -82,14 +91,17 @@
   {#snippet actions()}
     <SearchInput bind:value={query} />
     <Dropdown label={t("common.sortBy")} bind:value={sortKey} options={sorts.map((s) => ({ value: s.value, label: s.label }))} onchange={(v) => (asc = !!sorts.find((s) => s.value === v)?.asc)} />
+    <!-- The card's own action (such as Add) comes before the download, which sits with the columns menu at the end. -->
+    {#if extraActions}{@render extraActions()}{/if}
     {#if exportName}<ExportMenu name={exportName} rows={() => (server && exportAll ? exportAll() : exportRows ? exportRows(found) : found)} />{/if}
   {/snippet}
+  {#if above}{@render above()}{/if}
   {#if found.length}
     <div class="overflow-x-auto transition-opacity" class:loading-dim={loading}>
       {@render children(server ? { rows: found, offset: 0, limit: undefined } : { rows: found, offset: (page - 1) * pageSize, limit: pageSize })}
     </div>
     <Pager {page} total={total ?? found.length} size={pageSize} {loading} onpage={(p) => (page = p)} />
   {:else}
-    <Empty compact title={query.trim() ? t("filter.noMatches") : undefined} />
+    <Empty compact title={query.trim() ? t("filter.noMatches") : emptyTitle} />
   {/if}
 </Card>

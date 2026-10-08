@@ -47,4 +47,16 @@ describe("redact", () => {
     setMeta(db, "redacted", "0");
     expect(redactStored(db)).toBe(1);
   });
+
+  test("commit subjects and chart notes stored before are gone over too, also after an earlier pass", () => {
+    const db = memDb();
+    db.run(`INSERT INTO git_events (id, kind, provider, session_id, ts, subject) VALUES ('commit:x:1', 'commit', 'claude', 's', 1, 'Rotate ${GITHUB}')`);
+    db.run(`INSERT INTO chart_notes (id, ts, text, created_at, updated_at) VALUES ('n1', 1, 'new key ${OPENAI}', 1, 1)`);
+    // A database the first version of redaction went over already.
+    setMeta(db, "redacted", "1");
+
+    expect(redactStored(db)).toBe(2);
+    expect(db.query<{ subject: string }, []>("SELECT subject FROM git_events").get()!.subject).toBe(`Rotate ${REDACTED}`);
+    expect(db.query<{ text: string }, []>("SELECT text FROM chart_notes").get()!.text).toBe(`new key ${REDACTED}`);
+  });
 });

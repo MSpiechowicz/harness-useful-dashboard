@@ -9,7 +9,7 @@
  * are set again when its columns or their names change.
  *
  * A table with a key can also hide columns (ColumnsMenu.svelte lists them): any but the first, which names its rows,
- * and those without a name (a row's buttons). Hidden columns are remembered with the widths.
+ * and those without a name (a row's buttons), nor a column whose header has `data-fixed`. Hidden columns are remembered with the widths.
  */
 import type { Action } from "svelte/action";
 import { SvelteSet } from "svelte/reactivity";
@@ -45,6 +45,8 @@ let nextId = 0;
 /** The columns of a table with a key, and which of them are hidden. */
 export class ColumnSet {
   names = $state<string[]>([]);
+  /** The columns whose header says they always show (`data-fixed`). */
+  fixed = $state<boolean[]>([]);
   hidden = $state<number[]>([]);
   readonly #id = String(++nextId);
   readonly #style = document.createElement("style");
@@ -68,9 +70,9 @@ export class ColumnSet {
     this.#write();
   }
 
-  /** Whether a column can be hidden: not the first, and not one without a name. */
+  /** Whether a column can be hidden: not the first, not one without a name, and not one marked fixed. */
   hideable(i: number) {
-    return i > 0 && !!this.names[i];
+    return i > 0 && !!this.names[i] && !this.fixed[i];
   }
 
   isHidden(i: number) {
@@ -148,7 +150,10 @@ function visibleName(th: HTMLTableCellElement): string {
 /** Adds the edges to one layout of the table's header. Returns what undoes it. */
 function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet | null): () => void {
   const ths = [...table.querySelectorAll<HTMLTableCellElement>(":scope > thead > tr:first-child > th")];
-  if (set) set.names = ths.map(visibleName);
+  if (set) {
+    set.names = ths.map(visibleName);
+    set.fixed = ths.map((th) => th.hasAttribute("data-fixed"));
+  }
   if (!ths.length) return () => {};
   let group = table.querySelector<HTMLTableColElement>(":scope > colgroup");
   const created = !group;

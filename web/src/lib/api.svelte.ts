@@ -243,6 +243,10 @@ export interface Status {
   identity: { user: string; host: string };
   compiled: boolean;
   platform: string;
+  /** "newer-schema" when a newer app upgraded the shared database and this one only reads it. Absent on older servers. */
+  readOnly?: "newer-schema" | null;
+  /** Schema version of the open database. Absent on older servers. */
+  schemaVersion?: number;
 }
 
 export interface UpdateStatus {
@@ -256,7 +260,7 @@ export interface UpdateStatus {
   disabled?: boolean;
 }
 
-export type DriftMetric = "speed" | "ttft" | "toolErrors" | "interrupts" | "steps" | "output";
+export type DriftMetric = "speed" | "ttft" | "toolErrors" | "apiErrors" | "interrupts" | "steps" | "output";
 export interface DriftComparison {
   recent: number | null;
   baseline: number | null;
@@ -276,4 +280,87 @@ export interface Drift {
   days: string[];
   series: { key: DriftMetric; values: (number | null)[]; counts: number[]; comparison: DriftComparison; providers: string[] }[];
   versions: { day: string; label: string }[];
+}
+
+/** Chart note from /api/notes. `ts` is epoch ms, `day` is a local "YYYY-MM-DD" for a whole-day note, else null. */
+export interface Note {
+  id: string;
+  ts: number;
+  day: string | null;
+  text: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** One before or after window of /api/notes/compare. `from` and `to` are epoch ms, rates are 0..1, null when there is no data. */
+export interface NoteWindow {
+  from: number;
+  to: number;
+  cost: number;
+  prompts: number;
+  costPerPrompt: number | null;
+  tokensPerPrompt: number | null;
+  cacheHitRate: number | null;
+  toolErrorRate: number | null;
+  apiErrorRate: number | null;
+}
+
+/** /api/notes/compare. `clipped` is true when the after window was cut off at now. */
+export interface NoteCompare {
+  note: Note;
+  days: 7 | 14 | 30;
+  clipped: boolean;
+  before: NoteWindow;
+  after: NoteWindow;
+}
+
+/** /api/whatif. `change` is the relative difference (whatIf / actual - 1), null when actual is 0. `estimated` marks prices without a list price, `reported` marks costs the providers reported themselves. */
+export interface WhatIf {
+  candidate: string;
+  candidates: { inUse: string[]; priced: string[] };
+  actual: number;
+  whatIf: number;
+  change: number | null;
+  estimated: boolean;
+  reported: boolean;
+  rows: { model: string; tokens: number; actual: number; whatIf: number }[];
+}
+
+/** Commit found in an agent transcript. `ts` is epoch ms. `subject` is null unless prompt text is stored, `url` only for known github.com repos. */
+export interface GitCommit {
+  id: string;
+  ts: number;
+  branch: string | null;
+  sha: string | null;
+  subject: string | null;
+  project: string | null;
+  sessionId: string;
+  provider: string;
+  url?: string | null;
+}
+
+/** Pull request found in an agent transcript. `ts` is epoch ms. */
+export interface GitPr {
+  id: string;
+  ts: number;
+  repo: string | null;
+  number: number | null;
+  url: string | null;
+  branch: string | null;
+  sessionId: string;
+  provider: string;
+}
+
+/** Context compaction of a session. `ts` is epoch ms. `estimated` is true when costUsd is derived from tokens. */
+export interface Compaction {
+  id: string;
+  ts: number;
+  trigger: string | null;
+  preTokens: number | null;
+  postTokens: number | null;
+  durationMs: number | null;
+  costUsd: number;
+  estimated: boolean;
+  model: string | null;
+  agent: string;
 }

@@ -20,6 +20,9 @@
   /* Fill under white text (primary buttons, badges): darker than the accent, so the text stays readable (5.4:1). */
   --accent-fill: #256abf;
   --accent-fill-hover: #1c5cab;
+  /* Fill under white text for destructive buttons (delete): the error red, 6.4:1 against white. */
+  --danger-fill: #b42323;
+  --danger-fill-hover: #962020;
   /* Neutral ink for single-measure marks (totals, inline bars): color in charts always means identity. */
   --data: #76756f;
   --good-ink: #006300;
@@ -227,6 +230,14 @@ body {
 .btn-primary:hover {
   background: var(--accent-fill-hover);
 }
+.btn-danger {
+  background: var(--danger-fill);
+  border-color: transparent;
+  color: #fff;
+}
+.btn-danger:hover {
+  background: var(--danger-fill-hover);
+}
 
 .input {
   height: 2rem;
@@ -268,6 +279,17 @@ body {
   width: 100%;
   padding-right: 0.6rem;
   cursor: text;
+}
+/* On a narrow screen the closed field keeps only its icon's room, so it sits in a row with the other controls instead
+   of reserving its open width on a line of its own. Opened, it takes the whole line. */
+@media (max-width: 639px) {
+  .search-fold:not(.open) {
+    width: 2rem;
+  }
+  .search-fold.open {
+    flex-basis: 100%;
+    width: 100%;
+  }
 }
 .search-fold:not(.open) .input,
 .search-fold:not(.open) .input::placeholder {

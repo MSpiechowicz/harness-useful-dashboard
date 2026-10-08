@@ -16,6 +16,9 @@ import { activePlans } from "../core/limits.ts";
 import { limitHistory, planValue } from "../core/plans.ts";
 import { budgetStatus, message } from "../core/budgets.ts";
 import { generateTips } from "../core/tips.ts";
+import { addNote, compareNote, deleteNote, listNotes, NOTE_NOT_FOUND, updateNote } from "../core/notes.ts";
+import { isCandidate, whatIf } from "../core/whatif.ts";
+import { claudeRoots, liveClaudeSessions } from "../core/claudeRegistry.ts";
 import { addTag, allTags, projectRules, removeTag, sessionTags, setNote, setProjectRules } from "../core/tags.ts";
 import { clearLabel, isKind, sessionLabel, setKind } from "../core/labels.ts";
 import { kindUsage, tagUsage } from "../core/tagUsage.ts";
@@ -61,6 +64,11 @@ function cursorSyncStatus(app: App, s: CursorSyncState) {
 
 function error(message: string, status = 400): Response {
   return json({ error: message }, status);
+}
+
+/** A change refused because a newer app migrated the database: it is read-only for this one. */
+function newerDatabase(): Response {
+  return error("database-newer", 409);
 }
 
 export interface AssetSource {
@@ -179,14 +187,35 @@ function secured(res: Response): Response {
   return res;
 }
 
-/** A request's JSON body, or undefined when it isn't JSON. */
-async function jsonBody(req: Request): Promise<unknown> {
+/** A request's JSON body, or undefined when it isn't JSON or is longer than `maxChars`. */
+async function jsonBody(req: Request, maxChars = Number.POSITIVE_INFINITY): Promise<unknown> {
+  if (Number(req.headers.get("content-length")) > maxChars) return undefined;
+
   try {
-    return await req.json();
+    const text = await req.text();
+    return text.length > maxChars ? undefined : JSON.parse(text);
   } catch {
     return undefined;
   }
 }
+
+/** A chart note's body is a line of text and a time: anything longer is refused before it is parsed. */
+const NOTE_BODY_CHARS = 16 * 1024;
+
+/**
+ * A failed note change or comparison: 404 for a note that doesn't exist, 400 for anything else. That includes a
+ * database without the notes table, which this server never has open (it migrates, and a newer schema has the table).
+ */
+function noteError(result: { error: string }): Response {
+  return error(result.error, result.error === NOTE_NOT_FOUND ? 404 : 400);
+}
+
+/**
+ * What a read-only database still allows: leaving, updating the app, and the settings and tip states, which live in the
+ * config file (a switch to another database included). The folder picker only serves that switch. Everything else
+ * answers 409.
+ */
+const READ_ONLY_ROUTES = new Set(["/api/shutdown", "/api/update", "/api/language", "/api/settings", "/api/tips/state", "/api/pick-folder"]);
 
 const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const optionalPrice = (v: unknown): number | null => (isPrice(v) ? v : null);
@@ -241,7 +270,9 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
     const given = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
     if (!cfg.token || !sameToken(given, cfg.token)) return new Response("unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer", "Cache-Control": "no-store" } });
     const { user, host } = app.identity;
-    const body = metricsText({ db: app.db, queries: app.queries, budgets: app.cfg.budgets, projectLabels: cfg.projectLabels, user, host, version: VERSION, lastScanAt: app.lastScanAt });
+    // Live sessions judged like the Live view: this machine's Claude sessions by Claude Code's own registry.
+    const claudeLive = liveClaudeSessions(claudeRoots(app.cfg));
+    const body = metricsText({ db: app.db, queries: app.queries, budgets: app.cfg.budgets, projectLabels: cfg.projectLabels, user, host, version: VERSION, lastScanAt: app.lastScanAt, claudeLive });
     return new Response(req.method === "HEAD" ? null : body, { headers: { "Content-Type": CONTENT_TYPE, "Cache-Control": "no-store" } });
   }
 
@@ -268,6 +299,8 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
             identity: app.identity,
             compiled: isCompiledBinary(),
             platform: `${process.platform}-${process.arch}`,
+            readOnly: app.readOnly,
+            schemaVersion: app.schemaVersion(),
           });
         case "/api/summary":
           return json(q.summary(f));
@@ -348,13 +381,30 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           // The page polls this once a minute: scan first, so the answer includes what was written since the last scan.
           if (Date.now() - (app.lastScanAt ?? 0) > 10_000) await app.scanNow().catch(() => {});
           const minutes = Math.min(360, Math.max(5, Math.round(Number(sp.get("minutes")) || 60)));
-          return json(q.live(f, minutes));
+          // Claude Code's own registry says which of this machine's Claude sessions are still open.
+          // The scan may have opened the database again: its queries, not the ones from before it.
+          return json(app.queries.live(f, minutes, Date.now(), { host: app.identity.host, claudeLive: liveClaudeSessions(claudeRoots(app.cfg)) }));
+        }
+        case "/api/notes":
+          // Notes stand on the chart of the range: of the filters only the range applies.
+          return json({ notes: listNotes(app.db, { from: f.from, to: f.to }) });
+        case "/api/notes/compare": {
+          const result = compareNote(app.db, q, sp.get("id"), Number(sp.get("days")), f);
+          return "error" in result ? noteError(result) : json(result.ok);
+        }
+        case "/api/whatif": {
+          // `candidate`, not `model`: that one is the filter of the models the range is narrowed to. Only a model in use
+          // or one with a price: any other name would be priced and kept in the price book's cache.
+          const candidate = sp.get("candidate")?.trim() || null;
+          if (candidate && !isCandidate(app.db, app.priceBook(), f, candidate)) return error("unknown candidate: pick a model in use or one with a price");
+          return json(whatIf(app.db, app.priceBook(), f, candidate));
         }
         case "/api/limits": {
           // With `minutes`, only the plans the sessions of that window ran on are asked about.
+          // A read-only database keeps no history: the readings are only shown. Asked once the providers answered.
           const minutes = Number(sp.get("minutes"));
           const active = minutes > 0 ? activePlans(app.db, Date.now() - minutes * 60_000) : undefined;
-          const result = await app.limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active);
+          const result = await app.limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active, () => app.writable());
           app.sendAlerts(result.reports).catch((err) => console.error("[alerts]", err));
           return json({ ...result, active: active ?? null });
         }
@@ -391,7 +441,11 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
     }
 
     if (method === "POST" || method === "PUT" || method === "DELETE") {
-      if (method === "DELETE" && path !== "/api/tags" && path !== "/api/session/label") return error(`no route for ${method} ${url.pathname}`, 404);
+      if (method === "DELETE" && path !== "/api/tags" && path !== "/api/session/label" && path !== "/api/notes") return error(`no route for ${method} ${url.pathname}`, 404);
+      // A database a newer app migrated, at the start or since, is read-only: nothing that would write it is tried.
+      // Asked again once a request's body is read, since another machine may have migrated it meanwhile.
+      if (!READ_ONLY_ROUTES.has(path) && !app.writable()) return newerDatabase();
+
       switch (path) {
         // Tags and notes are the user's own data: written here, never by a scan. { session, tag } and { session, note }.
         case "/api/tags":
@@ -399,6 +453,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/tags/rules": {
           const body = (await jsonBody(req)) as Record<string, unknown> | undefined;
           if (!body || typeof body !== "object") return error("expected a JSON object");
+          if (!app.writable()) return newerDatabase();
           let result;
           if (path === "/api/tags/rules" && method === "PUT") result = setProjectRules(app.db, body.rules);
           else if (path === "/api/session/note" && method === "PUT") result = setNote(app.db, body.session, body.note);
@@ -408,12 +463,27 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           if ("error" in result) return error(result.error);
           return json(result.ok);
         }
+        // Chart notes, shared by every machine on the database: { ts, day?, text } to add, { id, text?, ts?, day? } to
+        // change, { id } to delete.
+        case "/api/notes": {
+          const body = await jsonBody(req, NOTE_BODY_CHARS);
+          if (!body || typeof body !== "object") return error("expected a JSON object");
+          if (!app.writable()) return newerDatabase();
+
+          let result;
+          if (method === "POST") result = addNote(app.db, body);
+          else if (method === "PUT") result = updateNote(app.db, body);
+          else result = deleteNote(app.db, (body as Record<string, unknown>).id);
+
+          return "error" in result ? noteError(result) : json(result.ok);
+        }
         // AI labels: the user's own opt-in. Label now, a regenerate for one session, a kind set by hand, a label cleared.
         case "/api/labels/run":
           return json({ ...(await app.labelSessions({ force: true })), ...app.labelStatus() });
         case "/api/session/label": {
           const body = (await jsonBody(req)) as Record<string, unknown> | undefined;
           if (!body || typeof body !== "object") return error("expected a JSON object");
+          if (!app.writable()) return newerDatabase();
           const id = body.session;
           if (method === "PUT") {
             const result = setKind(app.db, id, body.kind);
@@ -438,6 +508,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           return json(cursorSyncStatus(app, await app.syncCursor(true)));
         case "/api/import/cursor": {
           const text = await req.text();
+          if (!app.writable()) return newerDatabase();
           const writer = new DbWriter(app.db, app.priceBook(), app.identity);
           let result;
           app.db.transaction(() => {
@@ -481,6 +552,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/pricing": {
           const rules = await jsonBody(req);
           if (!Array.isArray(rules)) return error("expected an array of price rules");
+          if (!app.writable()) return newerDatabase();
           const ins = app.db.prepare("INSERT OR REPLACE INTO pricing (pattern, input, output, cache_read, cache_write_5m, cache_write_1h) VALUES (?, ?, ?, ?, ?, ?)");
           app.db.transaction(() => {
             app.db.exec("DELETE FROM pricing");

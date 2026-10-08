@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { memo } from "./cache.ts";
+import { hasTable } from "./db.ts";
 import { normalizeModel, type PriceBook } from "./pricing.ts";
 import { bucketExpr, EDIT_TOOLS, type Filters, projectLabel, READ_TOOLS, whereClause } from "./queries.ts";
 
@@ -29,6 +30,7 @@ const CATEGORY: Record<string, TipCategory> = {
   "context-bloat": "context",
   "long-session": "context",
   "repeated-reads": "context",
+  "frequent-compactions": "context",
   "premium-small-prompts": "models",
   "reasoning-heavy": "models",
   "output-heavy": "models",
@@ -305,6 +307,22 @@ function computeTips(db: Database, f: Filters, prices: PriceBook): Tip[] {
     tips.push({ id: "copilot-premium-pace", severity: "warn", params: { pace, used: Math.round(premium) }, link: "#/providers", impact: 0 });
   }
 
+  // 22. Frequent compactions: each one reads the whole context again and writes a summary. Their cost is worked out
+  // from list prices: estimated for Claude Code, whose compactions spend totals leave out, and priced from the call for
+  // Copilot, whose compaction calls spend counts already. Compactions carry no skill, so that filter doesn't apply.
+  // Without spend in range there is nothing to weigh them against.
+  const compactions = compactionStats(db, f);
+  if (compactions && compactions.count >= 5 && compactions.cost >= 1) {
+    const share = t.cost > 0 ? compactions.cost / t.cost : null;
+    tips.push({
+      id: "frequent-compactions",
+      severity: share != null && share > 0.1 ? "warn" : "info",
+      params: { count: compactions.count, cost: round2(compactions.cost), share: pct(compactions.auto / compactions.count) },
+      link: `#/sessions/${encodeURIComponent(compactions.topSession)}`,
+      impact: monthly(compactions.cost),
+    });
+  }
+
   const rank: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };
   return tips
     .map((tip) => ({ ...tip, category: CATEGORY[tip.id] ?? "spend", key: [tip.id, subject(tip)].filter(Boolean).join(":") }))
@@ -313,3 +331,24 @@ function computeTips(db: Database, f: Filters, prices: PriceBook): Tip[] {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** The compactions of a range: how many, their estimated cost, how many ran on their own, and the session with the most. */
+function compactionStats(db: Database, f: Filters): { count: number; cost: number; auto: number; topSession: string } | null {
+  if (!hasTable(db, "compactions")) return null;
+
+  const { skill: _skill, ...rest } = f;
+  const w = whereClause(rest, "c");
+  const totals = db
+    .query<{ count: number; cost: number; auto: number }, any>(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(c.cost_usd), 0) AS cost,
+              COALESCE(SUM(CASE WHEN c.trigger = 'auto' THEN 1 ELSE 0 END), 0) AS auto
+       FROM compactions c ${w.sql}`,
+    )
+    .get(w.params)!;
+  if (totals.count === 0) return null;
+
+  const top = db
+    .query<{ id: string }, any>(`SELECT c.session_id AS id FROM compactions c ${w.sql} GROUP BY c.session_id ORDER BY COUNT(*) DESC, SUM(c.cost_usd) DESC LIMIT 1`)
+    .get(w.params)!;
+  return { ...totals, topSession: top.id };
+}

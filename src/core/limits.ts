@@ -630,8 +630,19 @@ export class LimitsCache {
 
   constructor(private deps: LimitDeps = {}) {}
 
-  /** With `active`, only the sources those plans need are asked, and only their reports come back. */
-  async get(db: Database, host: string, enabled: Partial<Record<LimitSource, boolean>>, force = false, active?: ActivePlan[]): Promise<LimitsResult> {
+  /**
+   * With `active`, only the sources those plans need are asked, and only their reports come back. Fresh readings go
+   * into the history when `record` allows it: asked after the providers answered, since the database may have become
+   * read-only meanwhile.
+   */
+  async get(
+    db: Database,
+    host: string,
+    enabled: Partial<Record<LimitSource, boolean>>,
+    force = false,
+    active?: ActivePlan[],
+    record: () => boolean = () => true,
+  ): Promise<LimitsResult> {
     const now = (this.deps.now ?? Date.now)();
     const on = (s: LimitSource) => !!enabled[s] && (!active || active.some((a) => a.source === s));
     type Loaded = { reports: LimitReport[]; problem: LimitProblem["code"] | null };
@@ -685,7 +696,7 @@ export class LimitsCache {
     }
     // Fresh readings go into the history the plans view draws. A reading kept from earlier is already there.
     const fresh = reports.filter((r) => now - r.observedAt < FRESH_MS);
-    if (fresh.length) {
+    if (fresh.length && record()) {
       try {
         recordReports(db, host, fresh);
       } catch (e) {

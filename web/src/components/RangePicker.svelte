@@ -78,7 +78,7 @@
 
 <div class="relative" bind:this={root} onfocusout={onFocusOut}>
   <button bind:this={trigger} class="btn" aria-haspopup="dialog" aria-expanded={open} onclick={() => (open ? hide() : show())} onkeydown={onTriggerKey}>
-    <Calendar size={14} class="text-muted" />
+    <!-- Left out on a phone, so the range, the filters and Cost/Tokens fit one line at 375 px. --><Calendar size={14} class="hidden text-muted sm:block" />
     <span>{label}</span>
     <ChevronDown size={14} class="text-muted transition-transform {open ? 'rotate-180' : ''}" />
   </button>

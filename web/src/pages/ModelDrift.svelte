@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowDownRight, ArrowUpRight } from "@lucide/svelte";
+  import { ArrowDownRight, ArrowUpRight, Info } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Chart from "../components/Chart.svelte";
   import Dropdown from "../components/Dropdown.svelte";
@@ -21,12 +21,14 @@
   const d = useFetch<Drift>(() => apiUrl("/api/drift", { select: selected, effort }));
   const model = $derived(selected || d.data?.model || "");
 
-  const METRICS: DriftMetric[] = ["speed", "ttft", "toolErrors", "interrupts", "steps", "output"];
+  const METRICS: DriftMetric[] = ["speed", "ttft", "toolErrors", "apiErrors", "interrupts", "steps", "output"];
   const FORMAT: Record<DriftMetric, (v: number) => string> = {
     speed: (v) => t("drift.unit.tps", { v: integer(v) }),
     ttft: (v) => t("drift.unit.s", { v: trimmed(v) }),
     toolErrors: (v) => percent(v / 100, 1, { trim: true }),
-    interrupts: (v) => trimmed(v),
+    apiErrors: (v) => percent(v / 100, 1, { trim: true }),
+    // Per 100 prompts is the share of prompts interrupted, so it reads as a percent like the error rates.
+    interrupts: (v) => percent(v / 100, 1, { trim: true }),
     steps: (v) => integer(v),
     output: (v) => compact(v),
   };
@@ -128,13 +130,21 @@
     {#if d.data && !d.data.model}
       <div class="card"><Empty body={t("drift.empty")} /></div>
     {:else if d.data}
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
         {#each METRICS as m (m)}
           {@const c = series.get(m)?.comparison}
           {#if c}
             {@const tn = tone(c)}
+            {@const usual = c.baseline != null && c.status !== "stable" ? t("drift.usual", { value: fmt(m, c.baseline) }) : null}
             <div class="card flex min-w-0 flex-col gap-2 px-4 py-3.5" title={hint(m)}>
-              <div class="truncate text-xs font-medium text-muted">{label(m)}</div>
+              <!-- The usual value sits behind an icon in the corner, so every tile keeps one line under its number. It shows
+                   when it adds something: what a changed measure moved from, or what to expect when the last days are thin. -->
+              <div class="flex items-center justify-between gap-2">
+                <div class="truncate text-xs font-medium text-muted">{label(m)}</div>
+                {#if usual}
+                  <span class="shrink-0 text-muted" title={usual} aria-label={usual} role="img"><Info size={13} /></span>
+                {/if}
+              </div>
               <div class="truncate text-2xl leading-tight font-semibold tracking-tight text-ink">{fmt(m, c.recent)}</div>
               <div class="flex h-4 items-center gap-1 text-xs whitespace-nowrap" class:text-good={tn === "good"} class:text-bad={tn === "bad"} class:text-warn={tn === "warn"} class:text-muted={tn === "neutral"}>
                 {#if c.status === "changed" && c.change != null}
@@ -143,9 +153,6 @@
                 {/if}
                 <span class="truncate">{c.baseline == null ? t("drift.noBaseline") : statusText(c)}</span>
               </div>
-              <!-- Always there, so every tile is the same height. The usual value only when it adds something: what a
-                   changed measure moved from, or what to expect when the last days are too thin to judge. -->
-              <div class="h-4 truncate text-xs leading-4 text-muted">{c.baseline != null && c.status !== "stable" ? t("drift.usual", { value: fmt(m, c.baseline) }) : ""}</div>
             </div>
           {/if}
         {/each}
@@ -185,7 +192,7 @@
       <TableCard title={t("drift.allModels")} subtitle={t("drift.allModelsHint")} {rows} searchText={(r) => r.model} sorts={SORTS} bind:sortKey={sort} bind:asc exportName="model-drift">
         {#snippet children(view)}
           <div class="overflow-x-auto">
-            <table class="data" use:resizableColumns={"model-drift"}>
+            <table class="data" use:resizableColumns={"model-drift-v2"}>
               <thead>
                 <tr>
                   <th>{t("col.model")}</th>

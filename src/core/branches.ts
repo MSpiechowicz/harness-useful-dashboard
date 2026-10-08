@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { memo } from "./cache.ts";
 import { per100 } from "./changes.ts";
-import { bucketExpr, EDIT_TOOLS, fillBuckets, type Filters, projectLabel, sessionTitle, whereClause } from "./queries.ts";
+import { hasTable } from "./db.ts";
+import { bucketExpr, EDIT_TOOLS, fillBuckets, type Filters, gitEvents, projectLabel, sessionTitle, whereClause } from "./queries.ts";
 
 type Params = Record<string, string | number | null>;
 
@@ -51,7 +52,15 @@ export interface BranchRow {
   added: number;
   removed: number;
   costPer100: number | null;
+  /** Commits and pull requests the agents made on the branch, and its cost per each (null: none). */
+  commits: number;
+  prs: number;
+  costPerCommit: number | null;
+  costPerPr: number | null;
 }
+
+/** Cost per item, or null when there is none to share it. */
+const perItem = (cost: number, n: number) => (n > 0 ? cost / n : null);
 
 /** Usage by git branch, per project: what each piece of work cost. */
 export function branches(db: Database, f: Filters) {
@@ -80,6 +89,7 @@ function computeBranches(db: Database, f: Filters) {
       .all(wt.params)
       .map((r) => [branchId(r.branch, r.project), r]),
   );
+  const git = gitCounts(db, f);
   return {
     total,
     rows: rows.map((r): BranchRow => {
@@ -87,9 +97,41 @@ function computeBranches(db: Database, f: Filters) {
       const l = lines.get(id);
       const added = l?.added ?? 0;
       const removed = l?.removed ?? 0;
-      return { ...r, id, projectLabel: projectLabel(r.project), longLived: LONG_LIVED.has(r.branch), added, removed, costPer100: per100(r.cost, added + removed) };
+      const commits = git.get(id)?.commits ?? 0;
+      const prs = git.get(id)?.prs ?? 0;
+      return {
+        ...r,
+        id,
+        projectLabel: projectLabel(r.project),
+        longLived: LONG_LIVED.has(r.branch),
+        added,
+        removed,
+        costPer100: per100(r.cost, added + removed),
+        commits,
+        prs,
+        costPerCommit: perItem(r.cost, commits),
+        costPerPr: perItem(r.cost, prs),
+      };
     }),
   };
+}
+
+/**
+ * Commits and pull requests per branch and project, in the filters' range. Model and skill don't apply: a commit
+ * belongs to neither. Branches with commits but no usage are never asked for, so they aren't listed.
+ */
+function gitCounts(db: Database, f: Filters): Map<string, { commits: number; prs: number }> {
+  if (!hasTable(db, "git_events")) return new Map();
+
+  const w = whereClause({ ...f, model: undefined, skill: undefined }, "g");
+  const rows = db
+    .query<{ branch: string; project: string | null; commits: number; prs: number }, Params>(
+      `SELECT COALESCE(g.branch, '${NO_BRANCH}') AS branch, g.project AS project,
+              SUM(g.kind = 'commit') AS commits, SUM(g.kind = 'pr') AS prs
+       FROM git_events g ${w.sql} GROUP BY 1, 2`,
+    )
+    .all(w.params);
+  return new Map(rows.map((r) => [branchId(r.branch, r.project), r]));
 }
 
 /** One branch over its whole life: its sessions, day by day cost, models and the files it changed. */
@@ -152,12 +194,13 @@ export function branchDetail(db: Database, id: string) {
        GROUP BY t.file_path ORDER BY edits DESC LIMIT 500`,
     )
     .all(params);
+  const git = branchGit(db, branch, project);
   return {
     branch,
     project,
     projectLabel: projectLabel(project),
     longLived: LONG_LIVED.has(branch),
-    totals,
+    totals: { ...totals, commits: git.commitCount, prs: git.prCount },
     lines: { ...lines, costPer100: per100(totals.cost, lines.added + lines.removed) },
     days: { buckets, cost: buckets.map((b) => at.get(b)?.cost ?? 0), tokens: buckets.map((b) => at.get(b)?.tokens ?? 0) },
     sessions: sessions.map((x) => ({ ...x, added: sessionLines.get(x.id)?.added ?? 0, removed: sessionLines.get(x.id)?.removed ?? 0 })),
@@ -167,5 +210,24 @@ export function branchDetail(db: Database, id: string) {
       return { ...m, key, added: l?.added ?? 0, removed: l?.removed ?? 0, costPer100: per100(m.cost, (l?.added ?? 0) + (l?.removed ?? 0)) };
     }),
     files,
+    commits: git.commits,
+    prs: git.prs,
   };
+}
+
+/** A branch's commits and pull requests: all of them counted, the newest listed. */
+function branchGit(db: Database, branch: string, project: string | null) {
+  if (!hasTable(db, "git_events")) return { commitCount: 0, prCount: 0, commits: [], prs: [] };
+
+  const cond = `${branch === NO_BRANCH ? "g.branch IS NULL" : "g.branch = $branch"} AND ${project == null ? "g.project IS NULL" : "g.project = $project"}`;
+  const params: Params = {};
+  if (branch !== NO_BRANCH) params.branch = branch;
+  if (project != null) params.project = project;
+
+  const counts = db
+    .query<{ commits: number; prs: number }, Params>(
+      `SELECT COALESCE(SUM(g.kind = 'commit'), 0) AS commits, COALESCE(SUM(g.kind = 'pr'), 0) AS prs FROM git_events g WHERE ${cond}`,
+    )
+    .get(params)!;
+  return { commitCount: counts.commits, prCount: counts.prs, ...gitEvents(db, cond, params) };
 }

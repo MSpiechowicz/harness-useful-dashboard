@@ -96,4 +96,45 @@ describe("normalizeProjects", () => {
       expect(project(table, "d")).toBe("/r/app/web");
     }
   });
+
+  test("re-maps rolled-up outcomes, compactions and git events, and a commit moves to the key a rescan gives it", () => {
+    const db = memDb();
+    const rows: [string, string, string][] = [
+      ["a", "/r/app/web", "me"],
+      ["c", "/tmp/x", "me"],
+      ["d", "/r/app/web", "other-host"],
+    ];
+    for (const [id, project, host] of rows) {
+      db.query("INSERT INTO sessions (id, provider, native_id, project, host) VALUES (?, 'claude', ?, ?, ?)").run(id, id, project, host);
+      db.query("INSERT INTO outcome_days (ts, host, provider, session_id, project, n) VALUES (0, ?, 'claude', ?, ?, 2)").run(host, id, project);
+      db.query("INSERT INTO compactions (id, provider, session_id, ts, project, host) VALUES (?, 'claude', ?, 0, ?, ?)").run(id, id, project, host);
+    }
+    const git = db.query("INSERT INTO git_events (id, kind, provider, session_id, ts, project, host, sha) VALUES (?, ?, 'claude', 'a', ?, ?, ?, ?)");
+    git.run("commit:/r/app/web:1111111", "commit", 5, "/r/app/web", "me", "1111111");
+    git.run("commit:/r/app/web:2222222", "commit", 5, "/r/app/web", "me", "2222222");
+    git.run("commit:/r/app:2222222", "commit", 9, "/r/app", "me", "2222222"); // the same commit, read again since
+    git.run("commit:/tmp/x:3333333", "commit", 5, "/tmp/x", "me", "3333333");
+    git.run("commit:call-1", "commit", 5, "/r/app/web", "me", null);
+    git.run("pr:github.com/acme/app#4", "pr", 5, "/r/app/web", "me", null);
+    git.run("commit:/r/app/web:4444444", "commit", 5, "/r/app/web", "other-host", "4444444");
+    const map: Record<string, string | null> = { "/r/app/web": "/r/app", "/tmp/x": null };
+    normalizeProjects(db, "me", (p) => (p in map ? map[p]! : p));
+
+    const project = (table: string, where: string) =>
+      db.query<{ project: string | null }, []>(`SELECT project FROM ${table} WHERE ${where}`).get()!.project;
+    for (const [table, key] of [["outcome_days", "session_id"], ["compactions", "id"]]) {
+      expect(project(table, `${key} = 'a'`)).toBe("/r/app");
+      expect(project(table, `${key} = 'c'`)).toBeNull();
+      expect(project(table, `${key} = 'd'`)).toBe("/r/app/web");
+    }
+    const events = db.query<{ id: string; project: string | null }, []>("SELECT id, project FROM git_events ORDER BY id").all();
+    expect(events).toEqual([
+      { id: "commit:/r/app/web:4444444", project: "/r/app/web" },
+      { id: "commit:/r/app:1111111", project: "/r/app" },
+      { id: "commit:/r/app:2222222", project: "/r/app" },
+      { id: "commit::3333333", project: null },
+      { id: "commit:call-1", project: "/r/app" },
+      { id: "pr:github.com/acme/app#4", project: "/r/app" },
+    ]);
+  });
 });

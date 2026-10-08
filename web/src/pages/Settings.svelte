@@ -423,8 +423,13 @@
             : t("settings.upToDate")),
   );
 
+  // Which scan is running, so its button spins and counts the files (from the scan progress the server streams).
+  let scanning = $state<"quick" | "full" | null>(null);
+  const scanProgress = $derived(live.scanning ? ` ${live.scanning.done}/${live.scanning.total}` : "");
+
   async function rescan(full: boolean) {
     busy = true;
+    scanning = full ? "full" : "quick";
     try {
       await send(`/api/scan${full ? "?full=1" : ""}`);
       flash(t("settings.saved"));
@@ -432,6 +437,7 @@
       errorMsg = (e as Error).message;
     } finally {
       busy = false;
+      scanning = null;
     }
   }
 
@@ -579,7 +585,7 @@
               <span class="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-fill text-[11px] font-semibold text-white shadow-sm ring-4 ring-accent-wash tabular">{n}</span>
               <div class="min-w-0 sm:mt-3 sm:pr-8">
                 <div class="text-[13px] font-medium text-ink">{t(`settings.share.step${n}Title`)}</div>
-                <div class="mt-0.5 text-xs leading-relaxed text-muted">{t(`settings.share.step${n}`)}</div>
+                <div class="mt-0.5 max-w-[700px] text-xs leading-relaxed text-muted">{t(`settings.share.step${n}`)}</div>
               </div>
             </li>
           {/each}
@@ -670,8 +676,12 @@
         </div>
       </SettingRow>
       {#snippet footer()}
-        <button class="btn" onclick={() => rescan(false)} disabled={busy} title={t("settings.rescanHint")}><RefreshCw size={14} />{t("settings.rescan")}</button>
-        <button class="btn" onclick={() => rescan(true)} disabled={busy} title={t("settings.fullRescanHint")}>{t("settings.fullRescan")}</button>
+        <button class="btn" onclick={() => rescan(false)} disabled={busy} aria-busy={scanning === "quick"} title={t("settings.rescanHint")}>
+          {#if scanning === "quick"}<Loader size={14} class="animate-spin motion-reduce:animate-none" />{:else}<RefreshCw size={14} />{/if}{t("settings.rescan")}{scanning === "quick" ? scanProgress : ""}
+        </button>
+        <button class="btn" onclick={() => rescan(true)} disabled={busy} aria-busy={scanning === "full"} title={t("settings.fullRescanHint")}>
+          {#if scanning === "full"}<Loader size={14} class="animate-spin motion-reduce:animate-none" />{/if}{t("settings.fullRescan")}<span class="tabular">{scanning === "full" ? scanProgress : ""}</span>
+        </button>
         <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
       {/snippet}
     </Card>

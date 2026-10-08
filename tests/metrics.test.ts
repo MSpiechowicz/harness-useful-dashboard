@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_BUDGETS } from "../src/core/budgets.ts";
 import { parseSettings } from "../src/core/config.ts";
+import { DbWriter } from "../src/core/ingest/writer.ts";
+import { metricsText } from "../src/core/metrics.ts";
+import { PriceBook } from "../src/core/pricing.ts";
+import { Queries } from "../src/core/queries.ts";
 import { App } from "../src/server/app.ts";
 import { createHandler } from "../src/server/http.ts";
-import { claudeAssistant, claudeUser, CLAUDE_SESSION, tempDir, writeJsonl } from "./helpers.ts";
+import { claudeAssistant, claudeUser, CLAUDE_SESSION, ID, memDb, tempDir, writeJsonl } from "./helpers.ts";
 
 interface Sample {
   name: string;
@@ -197,8 +202,17 @@ describe("GET /metrics", () => {
     expect(one("harness_tag_cost_usd_total", { tag: "client-a" })).toBeGreaterThan(0);
     expect(one("harness_plan_limit_used_ratio", { provider: "claude", plan: "max", window: "5h" })).toBeCloseTo(0.42);
     expect(one("harness_plan_limit_resets_at_seconds", { provider: "claude", window: "5h" })).toBeGreaterThan(Date.now() / 1000);
-    for (const status of ["working", "idle", "error"]) expect(one("harness_live_sessions", { status })).toBeDefined();
+    for (const status of ["working", "idle", "error", "closed"]) expect(one("harness_live_sessions", { status })).toBeDefined();
     expect(one("harness_last_scan_timestamp_seconds", {})).toBeGreaterThan(0);
+  });
+
+  test("successful calls rolled up into daily counts count as many as each row says", async () => {
+    const read = { provider: "claude", tool: "Read", outcome: "ok" };
+    const before = sum(parse(await (await get(bearer(token()))).text()).samples, "harness_tool_calls_total", read);
+    app.db
+      .query("INSERT INTO outcome_days (ts, host, provider, session_id, project, model, tool, kind, n) VALUES (0, ?, 'claude', 'claude:s1', '/work/alpha', 'claude-opus-5-5', 'Read', 'tool_ok', 5)")
+      .run(app.identity.host);
+    expect(sum(parse(await (await get(bearer(token()))).text()).samples, "harness_tool_calls_total", read)).toBe(before + 5);
   });
 
   test("budget gauges appear for the caps that are set", async () => {
@@ -239,5 +253,47 @@ describe("GET /metrics", () => {
     expect(parseSettings({ metrics: { enabled: true, projectLabels: false, regenerateToken: true, token: "x" } })).toEqual({ patch: { metrics: { enabled: true, projectLabels: false, regenerateToken: true } } });
     expect(parseSettings({ metrics: { enabled: "yes" } })).toEqual({ error: "invalid value for metrics.enabled" });
     expect(parseSettings({ metrics: [] })).toEqual({ error: "invalid value for metrics" });
+  });
+});
+
+describe("the live sessions gauge", () => {
+  test("judges this machine's Claude sessions by Claude Code's registry, like the Live view", () => {
+    const db = memDb();
+    const prices = new PriceBook();
+    const queries = new Queries(db, () => prices);
+    const now = Date.now();
+    const w = new DbWriter(db, prices, ID);
+    for (const id of ["open-1", "gone-1"]) {
+      w.session({ id: `claude:${id}`, provider: "claude", nativeId: id, project: "/work/live" });
+      w.usage({
+        id: `u-${id}`, provider: "claude", sessionId: `claude:${id}`, promptId: null, ts: now - 5 * 60_000, project: "/work/live", model: "claude-sonnet-4-5",
+        skill: null, agent: "main", isSubagent: false, input: 100, output: 100, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0,
+      });
+    }
+    const claudeLive = new Set(["open-1"]);
+    const gauge = (live: Set<string> | null) => {
+      const text = metricsText({ db, queries, budgets: DEFAULT_BUDGETS, projectLabels: false, user: ID.user, host: ID.host, version: "1", lastScanAt: null, claudeLive: live, now });
+      return Object.fromEntries(parse(text).samples.filter((x) => x.name === "harness_live_sessions").map((x) => [x.labels.status, x.value]));
+    };
+
+    const statuses = queries.live({}, 60, now, { host: ID.host, claudeLive }).sessions.map((x) => x.status);
+    expect(gauge(claudeLive)).toMatchObject({ closed: statuses.filter((x) => x === "closed").length, idle: statuses.filter((x) => x === "idle").length });
+    expect(gauge(claudeLive).closed).toBe(1);
+  });
+
+  test("without a registry nothing is closed before it goes quiet", () => {
+    const db = memDb();
+    const prices = new PriceBook();
+    const queries = new Queries(db, () => prices);
+    const now = Date.now();
+    const w = new DbWriter(db, prices, ID);
+    w.session({ id: "claude:gone-1", provider: "claude", nativeId: "gone-1", project: "/work/live" });
+    w.usage({
+      id: "u-gone", provider: "claude", sessionId: "claude:gone-1", promptId: null, ts: now - 5 * 60_000, project: "/work/live", model: "claude-sonnet-4-5",
+      skill: null, agent: "main", isSubagent: false, input: 100, output: 100, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0,
+    });
+    const text = metricsText({ db, queries, budgets: DEFAULT_BUDGETS, projectLabels: false, user: ID.user, host: ID.host, version: "1", lastScanAt: null, claudeLive: null, now });
+    const closed = parse(text).samples.find((x) => x.name === "harness_live_sessions" && x.labels.status === "closed")!.value;
+    expect(closed).toBe(0);
   });
 });

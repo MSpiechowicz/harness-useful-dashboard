@@ -39,6 +39,17 @@ function fixture(): void {
     `INSERT INTO limit_readings (host, report_key, window_id, slot, provider, plan, window_ms, used_fraction, resets_at, observed_at)
      VALUES ('here', 'claude', 'five_hour', ?, 'claude', 'max', ?, 0.42, ?, ?)`,
   ).run(1, 5 * 60 * MIN, NOW + 80 * MIN, NOW - 2 * MIN);
+  const git = db.prepare(
+    `INSERT INTO git_events (id, kind, provider, session_id, ts, project, branch, sha, subject, repo, number, url)
+     VALUES (?, ?, 'claude', 'claude:s1', ?, ?, 'feat/mcp', ?, NULL, ?, ?, ?)`,
+  );
+  git.run(`commit:${REPO}:aaaaaaa`, "commit", NOW - 28 * MIN, REPO, "aaaaaaa", null, null, null);
+  git.run(`commit:${REPO}:bbbbbbb`, "commit", NOW - 21 * MIN, REPO, "bbbbbbb", null, null, null);
+  git.run("pr:github.com/acme/repo#12", "pr", NOW - 20 * MIN, REPO, null, "github.com/acme/repo", 12, "https://github.com/acme/repo/pull/12");
+  db.prepare(
+    `INSERT INTO compactions (id, provider, session_id, ts, project, model, trigger, pre_tokens, post_tokens, cost_usd, estimated)
+     VALUES ('claude:s1:x:compact', 'claude', 'claude:s1', ?, ?, 'claude-opus-5-5', 'auto', 150000, 4000, 0.3, 1)`,
+  ).run(NOW - 22 * MIN, REPO);
   db.close();
   // The working directory is a git checkout of the feature branch.
   mkdirSync(join(REPO, ".git"), { recursive: true });
@@ -227,6 +238,10 @@ describe("tools", () => {
       expect(r.subagents).toEqual({ count: 1, costUsd: 0.25, tokens: 1000 });
       expect(r.branch).toBe("feat/mcp");
       expect(r.title).toBe("Add an MCP server");
+      expect(r.commits).toBe(2);
+      expect(r.pullRequestCount).toBe(1);
+      expect(r.pullRequests).toEqual([{ number: 12, url: "https://github.com/acme/repo/pull/12" }]);
+      expect(r.compactions).toEqual({ count: 1, estimatedCostUsd: 0.3 });
     }
     const byCwd = call("session_cost");
     expect(byCwd).toMatchObject({ sessionId: "claude:s1", resolvedBy: "cwd" });
@@ -242,6 +257,9 @@ describe("tools", () => {
     const r = call("branch_cost");
     expect(r).toMatchObject({ branch: "feat/mcp", project: REPO, costUsd: 2.25, sessions: 1 });
     expect(r.latestSessions[0]).toMatchObject({ id: "claude:s1", subagents: 1 });
+    expect(r).toMatchObject({ commits: 2, costPerCommitUsd: 1.125, costPerPullRequestUsd: 2.25 });
+    expect(r.pullRequests).toEqual([{ number: 12, url: "https://github.com/acme/repo/pull/12" }]);
+    expect(call("branch_cost", { branch: "main" })).toMatchObject({ commits: 0, pullRequests: [], costPerCommitUsd: null, costPerPullRequestUsd: null });
     expect(call("branch_cost", { branch: "main" })).toMatchObject({ project: "/work/other", costUsd: 2, longLived: true });
     expect(() => call("branch_cost", { branch: "gone" })).toThrow("No usage on branch gone");
   });
@@ -275,6 +293,58 @@ describe("tools", () => {
     const r = call("tips", { range: "all" });
     expect(Array.isArray(r.tips)).toBe(true);
     for (const tip of r.tips) expect(tip.title).not.toBe(tip.id);
+  });
+
+  test("a database from before schema 18 still answers, without commits or compactions", () => {
+    const path = join(DIR, "v17.db");
+    const db = openDb(path);
+    db.prepare(
+      `INSERT INTO usage (id, provider, session_id, ts, project, user, host, model, total_tokens, cost_usd)
+       VALUES ('v1', 'claude', 'claude:old', ?, ?, 'alex', 'here', 'claude-opus-5-5', 1000, 1)`,
+    ).run(NOW - 5 * MIN, REPO);
+    db.prepare("INSERT INTO sessions (id, provider, native_id, project, git_branch) VALUES ('claude:old', 'claude', 'old', ?, 'feat/mcp')").run(REPO);
+    db.exec(`DROP TABLE git_events; DROP TABLE compactions; DROP VIEW outcome_counts; DROP TABLE outcome_days; DROP TABLE chart_notes;
+             UPDATE meta SET value = '17' WHERE key = 'schema_version'; DELETE FROM meta WHERE key = 'min_reader_schema'`);
+    db.close();
+
+    const old = server(path);
+    expect(call("session_cost", { session_id: "old" }, old.s)).toMatchObject({ costUsd: 1, commits: 0, pullRequests: [], compactions: { count: 0, estimatedCostUsd: 0 } });
+    expect(call("branch_cost", {}, old.s)).toMatchObject({ branch: "feat/mcp", costUsd: 1, commits: 0, pullRequests: [], costPerCommitUsd: null });
+    old.close();
+  });
+
+  test("session_cost counts every commit and pull request, lists a few, and links only to plain pull request pages", () => {
+    const path = join(DIR, "many-commits.db");
+    const db = openDb(path);
+    db.prepare("INSERT INTO sessions (id, provider, native_id, project, git_branch, started_at) VALUES ('claude:busy', 'claude', 'busy', ?, 'feat/x', ?)").run(REPO, NOW - 60 * MIN);
+    db.prepare(
+      `INSERT INTO usage (id, provider, session_id, ts, project, user, host, model, total_tokens, cost_usd)
+       VALUES ('b1', 'claude', 'claude:busy', ?, ?, 'alex', 'here', 'claude-opus-5-5', 1000, 1)`,
+    ).run(NOW - 50 * MIN, REPO);
+    const git = db.prepare(
+      `INSERT INTO git_events (id, kind, provider, session_id, ts, project, branch, sha, repo, number, url)
+       VALUES (?, ?, 'claude', 'claude:busy', ?, ?, 'feat/x', ?, ?, ?, ?)`,
+    );
+    db.transaction(() => {
+      for (let i = 0; i < 205; i++) git.run(`commit:${REPO}:${i}`, "commit", NOW - 40 * MIN + i, REPO, i.toString(16).padStart(7, "0"), null, null, null);
+      git.run("pr:a#1", "pr", NOW - 30 * MIN, REPO, null, "github.com/acme/repo", 1, "https://github.com/acme/repo/pull/1");
+      git.run("pr:a#2", "pr", NOW - 29 * MIN, REPO, null, "github.com/acme/repo", 2, "https://user:secret@github.com/acme/repo/pull/2");
+      git.run("pr:a#3", "pr", NOW - 28 * MIN, REPO, null, "github.com/acme/repo", 3, "https://github.com/acme/repo/pull/3?token=abc");
+      git.run("pr:a#4", "pr", NOW - 27 * MIN, REPO, null, "github.com/acme/repo", 4, "https://github.com/acme/repo/pull/4#top");
+    })();
+    db.close();
+
+    const busy = server(path);
+    const r = call("session_cost", { session_id: "busy" }, busy.s);
+    busy.close();
+    expect(r.commits).toBe(205);
+    expect(r.pullRequestCount).toBe(4);
+    expect(r.pullRequests).toEqual([
+      { number: 4, url: null },
+      { number: 3, url: null },
+      { number: 2, url: null },
+      { number: 1, url: "https://github.com/acme/repo/pull/1" },
+    ]);
   });
 
   test("a missing database is a tool error, and nothing is created", () => {

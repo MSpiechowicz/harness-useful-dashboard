@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { type AppConfig, applyMetrics, loadConfig, resolveDbPath, retentionMonths, saveConfig, scanInterval, type SettingsPatch } from "../core/config.ts";
-import { getMeta, openDb, setMeta } from "../core/db.ts";
+import { getMeta, NewerSchemaError, openDb, SCHEMA_VERSION, schemaInfo, setMeta } from "../core/db.ts";
 import { type ScanResult, scan } from "../core/ingest/index.ts";
 import { budgetAlerts, budgetStatus, limitAlerts, takeNew } from "../core/budgets.ts";
 import { activePlans, type LimitReport, LimitsCache } from "../core/limits.ts";
@@ -12,6 +12,7 @@ import { DbWriter, recomputeCosts } from "../core/ingest/writer.ts";
 import { redactStored } from "../core/redact.ts";
 import { Queries } from "../core/queries.ts";
 import { compact, type DbSize, dbSize, trimDetail, trimDue } from "../core/retention.ts";
+import { rollupDue, rollupOutcomes } from "../core/rollup.ts";
 import { buildDigest, type Digest, type DigestContext, type DigestWeek, digestDir, dueSlot, latestSlot, markSlot, notificationText, rememberDigest, writeDigestFile } from "../core/digest.ts";
 import { notify } from "./notify.ts";
 import { type CursorSyncState, syncCursor, syncState } from "../core/cursorSync.ts";
@@ -36,12 +37,24 @@ export type AppEvent =
   | { type: "pricing-changed" }
   | { type: "alert"; title: string; body: string };
 
+/**
+ * Why the database is open read-only: a newer app migrated it past the schema this one knows, at the start or while
+ * this one ran (App.writable). Nothing is written to it then, not by a scan, a background job or a request, until the
+ * app is updated.
+ */
+export type ReadOnlyReason = "newer-schema";
+
+/** What a scan answers while the database is read-only: nothing read, nothing written. */
+const NO_SCAN: ScanResult = { filesSeen: 0, filesParsed: 0, usageRows: 0, prompts: 0, tools: 0, errors: [], durationMs: 0 };
+
 /** Long-lived server state: config, database handle, background scanner and event subscribers. */
 export class App {
   cfg: AppConfig;
   db!: Database;
   dbPath!: string;
   queries!: Queries;
+  /** Set while the database is open read-only (see ReadOnlyReason), null while this app may write it. */
+  readOnly: ReadOnlyReason | null = null;
   private prices!: PriceBook;
   private listeners = new Set<(e: AppEvent) => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -69,7 +82,11 @@ export class App {
   private queuedFull: Promise<ScanResult> | null = null;
   /** The detail trim running in the background (retention.ts), at most one at a time. */
   private trimming: Promise<void> | null = null;
+  /** The outcome rollup running in the background (rollup.ts), at most one at a time. */
+  private rolling: Promise<void> | null = null;
   private closed = false;
+  /** Whether the background jobs were asked for: they start again when the database becomes writable. */
+  private background = false;
   lastScan: ScanResult | null = null;
   lastScanAt: number | null = null;
 
@@ -82,24 +99,111 @@ export class App {
     return { user: this.cfg.userName || localIdentity().user, host: localIdentity().host };
   }
 
+  /**
+   * Opens the configured database. One a newer app migrated past this app's schema is opened read-only instead, and
+   * one that newer app marked unreadable for older ones throws NewerSchemaError. The connection open until now is
+   * closed only once the new one is ready: a database that can't be opened leaves the app on the one it had.
+   */
   private openDatabase(): void {
     const { path, isDefault } = resolveDbPath(this.cfg, this.cliDbPath);
-    this.db = openDb(path, { journalMode: this.cfg.journalMode, isDefaultPath: isDefault });
+    let db: Database;
+    let readOnly: ReadOnlyReason | null = null;
+    try {
+      db = openDb(path, { journalMode: this.cfg.journalMode, isDefaultPath: isDefault });
+    } catch (err) {
+      if (!(err instanceof NewerSchemaError)) throw err;
+      db = openDb(path, { readonly: true });
+      readOnly = "newer-schema";
+      console.warn(`[db] ${err.message} Opened read-only.`);
+    }
+
+    let prices: PriceBook;
+    let last: string | null;
+    try {
+      prices = PriceBook.fromDb(db);
+      if (!readOnly) {
+        // History priced with an older built-in table is re-priced once. Only upwards, so machines on an older version
+        // sharing the database don't undo it.
+        if (Number(getMeta(db, "builtin_prices") ?? 0) < BUILTIN_PRICES_VERSION) {
+          db.transaction(() => {
+            recomputeCosts(db, prices);
+            setMeta(db, "builtin_prices", String(BUILTIN_PRICES_VERSION));
+          })();
+        }
+        redactStored(db);
+      }
+      last = getMeta(db, `last_scan:${this.identity.host}`);
+    } catch (err) {
+      db.close();
+      throw err;
+    }
+
+    const previous: Database | undefined = this.db;
+    this.db = db;
+    this.readOnly = readOnly;
     this.dbPath = path;
     this.dbFile = fileId(path);
-    this.prices = PriceBook.fromDb(this.db);
-    // History priced with an older built-in table is re-priced once. Only upwards, so machines on an older version
-    // sharing the database don't undo it.
-    if (Number(getMeta(this.db, "builtin_prices") ?? 0) < BUILTIN_PRICES_VERSION) {
-      this.db.transaction(() => {
-        recomputeCosts(this.db, this.prices);
-        setMeta(this.db, "builtin_prices", String(BUILTIN_PRICES_VERSION));
-      })();
-    }
-    redactStored(this.db);
-    this.queries = new Queries(this.db, () => this.prices);
-    const last = getMeta(this.db, `last_scan:${this.identity.host}`);
+    this.prices = prices;
+    this.queries = new Queries(db, () => this.prices);
     this.lastScanAt = last ? Number(last) : null;
+    previous?.close();
+  }
+
+  /** The database's schema version, which is ahead of this app's while it is read-only. 0 when it can't be read. */
+  schemaVersion(): number {
+    try {
+      return schemaInfo(this.db).version;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Whether this app may write the database now. Another machine sharing it can migrate it past this app's schema while
+   * this one runs: every write (a scan, a background job, a request) asks first, which reads two meta rows. A newer
+   * schema makes the app read-only like one opened that way, and open windows hear of it. The database is opened again
+   * read-only when nothing else is using the connection. One the newer app marked unreadable for this one, or one a job
+   * is still running on, keeps its connection: only nothing is written to it anymore.
+   */
+  writable(): boolean {
+    if (this.readOnly) return false;
+
+    // A version that can't be read is no permission to write: not this time, though the next check may read it.
+    let schema: { version: number; minReader: number };
+    try {
+      schema = schemaInfo(this.db);
+    } catch (err) {
+      console.warn("[db] Can't read the schema version, nothing is written:", err);
+      return false;
+    }
+    if (schema.version <= SCHEMA_VERSION) return true;
+
+    console.warn(`[db] ${new NewerSchemaError(schema.version, schema.minReader).message} Nothing is written to it anymore.`);
+    const busy = this.scanning || this.trimming || this.rolling || this.labeling || this.cursorSyncing;
+    let reopened = false;
+    if (!busy) {
+      try {
+        this.reopen();
+        reopened = true;
+      } catch {
+        // Unreadable for this app: the connection stays, nothing is written to it.
+      }
+    }
+    if (!reopened) {
+      this.readOnly = "newer-schema";
+      if (this.background) this.startBackgroundScan();
+    }
+
+    this.emit({ type: "db-changed", path: this.dbPath });
+    return false;
+  }
+
+  /**
+   * Whether a background job on `db` (a trim, the rollup) stops at its next step: the app closed or moved to another
+   * database, or this one went read-only, or a newer app migrated it meanwhile.
+   */
+  private jobStopped(db: Database): boolean {
+    return this.closed || this.db !== db || !this.writable();
   }
 
   priceBook(): PriceBook {
@@ -142,6 +246,8 @@ export class App {
       return this.queuedFull;
     }
     this.reopenIfReplaced();
+    if (!this.writable()) return Promise.resolve(NO_SCAN);
+
     this.scanningFull = full;
     let lastEmit = 0;
     this.scanning = scan(this.db, this.cfg, this.identity, {
@@ -160,8 +266,9 @@ export class App {
         this.emit({ type: "scan", result });
         if (result.filesParsed > 0) this.sendAlerts().catch((err) => console.error("[alerts]", err));
         this.trimIfDue();
+        this.rollupIfDue();
         // The labeler's own runs leave transcripts that this scan may just have read.
-        tagLabelerSessions(this.db, this.labelerDir());
+        if (this.writable()) tagLabelerSessions(this.db, this.labelerDir());
         return result;
       })
       .finally(() => {
@@ -177,17 +284,32 @@ export class App {
    */
   private reopenIfReplaced(): void {
     if (this.dbFile == null || fileId(this.dbPath) === this.dbFile || !existsSync(this.dbPath)) return;
-    this.db.close();
-    this.openDatabase();
+    this.reopen();
     this.emit({ type: "db-changed", path: this.dbPath });
+  }
+
+  /**
+   * Opens the database again, and starts or stops the background jobs when it became writable or read-only. One that
+   * can't be opened throws, and leaves the connection as it was.
+   */
+  private reopen(): void {
+    const was = this.readOnly;
+    this.openDatabase();
+    if (this.readOnly !== was && this.background) this.startBackgroundScan();
   }
 
   get isScanning(): boolean {
     return this.scanning !== null;
   }
 
+  /** Starts the scan and the other background jobs. None of them runs on a read-only database: they all write it. */
   startBackgroundScan(): void {
     this.stopBackgroundScan();
+    this.background = true;
+    // Only a database known to be read-only has no jobs. A check that fails for a moment (a locked file in a synced
+    // folder) must not leave none running: each job asks writable() itself before it writes.
+    if (this.readOnly) return;
+
     // Kept in range here too: the config file can be edited by hand.
     const sec = scanInterval(this.cfg.scanIntervalSec);
     if (sec > 0) {
@@ -201,12 +323,14 @@ export class App {
     // Only with the user's opt-in: the sync itself checks the setting, and asks cursor.com only when due.
     const cursor = () => void this.syncCursor().catch((err) => console.error("[cursor]", err));
     this.cursorTimer = setInterval(cursor, CURSOR_CHECK_MS);
-    if (this.cfg.cursorSync) cursor();
     // Opt-in, and checked against the settings each time: due once a week, caught up when the app was off.
     this.digestTimer = setInterval(() => this.checkDigest(), DIGEST_CHECK_MS);
-    this.checkDigest();
     // Opt-in: runs only while Settings has it on, and at most every 30 minutes when something is waiting.
     this.labelTimer = setInterval(() => void this.labelSessions().catch((err) => console.error("[labels]", err)), LABEL_CHECK_MS);
+
+    // Run now, once every timer is set: one that finds the database migrated restarts the jobs, which stops them all.
+    if (this.cfg.cursorSync) cursor();
+    this.checkDigest();
   }
 
   stopBackgroundScan(): void {
@@ -229,6 +353,8 @@ export class App {
   syncCursor(force = false): Promise<CursorSyncState> {
     if (this.cursorSyncing) return this.cursorSyncing;
     const { host } = this.identity;
+    if (!this.writable()) return Promise.resolve(syncState(this.db, host));
+
     const last = syncState(this.db, host).syncedAt;
     this.cursorSyncing = syncCursor(this.db, host, () => new DbWriter(this.db, this.prices, this.identity), { enabled: this.cfg.cursorSync, force })
       .then((state) => {
@@ -259,6 +385,8 @@ export class App {
    */
   labelSessions(opts: { force?: boolean; ids?: string[] } = {}): Promise<LabelRun> {
     if (this.labeling) return this.labeling;
+    if (!this.writable()) return Promise.resolve({ ...labelState(this.db, this.identity.host), skipped: "disabled" });
+
     const db = this.db;
     this.labeling = labelSessions(db, this.identity.host, this.cfg, opts, this.labelerDeps)
       .then((run) => {
@@ -288,6 +416,9 @@ export class App {
 
   /** Writes last week's digest and shows the notification when its slot has come and none was written for it. */
   checkDigest(now = Date.now()): { digest: Digest; path: string } | null {
+    // Which week was written is kept in the database: on a read-only one the same week would be written on every check.
+    if (!this.writable()) return null;
+
     const { host } = this.identity;
     const slot = dueSlot(this.db, host, this.cfg.digest, now);
     if (slot == null || slot === this.digestFailed) return null;
@@ -306,9 +437,11 @@ export class App {
 
   /** Reads the limits of the plans in use, which keeps them in the history. */
   private async pollLimits(): Promise<void> {
+    if (!this.writable()) return;
+
     const active = activePlans(this.db, Date.now() - LIMIT_ACTIVE_MS);
     if (!active.length) return;
-    const { reports } = await this.limits.get(this.db, this.identity.host, this.cfg.limits, false, active);
+    const { reports } = await this.limits.get(this.db, this.identity.host, this.cfg.limits, false, active, () => this.writable());
     await this.sendAlerts(reports);
   }
 
@@ -317,6 +450,9 @@ export class App {
    * reading. Open windows hear about them too.
    */
   async sendAlerts(reports?: LimitReport[]): Promise<void> {
+    // Which alerts were sent is kept in the database: on a read-only one none could be marked, so none is sent.
+    if (!this.writable()) return;
+
     const b = this.cfg.budgets;
     const { user, host } = this.identity;
     const lang = this.cfg.language;
@@ -338,14 +474,23 @@ export class App {
     if (this.scanning) await this.scanning.catch(() => {});
     if (copy && newPath && !existsSync(newPath)) {
       mkdirSync(dirname(newPath), { recursive: true });
-      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      // VACUUM INTO reads a read-only database as well, only the checkpoint would write it.
+      if (!this.readOnly) this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
       this.db.query("VACUUM INTO ?").run(newPath);
     }
-    this.db.close();
+    // The config names the new file only once it opened: one that can't be read leaves the app on the old one.
+    const previous = { cfg: this.cfg, cliDbPath: this.cliDbPath };
     this.cfg = { ...this.cfg, dbPath: newPath };
-    saveConfig(this.cfg);
     this.cliDbPath = undefined;
-    this.openDatabase();
+    try {
+      this.reopen();
+    } catch (err) {
+      this.cfg = previous.cfg;
+      this.cliDbPath = previous.cliDbPath;
+      throw err;
+    }
+
+    saveConfig(this.cfg);
     this.emit({ type: "db-changed", path: this.dbPath });
   }
 
@@ -365,7 +510,7 @@ export class App {
     // Turned on, or moved to another time, in the middle of a week: that week's slot has passed already, so the first
     // digest is the next one.
     const d = this.cfg.digest;
-    if (d.enabled && (!was.enabled || d.day !== was.day || d.hour !== was.hour)) markSlot(this.db, this.identity.host, latestSlot(Date.now(), d.day, d.hour));
+    if (d.enabled && this.writable() && (!was.enabled || d.day !== was.day || d.hour !== was.hour)) markSlot(this.db, this.identity.host, latestSlot(Date.now(), d.day, d.hour));
     this.digestFailed = null;
     saveConfig(this.cfg);
     this.startBackgroundScan();
@@ -379,19 +524,41 @@ export class App {
    * batches the server answers requests between. It stops when the database is switched or closed under it.
    */
   trimIfDue(): void {
-    if (this.trimming) return;
+    if (this.trimming || !this.writable()) return;
     const db = this.db;
     const { host } = this.identity;
     const months = retentionMonths(this.cfg.detailRetentionMonths);
     if (!trimDue(db, host, months)) return;
-    this.trimming = trimDetail(db, host, months, { stop: () => this.closed || this.db !== db })
+    this.trimming = trimDetail(db, host, months, { stop: () => this.jobStopped(db) })
       .then((r) => {
-        const rows = r.prompts + r.toolCalls + r.outcomes + r.sessions + r.responseMeta;
+        const rows = r.prompts + r.toolCalls + r.outcomes + r.sessions + r.responseMeta + r.gitEvents;
         if (rows || r.freedPages) console.log(`[retention] trimmed ${rows} rows in ${r.batches} batches, freed ${r.freedPages} pages`);
       })
       .catch((err) => console.error("[retention]", err))
       .finally(() => {
         this.trimming = null;
+      });
+  }
+
+  /**
+   * Rolls this host's successful tool calls older than a week into daily counts once a day (rollup.ts). Checked after
+   * every scan, after the trim: it waits for a trim in progress, then runs in the background a day per transaction.
+   * It stops when the database is switched or closed under it.
+   */
+  rollupIfDue(): void {
+    if (this.rolling || !this.writable()) return;
+    const db = this.db;
+    const { host } = this.identity;
+    if (!rollupDue(db, host)) return;
+    const stop = () => this.jobStopped(db);
+    this.rolling = (this.trimming ?? Promise.resolve())
+      .then(() => (stop() ? null : rollupOutcomes(db, host, { stop })))
+      .then((r) => {
+        if (r?.deleted || r?.freedPages) console.log(`[rollup] counted ${r.counted} tool results of ${r.days} days in ${r.groups} rows, freed ${r.freedPages} pages`);
+      })
+      .catch((err) => console.error("[rollup]", err))
+      .finally(() => {
+        this.rolling = null;
       });
   }
 
@@ -401,12 +568,15 @@ export class App {
   }
 
   /**
-   * Rewrites the database without its free pages (Settings → Compact). Waits for a scan or trim in progress. VACUUM
+   * Rewrites the database without its free pages (Settings → Compact). Waits for a scan, trim or rollup in progress. VACUUM
    * holds the connection until done, so no scan runs meanwhile.
    */
   async compactDb(): Promise<DbSize> {
     if (this.scanning) await this.scanning.catch(() => {});
     if (this.trimming) await this.trimming;
+    if (this.rolling) await this.rolling;
+    // Another machine may have migrated it while this waited: then nothing is rewritten.
+    if (!this.writable()) return this.dbSize();
     return compact(this.db);
   }
 

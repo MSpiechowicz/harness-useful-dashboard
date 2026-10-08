@@ -11,16 +11,24 @@
    * A session's or prompt's model calls in four plain charts, one question each: how the context grew, agent by agent,
    * and per interval what was read from and written to the cache, what went in and came out fresh, and what it cost.
    */
-  /** `prompts`: the session's prompts in order, numbered as its prompt list numbers them (left out for a single prompt). */
+  /**
+   * `prompts`: the session's prompts in order, numbered as its prompt list numbers them (left out for a single prompt).
+   * `marks`: the session's compactions, drawn as marked rules on the context chart with a legend entry that hides them.
+   */
   let {
     rows,
     prompts,
-  }: { rows: (CallRow & { promptId?: string | null })[]; prompts?: { id: string; n: number; text: string | null }[] } = $props();
+    marks,
+  }: {
+    rows: (CallRow & { promptId?: string | null })[];
+    prompts?: { id: string; n: number; text: string | null }[];
+    marks?: { ts: number; label: string }[];
+  } = $props();
 
   const groups = $derived(callIntervals(rows));
   const every = $derived(duration(groups.step));
   const name = (k: string) => t(`tok.${k}` as "tok.input");
-  const context = $derived.by(() => (void store.dark, contextByAgent(rows)));
+  const context = $derived.by(() => (void store.dark, contextByAgent(rows, { marks, marksName: t("detail.compactions") })));
   const perPrompt = $derived.by(() => (void store.dark, prompts ? contextPerPrompt(rows, prompts) : null));
   const cache = $derived.by(
     () => (void store.dark, intervalBars(groups, (["cacheRead", "cacheWrite"] as const).map((k) => ({ key: k, name: name(k), color: colorFor("type", k) })), compact)),

@@ -10,6 +10,7 @@ import { detailCutoff } from "../retention.ts";
 import { claudeParser } from "./claude.ts";
 import { codexParser } from "./codex.ts";
 import { copilotParser } from "./copilot.ts";
+import { copilotStoreDatabases, ingestCopilotStore } from "./copilotStore.ts";
 import { geminiParser, ingestGeminiJson } from "./gemini.ts";
 import { ompParser, piParser } from "./omp.ts";
 import { ingestOpencode, opencodeDatabases, sqliteStamp } from "./opencode.ts";
@@ -170,6 +171,9 @@ function succeeded(path: string): void {
   failing.delete(path);
 }
 
+/** How long a scan runs before it lets the event loop answer requests and send its progress. */
+const YIELD_MS = 100;
+
 export async function scan(
   db: Database,
   cfg: AppConfig,
@@ -204,6 +208,7 @@ export async function scan(
     batched = 0;
   };
   let done = 0;
+  let lastYield = performance.now();
   // A savepoint's undo log is a temporary file by default: one per file in a batch made the batch slower than a
   // commit per file. Kept in memory while the batches run.
   db.exec("PRAGMA temp_store = MEMORY");
@@ -285,14 +290,21 @@ export async function scan(
         result.errors.push({ path: file.path, error: (err as Error).message });
       }
       opts.onProgress?.(done, files.length);
+      // A long scan hands the event loop back now and then, between batches only (never with a transaction open), so
+      // its progress reaches the window and requests are answered while it runs instead of all at the end.
+      if (performance.now() - lastYield > YIELD_MS) {
+        commit();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        lastYield = performance.now();
+      }
     }
   } finally {
     commit();
     db.exec("PRAGMA temp_store = DEFAULT");
   }
 
-  // OpenCode and Zed keep a database rather than log files: read what changed since the last scan, when it changed
-  // at all.
+  // OpenCode, Zed and Copilot's session store are databases rather than log files: read what changed since the last
+  // scan, when it changed at all. Copilot's store comes after its events.jsonl files, whose shutdown totals it supersedes.
   // Kilo Code 7 writes OpenCode's schema: read with the OpenCode reader, as Kilo Code's.
   const families = [
     { family: "cline" as const, on: cfg.sources.enabled.cline, dirs: cfg.sources.clineDirs ?? [] },
@@ -303,6 +315,7 @@ export async function scan(
   const databases: { enabled: boolean; dirs: string[]; find: (dir: string) => string[]; ingest: typeof ingestOpencode }[] = [
     { enabled: cfg.sources.enabled.opencode, dirs: cfg.sources.opencodeDirs ?? [], find: opencodeDatabases, ingest: ingestOpencode },
     { enabled: cfg.sources.enabled.zed, dirs: cfg.sources.zedDirs ?? [], find: zedDatabases, ingest: ingestZed },
+    { enabled: cfg.sources.enabled.copilot, dirs: cfg.sources.copilotDirs ?? [], find: copilotStoreDatabases, ingest: (path, sink, o) => ingestCopilotStore(path, sink, { ...o, prices }) },
     { enabled: cline.length > 0, dirs: ["kilo"], find: () => [...new Set(cline.flatMap((c) => c.kiloDatabases))], ingest: (path, sink, o) => ingestOpencode(path, sink, { ...o, flavor: KILO }) },
   ];
   for (const source of databases) {
