@@ -283,6 +283,16 @@
   <td class="truncate text-ink-2" title={skills.join("\n")}>{skills.length ? skills.map(skillName).join(", ") : "–"}</td>
 {/snippet}
 
+<!-- A status dot. Working, it pings green like the sidebar's connection dot: the session is running right now. An idle
+     session pings amber: it waits for your next prompt. A subagent that is done stays still in grey. -->
+{#snippet statusDot(status: keyof typeof STATUS_COLOR, run = false)}
+  {@const color = status === "idle" && !run ? "var(--status-warning)" : STATUS_COLOR[status]}
+  <span class="relative flex size-2 shrink-0">
+    {#if status === "working" || (status === "idle" && !run)}<span class="absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:hidden" style:background={color}></span>{/if}
+    <span class="relative inline-flex size-2 rounded-full" style:background={color}></span>
+  </span>
+{/snippet}
+
 <!-- Failed calls as one small count after the title, so the title keeps its room. What failed is in the tooltip. -->
 {#snippet failed(errors: number, apiErrors: number)}
   {@const label = [errors ? t("live.errors", { n: errors }) : null, apiErrors ? t("live.apiErrors", { n: apiErrors }) : null].filter(Boolean).join(" · ")}
@@ -432,7 +442,7 @@
                 </td>
                 <td>
                   <span class="inline-flex items-center gap-2 text-ink-2">
-                    <span class="h-2 w-2 shrink-0 rounded-full" class:animate-pulse={s.status === "working"} style:background={STATUS_COLOR[s.status]}></span>
+                    {@render statusDot(s.status)}
                     {t(`live.status.${s.status}`)}
                   </span>
                 </td>
@@ -484,7 +494,7 @@
                     </td>
                     <td>
                       <span class="inline-flex items-center gap-2 text-ink-2">
-                        <span class="h-2 w-2 shrink-0 rounded-full" class:animate-pulse={r.status === "working"} style:background={STATUS_COLOR[r.status]}></span>
+                        {@render statusDot(r.status, true)}
                         {runStatus(r)}
                       </span>
                     </td>

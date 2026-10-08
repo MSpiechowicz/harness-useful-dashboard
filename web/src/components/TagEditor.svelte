@@ -169,7 +169,7 @@
             </ul>
           {/if}
         </div>
-        <button type="submit" class="btn shrink-0" disabled={busy || !input.trim()}><Plus size={14} />{t("tags.add")}</button>
+        <button type="submit" class="btn btn-primary shrink-0" disabled={busy || !input.trim()}><Plus size={14} />{t("tags.add")}</button>
       </form>
       {#if tags.length || inherited.length || rule}
         <ul class="flex flex-wrap gap-1.5">
