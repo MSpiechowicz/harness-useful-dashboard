@@ -1,3 +1,10 @@
+# [1.21.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.20.2...v1.21.0) (2026-10-08)
+
+
+### Features
+
+* Live shows what ran each session, and tables resize and hide columns ([50e57fc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/50e57fc9865bc8a4060d502fae0042092eb31286))
+
 ## [1.20.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.20.1...v1.20.2) (2026-10-07)
 
 
