@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { claudeRoots, liveClaudeSessions } from "../src/core/claudeRegistry.ts";
 import type { UsageRecord } from "../src/core/ingest/types.ts";
 import { DbWriter } from "../src/core/ingest/writer.ts";
@@ -123,10 +123,12 @@ describe("Claude Code's session registry", () => {
   });
 
   test("the roots: above each configured projects folder, and CLAUDE_CONFIG_DIR", () => {
+    // Absolute paths as this platform writes them (on Windows with the current drive).
     const cfg = testConfig("/r");
-    expect(claudeRoots(cfg, {})).toEqual(["/r/claude"]);
-    expect(claudeRoots(cfg, { CLAUDE_CONFIG_DIR: "/c" })).toEqual(["/r/claude", "/c"]);
-    expect(claudeRoots(cfg, { CLAUDE_CONFIG_DIR: "/r/claude/" })).toEqual(["/r/claude"]);
+    const own = resolve("/r/claude");
+    expect(claudeRoots(cfg, {})).toEqual([own]);
+    expect(claudeRoots(cfg, { CLAUDE_CONFIG_DIR: "/c" })).toEqual([own, resolve("/c")]);
+    expect(claudeRoots(cfg, { CLAUDE_CONFIG_DIR: "/r/claude/" })).toEqual([own]);
   });
 });
 
