@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.3...v1.22.0) (2026-10-08)
+
+
+### Features
+
+* Commits, PRs, compactions, chart notes and what-if pricing, with a smaller database ([6660386](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/6660386266ba3f123bb6fd48721d3aabbe387e11))
+
 ## [1.21.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.2...v1.21.3) (2026-10-08)
 
 
