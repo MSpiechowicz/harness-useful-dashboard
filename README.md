@@ -5,10 +5,10 @@ Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, pi, omp (oh-my-pi)
 Code extensions already write to disk, plus Cursor usage from cursor.com or its CSV export. It stores
 everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
-[![A one-minute tour of Harness Dashboard](docs/video/harness-dashboard-tour.jpg)](docs/video/harness-dashboard-tour.mp4)
+https://github.com/user-attachments/assets/510b68af-a524-476e-8a50-8715b8ecabbb
 
 <sub>A one-minute tour with sound: where the tokens go, one prompt in full, trimming an expensive skill, and the settings.
-Made with demo data.</sub>
+Made with demo data. [Download the full-quality video](docs/video/harness-dashboard-tour.mp4?raw=true) (19 MB).</sub>
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
 - **By project, user, model, provider, skill, agent, session and prompt**: every dimension is a filter
