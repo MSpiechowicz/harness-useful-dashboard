@@ -1,3 +1,10 @@
+## [1.21.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.2...v1.21.3) (2026-10-08)
+
+
+### Bug Fixes
+
+* Live pings working sessions green and idle ones amber, and Add tag is a blue button ([b89f6f5](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/b89f6f50fb6a2c8c13befbd54b221793959214da))
+
 ## [1.21.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.1...v1.21.2) (2026-10-08)
 
 
