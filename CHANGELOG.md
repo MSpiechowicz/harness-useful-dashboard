@@ -1,3 +1,10 @@
+## [1.21.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.0...v1.21.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* Subagent skills keep their plugin name on Windows ([e822192](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/e822192261fe69316bc71f0be418f8280a80d1cb))
+
 # [1.21.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.20.2...v1.21.0) (2026-10-08)
 
 
