@@ -1,3 +1,10 @@
+## [1.21.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.1...v1.21.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* The network keeps names and points off the lines, and names each Other ([7831b41](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/7831b41db0a96349632ee0e8d8d119f1f5d774b8))
+
 ## [1.21.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.0...v1.21.1) (2026-10-08)
 
 
