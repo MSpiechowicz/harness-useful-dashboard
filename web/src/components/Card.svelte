@@ -2,6 +2,8 @@
   import { setContext, type Snippet } from "svelte";
   import { Table2, ChartColumn } from "@lucide/svelte";
   import { t } from "../lib/i18n.svelte.ts";
+  import { columnSets } from "../lib/columns.svelte.ts";
+  import ColumnsMenu from "./ColumnsMenu.svelte";
   import ExportMenu from "./ExportMenu.svelte";
 
   interface Props {
@@ -26,6 +28,11 @@
   // A chart in the card is named after it (see Chart's label).
   setContext("card-title", () => title);
   const hasHeader = $derived(!!(title || actions || table || exportName));
+  // The tables in the card whose columns can be hidden get a menu for them, with the card's other buttons.
+  let body = $state<HTMLDivElement>();
+  const sets = $derived(
+    [...columnSets].filter((s) => body?.contains(s.table) && s.table.closest("section.card") === body.parentElement && s.names.some((_, i) => s.hideable(i))),
+  );
 </script>
 
 <section class="card flex min-w-0 flex-col {cls}">
@@ -38,6 +45,7 @@
       </div>
       <div class="flex min-w-0 flex-wrap items-center gap-2">
         {#if actions}{@render actions()}{/if}
+        {#if sets.length}<ColumnsMenu {sets} small={!actions} />{/if}
         {#if exportName && exportRows}<ExportMenu name={exportName} rows={exportRows} small />{/if}
         {#if table}
           <button
@@ -54,7 +62,7 @@
   {/if}
   <!-- Unpadded content (edge-to-edge tables) is clipped to the card's inner radius so header and row fills stay inside the border.
        Under a header it starts the same distance below the description in every card. -->
-  <div class="min-w-0 flex-1 {divided ? 'px-5' : pad ? 'px-5 pt-3 pb-4' : hasHeader ? 'card-flush overflow-hidden rounded-b-[13px] pt-3' : 'card-flush overflow-hidden rounded-[13px]'}">
+  <div bind:this={body} class="min-w-0 flex-1 {divided ? 'px-5' : pad ? 'px-5 pt-3 pb-4' : hasHeader ? 'card-flush overflow-hidden rounded-b-[13px] pt-3' : 'card-flush overflow-hidden rounded-[13px]'}">
     {#if table && showTable}
       <div class="max-h-[420px] overflow-auto">{@render table()}</div>
     {:else}

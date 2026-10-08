@@ -13,6 +13,7 @@
   import { compact, decimal, entityLabel, percent } from "../lib/format.ts";
   import { t, type MessageKey } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface ToolsData {
     totals: { calls: number; tools: number; mcpTools: number; mcpCalls: number; prompts: number };
@@ -231,7 +232,7 @@
         exportName="tools"
       >
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"tools"}>
             <colgroup>
               <col />
               <col class="w-40" />

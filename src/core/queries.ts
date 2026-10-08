@@ -513,15 +513,18 @@ export class Queries {
     );
     const shown = all.slice(0, Queries.LIVE_RUNS);
     if (!shown.length) return { runs: [], runCount: 0 };
-    // Each run's last response, last tool call and failed calls in the window: one query each for all of them.
-    const stops = new Map(
-      this.all<{ key: string; stop: string | null }>(
-        `SELECT key, stop FROM (
-           SELECT ${key("u", "u.spawn_ref")} AS key, m.stop_reason AS stop, ROW_NUMBER() OVER (PARTITION BY ${key("u", "u.spawn_ref")} ORDER BY u.ts DESC) AS n
+    // Each run's last response (how it ended, the model it went to, the effort of the last that logged one), last tool
+    // call, failed calls and skills in the window: one query each for all of them.
+    const lasts = new Map(
+      this.all<{ key: string; stop: string | null; model: string | null; effort: string | null }>(
+        `SELECT key, stop, model, effort FROM (
+           SELECT ${key("u", "u.spawn_ref")} AS key, m.stop_reason AS stop, u.model,
+                  FIRST_VALUE(m.effort) OVER (PARTITION BY ${key("u", "u.spawn_ref")} ORDER BY m.effort IS NULL, u.ts DESC) AS effort,
+                  ROW_NUMBER() OVER (PARTITION BY ${key("u", "u.spawn_ref")} ORDER BY u.ts DESC) AS n
            FROM usage u LEFT JOIN response_meta m ON m.usage_id = u.id WHERE ${mine("u")} AND u.ts >= $from
          ) WHERE n = 1`,
         p,
-      ).map((r) => [r.key, r.stop]),
+      ).map((r) => [r.key, r]),
     );
     const tools = new Map(
       this.all<{ key: string; tool: string; file: string | null }>(
@@ -540,12 +543,24 @@ export class Queries {
         p,
       ).map((r) => [r.key, r.n]),
     );
+    // A run's skills: the one its agent is built from, any it used itself, else the one its session was in when it
+    // started the run (resolveSpawnRefs).
+    const skills = new Map<string, string[]>();
+    for (const r of this.all<{ key: string; skill: string }>(
+      `SELECT ${key("u", "u.spawn_ref")} AS key, u.skill FROM usage u
+       WHERE ${mine("u")} AND u.ts >= $from AND u.skill IS NOT NULL AND u.skill <> ''
+       GROUP BY key, u.skill ORDER BY MAX(u.ts) DESC`,
+      p,
+    )) skills.set(r.key, [...(skills.get(r.key) ?? []), r.skill]);
     return {
       runs: shown.map((r) => {
         const tool = tools.get(r.key);
         return {
           ...r,
-          status: liveStatus(r.lastTs, stops.get(r.key) ?? null, now),
+          model: lasts.get(r.key)?.model ?? null,
+          effort: lasts.get(r.key)?.effort ?? null,
+          skills: skills.get(r.key) ?? [],
+          status: liveStatus(r.lastTs, lasts.get(r.key)?.stop ?? null, now),
           lastTool: tool?.tool ?? null,
           lastFile: tool?.file ? relativeTo(tool.file, project) : null,
           errors: errors.get(r.key) ?? 0,
@@ -594,7 +609,7 @@ export class Queries {
               COUNT(DISTINCT CASE WHEN u.session_id <> a.id THEN u.session_id END) AS subagents,
               COALESCE(SUM(CASE WHEN u.session_id = a.id AND u.agent = 'main' THEN u.total_tokens END), 0) AS ownTokens,
               COALESCE(SUM(CASE WHEN u.session_id = a.id AND u.agent = 'main' THEN u.cost_usd END), 0) AS ownCost,
-              (SELECT u2.model FROM usage u2 WHERE u2.session_id = a.id ORDER BY u2.ts DESC LIMIT 1) AS model,
+              (SELECT u2.model FROM usage u2 WHERE u2.session_id = a.id ORDER BY u2.agent = 'main' DESC, u2.ts DESC LIMIT 1) AS model,
               MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
        FROM active a
        JOIN sessions root ON root.id = a.id
@@ -604,8 +619,8 @@ export class Queries {
       w.params,
     );
     const from = first * MINUTE;
-    // Each session with what its main agent last did, its last tool and file, the subagents working right now and the
-    // tool errors in the window. A session's subagents are its child sessions (omp, Codex) or other agents in it (Claude).
+    // Each session with what its main agent last did, its last tool and file, the subagents working right now, and the
+    // tool errors and its main agent's skills in the window. A session's subagents are its child sessions (omp, Codex) or other agents in it (Claude).
     const tree = "(u.session_id = $id OR u.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id))";
     const tags = tagsForSessions(this.db, sessions.map((r) => r.id));
     const detailed = sessions.map((r) => {
@@ -615,6 +630,12 @@ export class Queries {
          WHERE u.session_id = $id AND u.agent = 'main' ORDER BY u.ts DESC LIMIT 1`,
         { id: r.id },
       )?.stop ?? null;
+      // The effort its main agent last ran at, from the last response that logged one.
+      const effort = this.get<{ effort: string }>(
+        `SELECT m.effort FROM usage u JOIN response_meta m ON m.usage_id = u.id
+         WHERE u.session_id = $id AND u.agent = 'main' AND m.effort IS NOT NULL ORDER BY u.ts DESC LIMIT 1`,
+        { id: r.id },
+      )?.effort ?? null;
       const tool = this.get<{ tool: string; file: string | null }>(
         `SELECT t.tool, t.file_path AS file FROM tool_calls t
          WHERE t.session_id = $id OR t.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id) ORDER BY t.ts DESC LIMIT 1`,
@@ -631,10 +652,17 @@ export class Queries {
            AND o.kind IN ('tool_error', 'api_error')`,
         p,
       )!;
+      const skills = this.all<{ skill: string }>(
+        `SELECT u.skill FROM usage u WHERE u.session_id = $id AND u.agent = 'main' AND u.ts >= $from AND u.skill IS NOT NULL AND u.skill <> ''
+         GROUP BY u.skill ORDER BY MAX(u.ts) DESC`,
+        { id: r.id, from },
+      ).map((x) => x.skill);
       return {
         ...r,
         projectLabel: projectLabel(r.project),
+        skills,
         tags: tags.get(r.id) ?? [],
+        effort,
         status: liveStatus(r.lastTs, lastStop, now),
         lastTool: tool?.tool ?? null,
         lastFile: tool?.file ? relativeTo(tool.file, r.project) : null,

@@ -14,6 +14,7 @@
   import { compact, dayWithYear, days, integer, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   let { id }: { id: string } = $props();
 
@@ -88,7 +89,7 @@
       <div class="grid gap-5 xl:grid-cols-3">
         <Card title={t("branches.sessions")} subtitle={t("branches.sessionsHint")} class="xl:col-span-2" pad={false}>
           <div class="max-h-[560px] overflow-auto">
-            <table class="data">
+            <table class="data" use:resizableColumns={"branch-detail"}>
               <thead>
                 <tr>
                   <th>{t("col.title")}</th>

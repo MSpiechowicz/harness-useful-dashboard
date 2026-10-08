@@ -14,6 +14,7 @@
   import { seriesRows } from "../lib/export.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   type Group = "none" | "type" | "provider" | "model" | "project" | "user" | "agent" | "skill";
   type Bucket = "hour" | "day" | "week" | "month";
@@ -105,7 +106,7 @@
         {/snippet}
         {#snippet table()}
           {#if series.data}
-            <table class="data">
+            <table class="data" use:resizableColumns={"trends-1"}>
               <thead><tr><th>{t("col.time")}</th>{#each series.data.series as se (se.key)}<th class="num">{seriesLabel(group, se)}</th>{/each}<th class="num">{t("common.total")}</th></tr></thead>
               <tbody>
                 {#each series.data.buckets as b, i (b)}
@@ -138,7 +139,7 @@
             <span class="text-2xl font-semibold tracking-tight text-ink tabular">{compact(linesTotal)}</span>
           {/snippet}
           {#snippet table()}
-            <table class="data">
+            <table class="data" use:resizableColumns={"trends-2"}>
               <thead><tr><th>{t("col.time")}</th><th class="num">{t("col.added")}</th><th class="num">{t("col.removed")}</th><th class="num">{t("col.cost")}</th><th class="num">{t("col.per100")}</th></tr></thead>
               <tbody>
                 {#each x.buckets as b, i (b)}

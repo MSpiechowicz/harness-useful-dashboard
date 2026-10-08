@@ -17,6 +17,7 @@
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
   import { checkUpdate, installUpdate, updater } from "../lib/update.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
   type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs" | "zedDirs" | "clineDirs" | "rooDirs" | "kiloDirs" | "geminiDirs" | "copilotDirs";
@@ -812,7 +813,7 @@
 
     <Card title={t("settings.pricing")} subtitle={t("settings.pricingHint")} divided>
       <div class="card-flush -mx-5 overflow-x-auto">
-        <table class="data">
+        <table class="data" use:resizableColumns={"settings-1"}>
           <thead>
             <tr>
               <th>{t("settings.pattern")}</th><th class="num">{t("tok.input")}</th><th class="num">{t("tok.output")}</th>
@@ -838,7 +839,7 @@
       </div>
       {#if showBuiltin}
         <div class="mb-4 max-h-80 overflow-auto rounded-lg border border-line">
-          <table class="data">
+          <table class="data" use:resizableColumns={"settings-2"}>
             <tbody>
               {#each builtinRules as r (r.pattern)}
                 <tr>

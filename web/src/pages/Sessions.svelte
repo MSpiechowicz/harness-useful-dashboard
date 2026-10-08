@@ -14,6 +14,7 @@
   import { compact, entityLabel, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { navigate, store, keeper } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface SessionRow {
     id: string;
@@ -108,7 +109,7 @@
       exportAll={() => getJson<{ rows: SessionRow[] }>(apiUrl("/api/sessions", { sort, q: debounced, limit: 10000, export: 1 })).then((d) => d.rows)}
     >
       {#snippet children(view)}
-        <table class="data fixed-cols">
+        <table class="data fixed-cols" use:resizableColumns={"sessions"}>
           <colgroup>
             <col />
             <col class="w-44" />

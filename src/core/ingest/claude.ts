@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { apiErrorOf } from "../apiErrors.ts";
 import { failureOf, inputSummary, type PendingCalls, rememberCall, takeCall } from "../failures.ts";
 import { countLines, diffLines, hunkLines, type LineCount, sumLines } from "./lines.ts";
@@ -150,6 +150,36 @@ function subagentInfo(path: string): { agent: string | null; spawnRef: string | 
   return { agent: "subagent", spawnRef: null };
 }
 
+/** The name of the plugin a skill folder belongs to: its `.claude-plugin/plugin.json`, a level or two up. */
+const pluginNames = new Map<string, string | null>();
+function pluginOf(skillsDir: string): string | null {
+  if (pluginNames.has(skillsDir)) return pluginNames.get(skillsDir)!;
+  let name: string | null = null;
+  for (let dir = dirname(skillsDir), i = 0; i < 3 && !name; dir = dirname(dir), i++) {
+    try {
+      const v = JSON.parse(readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8")) as { name?: unknown };
+      if (typeof v.name === "string" && v.name) name = v.name;
+    } catch {
+      /* not this level */
+    }
+  }
+  pluginNames.set(skillsDir, name);
+  return name;
+}
+
+/**
+ * The skill a subagent's agent is built from: its instructions (the first part of its system prompt) point into one
+ * skill's folder, as a plugin's agents follow their skill's brief. Named as the Skill tool names it ("plugin:skill").
+ */
+export function agentSkill(systemPrompt: unknown): string | null {
+  const own = Array.isArray(systemPrompt) ? systemPrompt[0] : systemPrompt;
+  if (typeof own !== "string") return null;
+  const m = /((?:\/[^\s`'"()]+?)?\/skills)\/([A-Za-z0-9_.-]+)\//.exec(own);
+  if (!m) return null;
+  const plugin = m[1]!.startsWith("/") ? pluginOf(m[1]!) : null;
+  return plugin ? `${plugin}:${m[2]}` : m[2]!;
+}
+
 export const claudeParser: LineParser<ClaudeState> = {
   initialState(path) {
     return { promptId: null, skill: null, ...subagentInfo(path) };
@@ -192,6 +222,11 @@ export const claudeParser: LineParser<ClaudeState> = {
           effort: state.effort ?? null,
           ...apiErrorOf(typeof body.type === "string" ? body.type : null, typeof e.status === "number" ? e.status : null, message, ctx.promptTextLimit),
         });
+        continue;
+      }
+      // A subagent's own instructions, logged before it starts: the skill its agent is built from is its skill.
+      if (rec.type === "attachment" && rec.attachment?.type === "prompt_snapshot") {
+        if (state.agent !== null && !state.skill) state.skill = agentSkill(rec.attachment.systemPrompt);
         continue;
       }
       if (rec.type !== "user" && rec.type !== "assistant") continue;

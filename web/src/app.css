@@ -238,6 +238,59 @@ body {
   font-size: 0.8125rem;
   min-width: 0;
 }
+/* The search field folded to its icon (SearchInput.svelte), the size of an icon button. Its open width is always
+   kept, so nothing beside it moves: opened, the field grows to the left within it, its icon sliding to the start.
+   Only the field takes clicks, not the empty room beside the icon. */
+.search-fold {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  width: min(14rem, calc(100vw - 4rem));
+  height: 2rem;
+  pointer-events: none;
+}
+.search-fold .input {
+  position: absolute;
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  width: 2rem;
+  height: 2rem;
+  /* The folded field's whole inner width, so it stays 2rem with its border. */
+  padding: 0 0 0 calc(2rem - 2px);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    width 0.2s ease,
+    background 0.12s;
+}
+.search-fold.open .input {
+  width: 100%;
+  padding-right: 0.6rem;
+  cursor: text;
+}
+.search-fold:not(.open) .input,
+.search-fold:not(.open) .input::placeholder {
+  color: transparent;
+}
+.search-fold:not(.open) .input:hover {
+  background: var(--surface-2);
+}
+.search-fold:not(.open) .input::-webkit-search-cancel-button {
+  display: none;
+}
+/* Centered in the folded field: (2rem - 14px) / 2 from its edge. */
+.search-fold .search-icon {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  pointer-events: none;
+  color: var(--muted);
+  transition: right 0.2s ease;
+}
+.search-fold.open .search-icon {
+  right: calc(100% - 23px);
+}
 .popover {
   position: absolute;
   z-index: 30;
@@ -384,6 +437,10 @@ table.data.fixed-cols td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A row's button is not text to cut short: a column narrower than it shows no ellipsis beside it. */
+table.data.fixed-cols td:has(> button, > .btn) {
+  text-overflow: clip;
+}
 table.data th {
   text-align: left;
   font-weight: 500;
@@ -395,6 +452,42 @@ table.data th {
   position: sticky;
   top: 0;
   background: var(--surface);
+}
+/* A column's edge to drag, on tables whose columns resize (columns.ts). It shows on the header's hover. */
+table.data th .col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+table.data th .col-resize::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 0;
+  width: 1px;
+  background: var(--grid);
+  opacity: 0;
+}
+table.data thead:hover .col-resize::after {
+  opacity: 1;
+}
+table.data th .col-resize:is(:hover, :focus-visible)::after,
+.col-resizing table.data th .col-resize:active::after {
+  background: var(--accent);
+  opacity: 1;
+}
+table.data th .col-resize:focus-visible {
+  outline: none;
+}
+.col-resizing,
+.col-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
 }
 table.data th button {
   font: inherit;
@@ -641,6 +734,9 @@ table.data th.num {
   }
   table.data th {
     position: static;
+  }
+  table.data th .col-resize {
+    display: none;
   }
   table.data tbody tr:hover {
     background: transparent;

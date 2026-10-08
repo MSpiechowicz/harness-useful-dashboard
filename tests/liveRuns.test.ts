@@ -27,15 +27,20 @@ function seed() {
   const w = new DbWriter(db, new PriceBook(), ID);
   // Claude Code: two subagents in the parent's own log, each started by an Agent call that says what it is for.
   w.session({ id: "claude:p", provider: "claude", nativeId: "p", project: "/work/alpha", title: "Parent" });
-  w.usage(usage({ id: "m1", costUsd: 2 }));
-  w.tool(tool({ id: "claude:tA", tool: "Agent", brief: "Find the login handlers" }));
+  w.usage(usage({ id: "m1", costUsd: 2, skill: "us-plan" }));
+  w.tool(tool({ id: "claude:tA", tool: "Agent", brief: "Find the login handlers", skill: "us-implement" }));
   w.tool(tool({ id: "claude:tB", tool: "Agent", brief: "Review the diff" }));
   const sub = (id: string, ref: string, agent: string, ts: number) =>
     w.usage(usage({ id, agent, isSubagent: true, spawnRef: ref, ts, costUsd: 0.5 }));
   sub("a1", "claude:tA", "Explore", NOW - 5 * MIN);
+  // A run without a skill of its own is credited its parent's (resolveSpawnRefs).
+  w.usage(usage({ id: "a0", agent: "Explore", isSubagent: true, spawnRef: "claude:tA", ts: NOW - 6 * MIN, skill: "us-implement", costUsd: 0 }));
   sub("a2", "claude:tA", "Explore", NOW - 30_000);
   sub("b1", "claude:tB", "general-purpose", NOW - 8 * MIN);
-  w.responseMeta({ usageId: "b1", startTs: null, endTs: NOW - 8 * MIN, stopReason: "end_turn" });
+  w.usage(usage({ id: "a3", agent: "Explore", isSubagent: true, spawnRef: "claude:tA", ts: NOW - 20_000, model: "claude-haiku-4-5", costUsd: 0, skill: "graphify" }));
+  w.responseMeta({ usageId: "b1", startTs: null, endTs: NOW - 8 * MIN, stopReason: "end_turn", effort: "low" });
+  w.responseMeta({ usageId: "a1", startTs: null, endTs: NOW - 5 * MIN, stopReason: null, effort: "high" });
+  w.responseMeta({ usageId: "m1", startTs: null, endTs: NOW - 10 * MIN, stopReason: null, effort: "xhigh" });
   // A run that ended before the window: not listed.
   w.tool(tool({ id: "claude:tC", tool: "Agent", brief: "Old work", ts: NOW - 5 * 60 * MIN }));
   sub("c1", "claude:tC", "Explore", NOW - 5 * 60 * MIN);
@@ -63,8 +68,14 @@ describe("live subagent runs", () => {
       ["claude:tA", "Explore", "Find the login handlers", "working"],
       ["claude:tB", "general-purpose", "Review the diff", "idle"],
     ]);
-    expect(p.runs[0]).toMatchObject({ sessionId: null, cost: 1, messages: 2, lastTool: "Read", lastFile: "src/login.ts", errors: 1 });
-    expect(p.runs[1]).toMatchObject({ lastTool: null, errors: 0 });
+    expect(p.model).toBe("claude-sonnet-4-5");
+    expect(p.skills).toEqual(["us-plan"]);
+    expect(p.effort).toBe("xhigh");
+    // A run's effort is its last logged one, though later responses logged none.
+    expect(p.runs.map((r) => r.effort)).toEqual(["high", "low"]);
+    expect(p.runs[0]).toMatchObject({ sessionId: null, model: "claude-haiku-4-5", cost: 1, messages: 4, lastTool: "Read", lastFile: "src/login.ts", errors: 1 });
+    expect(p.runs[0]!.skills).toEqual(["graphify", "us-implement"]);
+    expect(p.runs[1]).toMatchObject({ lastTool: null, errors: 0, skills: [] });
   });
 
   test("a child session is a run of its own, with its page to open", () => {

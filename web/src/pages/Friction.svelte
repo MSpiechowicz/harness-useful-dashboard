@@ -17,6 +17,7 @@
   import { t } from "../lib/i18n.svelte.ts";
   import { PROVIDER_NAMES, type Provider } from "../lib/palette.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface Counts {
     ok: number;
@@ -265,7 +266,7 @@
 
       <TableCard title={t("friction.byTool")} subtitle={t("friction.byToolHint")} rows={tools} searchText={(r) => r.key} sorts={TOOL_SORTS} bind:sortKey={toolSort} bind:asc={toolAsc} exportName="friction-by-tool">
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"friction-1"}>
             <colgroup>
               <col />
               <col class="w-24" />
@@ -312,7 +313,7 @@
           exportName="friction-failures"
         >
           {#snippet children(view)}
-            <table class="data fixed-cols">
+            <table class="data fixed-cols" use:resizableColumns={"friction-2"}>
               <colgroup>
                 <col class="w-32" />
                 <col class="w-36" />
@@ -390,7 +391,7 @@
 
       <TableCard title={t("friction.sessions")} subtitle={t("friction.sessionsHint")} rows={sessions} searchText={(s) => `${s.title ?? ""} ${s.projectLabel}`} sorts={SESSION_SORTS} bind:sortKey={sessionSort} exportName="friction-sessions">
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"friction-3"}>
             <colgroup>
               <col />
               <col class="w-44" />
@@ -476,7 +477,7 @@
           exportName="friction-api-errors"
         >
           {#snippet children(view)}
-            <table class="data fixed-cols">
+            <table class="data fixed-cols" use:resizableColumns={"friction-4"}>
               <colgroup>
                 <col class="w-32" />
                 <col class="w-44" />

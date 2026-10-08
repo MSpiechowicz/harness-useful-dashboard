@@ -103,11 +103,14 @@ export class DbWriter implements IngestSink {
               $agent, $spawnRef, $brief, COALESCE($model, (SELECT u.model FROM usage u WHERE u.id = $usageId)),
               CASE WHEN ${failed} THEN NULL ELSE $linesAdded END, CASE WHEN ${failed} THEN NULL ELSE $linesRemoved END)
       ON CONFLICT(id) DO UPDATE SET
+        skill         = COALESCE(tool_calls.skill, excluded.skill),
+        prompt_id     = COALESCE(tool_calls.prompt_id, excluded.prompt_id),
         brief         = COALESCE(tool_calls.brief, excluded.brief),
         model         = COALESCE(tool_calls.model, excluded.model),
         lines_added   = CASE WHEN ${failed} THEN NULL ELSE COALESCE(tool_calls.lines_added, excluded.lines_added) END,
         lines_removed = CASE WHEN ${failed} THEN NULL ELSE COALESCE(tool_calls.lines_removed, excluded.lines_removed) END
       WHERE excluded.brief IS NOT NULL OR excluded.model IS NOT NULL OR excluded.lines_added IS NOT NULL
+         OR excluded.skill IS NOT NULL OR excluded.prompt_id IS NOT NULL
     `);
     // Only an edit's count is replaced (it has one from its input): a result's diff never makes another call an edit.
     this.sLines = db.prepare(`UPDATE tool_calls SET lines_added = $added, lines_removed = $removed WHERE id = $id AND lines_added IS NOT NULL`);

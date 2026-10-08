@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 import { CURSOR_REKEY } from "./ingest/cursor.ts";
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -285,6 +285,14 @@ const MIGRATIONS: Record<number, string> = {
       session_id TEXT PRIMARY KEY,
       attempts   INTEGER NOT NULL
     );
+  `,
+  // A Claude Code subagent's skill is the one its agent is built from (claude.ts agentSkill), no longer always the one
+  // its parent was in when it started it: that one stays the fallback (resolveSpawnRefs). Forget the skills subagents
+  // were given and read their logs once more. Records are keyed by their place in the logs, so nothing else changes.
+  17: /* sql */ `
+    UPDATE usage SET skill = NULL, prompt_id = NULL WHERE provider = 'claude' AND spawn_ref IS NOT NULL;
+    UPDATE tool_calls SET skill = NULL, prompt_id = NULL WHERE provider = 'claude' AND spawn_ref IS NOT NULL;
+    DELETE FROM ingest_files WHERE path LIKE '%/subagents/agent-%.jsonl' OR path LIKE '%\\subagents\\agent-%.jsonl';
   `,
 };
 

@@ -14,6 +14,7 @@
   import { compact, entityLabel, integer, percent, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { navigate } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface BranchRow {
     id: string;
@@ -198,7 +199,7 @@
 
       <TableCard title={t("branches.all")} subtitle={t("branches.allHint")} rows={sorted} searchText={(r) => `${r.branch} ${r.projectLabel}`} sorts={SORTS} bind:sortKey={sort} bind:asc exportName="branches">
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"branches"}>
             <colgroup>
               <col />
               <col class="w-44" />

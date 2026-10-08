@@ -10,6 +10,7 @@
   import { compact, entityLabel, percent, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store, type FilterKey } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface Props {
     rows: BreakdownRow[];
@@ -48,7 +49,7 @@
   const dir = (k: BreakdownSortKey) => (sortKey === k ? (asc ? "ascending" : "descending") : undefined);
 </script>
 
-<table class="data">
+<table class="data" use:resizableColumns={`breakdown-${dim}${compactCols ? "-compact" : ""}`}>
   <thead>
     <tr>
       <SortTh label={t("col.name")} sort={dir("label")} onclick={() => sortBy("label")} />

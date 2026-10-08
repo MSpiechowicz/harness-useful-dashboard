@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseClaudePrompt } from "../src/core/ingest/claude.ts";
+import { agentSkill, parseClaudePrompt } from "../src/core/ingest/claude.ts";
 import { scan } from "../src/core/ingest/index.ts";
 import { claudeAssistant, claudeToolResult, claudeUser, CLAUDE_SESSION, ID, memDb, tempDir, testConfig, writeJsonl } from "./helpers.ts";
 
@@ -23,6 +23,23 @@ describe("parseClaudePrompt", () => {
   test("slash commands are parsed with args", () => {
     const p = parseClaudePrompt("<command-name>/review</command-name>\n<command-message>review</command-message>\n<command-args>PR 12</command-args>");
     expect(p).toEqual({ text: "/review PR 12", command: "review" });
+  });
+});
+
+describe("agentSkill", () => {
+  test("names the skill folder an agent's instructions point into, with its plugin", () => {
+    const root = tempDir();
+    mkdirSync(join(root, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "useful-skills" }));
+    const brief = `${root}/claude/skills/us-check-security/references/brief.md`;
+    expect(agentSkill([`Follow the brief from \`${brief}\` and its scope.`, "/other/skills/no/x"])).toBe("useful-skills:us-check-security");
+  });
+  test("a folder outside a plugin goes by its own name", () => {
+    expect(agentSkill(["Read /nowhere/skills/lone/SKILL.md first."])).toBe("lone");
+  });
+  test("only the agent's own instructions count, and none without a skill folder", () => {
+    expect(agentSkill(["Search the code.", "/work/skills/x/a.md"])).toBeNull();
+    expect(agentSkill(undefined)).toBeNull();
   });
 });
 
@@ -113,6 +130,24 @@ describe("Claude Code ingest", () => {
     expect(tools.map((t) => t.tool)).toEqual(["Agent", "Grep", "Read", "Skill"]);
     expect(tools.find((t) => t.tool === "Read").file_path).toBe("/work/alpha/src/login.ts");
     expect(tools.find((t) => t.tool === "Grep").agent).toBe("Explore");
+  });
+
+  test("a subagent's skill is the one its agent is built from, not its parent's", async () => {
+    const { root } = setup();
+    const plugin = join(root, "plugin");
+    mkdirSync(join(plugin, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "kit" }));
+    const subDir = join(root, "claude", "projects", "-work-alpha", CLAUDE_SESSION, "subagents");
+    writeJsonl(join(subDir, "agent-abc.jsonl"), [
+      { type: "attachment", sessionId: CLAUDE_SESSION, timestamp: "2026-09-01T10:00:05.000Z", isSidechain: true,
+        attachment: { type: "prompt_snapshot", systemPrompt: [`Follow ${plugin}/skills/reviewing/brief.md.`, "Notes"] } },
+      claudeUser("look", { uuid: "s1", ts: "2026-09-01T10:00:05.000Z", sidechain: true }),
+      claudeAssistant({ id: "msg_sub", ts: "2026-09-01T10:00:06.000Z", sidechain: true, content: [{ type: "tool_use", id: "toolu_grep", name: "Grep", input: { pattern: "x" } }] }),
+    ]);
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    expect(db.query<any, []>("SELECT skill FROM usage WHERE id = 'claude:msg_sub'").get().skill).toBe("kit:reviewing");
+    expect(db.query<any, []>("SELECT skill FROM tool_calls WHERE tool = 'Grep'").get().skill).toBe("kit:reviewing");
   });
 
   test("keeps fast mode when only a later streamed copy of a message reports it", async () => {

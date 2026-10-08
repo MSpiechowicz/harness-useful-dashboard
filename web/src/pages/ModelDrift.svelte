@@ -13,6 +13,7 @@
   import { compact, integer, percent, trimmed } from "../lib/format.ts";
   import { t, type MessageKey } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   // The model and effort compared here. Until one is picked, the server takes the global model filter or the busiest model.
   let selected = $state("");
@@ -184,7 +185,7 @@
       <TableCard title={t("drift.allModels")} subtitle={t("drift.allModelsHint")} {rows} searchText={(r) => r.model} sorts={SORTS} bind:sortKey={sort} bind:asc exportName="model-drift">
         {#snippet children(view)}
           <div class="overflow-x-auto">
-            <table class="data">
+            <table class="data" use:resizableColumns={"model-drift"}>
               <thead>
                 <tr>
                   <th>{t("col.model")}</th>

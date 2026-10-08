@@ -14,6 +14,7 @@
   import { t } from "../lib/i18n.svelte.ts";
   import { PROVIDER_NAMES } from "../lib/palette.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface PlanRow {
     key: string;
@@ -167,7 +168,7 @@
 
       <Card title={t("plans.perPlan")} subtitle={t("plans.perPlanHint")} pad={false}>
         <div class="overflow-x-auto">
-          <table class="data">
+          <table class="data" use:resizableColumns={"plans-1"}>
             <thead>
               <tr>
                 <th>{t("plans.plan")}</th>
@@ -232,7 +233,7 @@
         {#if historyOption && selected}
           <div class="flex flex-col gap-5">
             <Chart option={historyOption} height={260} dim={d.loading} />
-            <table class="data">
+            <table class="data" use:resizableColumns={"plans-2"}>
               <thead>
                 <tr>
                   <th>{t("plans.window")}</th>

@@ -19,6 +19,7 @@
   import { PROVIDER_NAMES } from "../lib/palette.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   let { id }: { id: string } = $props();
 
@@ -161,7 +162,7 @@
         {:else}
           <Card title={t("sessions.promptsInSession")} subtitle={t("detail.prompts")} class="self-start xl:col-span-2" pad={false}>
             <div class="overflow-x-auto">
-              <table class="data">
+              <table class="data" use:resizableColumns={"session-detail"}>
                 <thead><tr><th class="w-10">#</th><th class="w-16">{t("col.time")}</th><th>{t("col.prompt")}</th>{#if hasSkills}<th>{t("col.skill")}</th>{/if}<th class="num">{t("col.messages")}</th><th class="num">{t("col.tools")}</th><th class="num">{t("col.tokens")}</th><th class="num">{t("col.cost")}</th></tr></thead>
                 <tbody>
                   {#each d.data.prompts.slice((promptPage - 1) * PAGE, promptPage * PAGE) as p (p.id)}

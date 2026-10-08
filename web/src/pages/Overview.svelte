@@ -25,6 +25,7 @@
   import { seriesRows } from "../lib/export.ts";
   import { store } from "../lib/state.svelte.ts";
   import { tipStore } from "../lib/tips.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   type Group = "type" | "provider" | "model" | "project";
   let group = $state<Group>("type");
@@ -145,7 +146,7 @@
         {/snippet}
         {#snippet table()}
           {#if series.data}
-            <table class="data">
+            <table class="data" use:resizableColumns={"overview"}>
               <thead><tr><th>{t("col.time")}</th>{#each series.data.series as se (se.key)}<th class="num">{seriesLabel(group, se)}</th>{/each}</tr></thead>
               <tbody>
                 {#each series.data.buckets as b, i (b)}

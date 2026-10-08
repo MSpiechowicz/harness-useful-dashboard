@@ -19,6 +19,7 @@
   import { live } from "../lib/live.svelte.ts";
   import { everyWhileVisible } from "../lib/visibility.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface LiveSession {
     id: string;
@@ -40,6 +41,10 @@
     activeSubagents: number;
     tags: string[];
     errors: number;
+    /** The effort or thinking level its main agent last ran at. */
+    effort: string | null;
+    /** The skills its main agent used in the window, the latest first. */
+    skills: string[];
     /** Model requests that failed in the window (rate limits, overloads, …). */
     apiErrors: number;
     /** The main agent's own share of the totals, its subagents left out. */
@@ -56,6 +61,11 @@
     sessionId: string | null;
     agent: string | null;
     brief: string | null;
+    /** The model its last response came from, and the effort it last ran at. */
+    model: string | null;
+    effort: string | null;
+    /** The skills it used in the window, the latest first. */
+    skills: string[];
     tokens: number;
     cost: number;
     messages: number;
@@ -247,12 +257,15 @@
   // A finished subagent is done, not waiting for a prompt like an idle session.
   const runStatus = (r: LiveRun) => t(r.status === "idle" ? "live.status.done" : `live.status.${r.status}`);
   const runTarget = (s: LiveSession, r: LiveRun) => r.sessionId ?? s.id;
+  // A model without its snapshot date ("claude-haiku-4-5-20251001" → "claude-haiku-4-5"). The full id is in the tooltip.
+  const skillName = (k: string) => k.slice(k.lastIndexOf(":") + 1);
+  const modelName = (m: string) => entityLabel("model", m, m.replace(/-\d{8}$/, ""));
   // The export has a line per session and per subagent listed under it, which names its session.
   const exportSessions = (rows: LiveSession[]) =>
     rows.flatMap(({ runs, ...s }) => [
       { ...s, parent: null, agent: null, brief: null },
       ...runs.map((r) => ({
-        id: r.sessionId ?? r.key, title: r.agent, parent: s.id, agent: r.agent, brief: r.brief, provider: s.provider, project: s.project,
+        id: r.sessionId ?? r.key, title: r.agent, parent: s.id, agent: r.agent, brief: r.brief, provider: s.provider, project: s.project, model: r.model, effort: r.effort, skills: r.skills,
         status: r.status, lastTool: r.lastTool, lastFile: r.lastFile, tokens: r.tokens, cost: r.cost, messages: r.messages,
         errors: r.errors, firstTs: r.firstTs, lastTs: r.lastTs,
       })),
@@ -263,6 +276,12 @@
     (data.data?.sessions ?? []).reduce((m, s) => m.set(s.provider, (m.get(s.provider) ?? 0) + 1), new Map<string, number>()),
   );
 </script>
+
+<!-- The skills a session or subagent used in the window, the latest first: a subagent's is the one its agent is built
+     from. A plugin's skill goes by its own name, and the full names are in the tooltip. -->
+{#snippet skillCell(skills: string[])}
+  <td class="truncate text-ink-2" title={skills.join("\n")}>{skills.length ? skills.map(skillName).join(", ") : "–"}</td>
+{/snippet}
 
 <!-- Failed calls as one small count after the title, so the title keeps its room. What failed is in the tooltip. -->
 {#snippet failed(errors: number, apiErrors: number)}
@@ -359,22 +378,28 @@
       title={t("live.sessions")}
       subtitle={t("live.sessionsHint")}
       rows={[...(data.data?.sessions ?? [])].sort((a, b) => (sort === "recent" ? b.lastTs - a.lastTs : b[sort] - a[sort]))}
-      searchText={(s) => `${s.title ?? ""} ${s.tags.join(" ")} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider} ${s.runs.map((r) => `${r.agent ?? ""} ${r.brief ?? ""}`).join(" ")}`}
+      searchText={(s) => `${s.title ?? ""} ${s.tags.join(" ")} ${s.projectLabel} ${s.gitBranch ?? ""} ${s.model ?? ""} ${s.provider} ${s.runs.map((r) => `${r.agent ?? ""} ${r.brief ?? ""} ${r.model ?? ""} ${r.skills.join(" ")}`).join(" ")} ${s.skills.join(" ")}`}
       sorts={SORTS}
       bind:sortKey={sort}
       exportName="live-sessions"
       exportRows={exportSessions}
     >
       {#snippet children(view)}
-        <!-- Branch shares the project's cell, so the table fits a card about 1000px wide without scrolling sideways. -->
-        <table class="data fixed-cols !min-w-[52rem]">
+        <!-- Branch shares the project's cell to keep the table narrow. The title gets at least 10rem: a card narrower than
+             the table scrolls sideways rather than squeeze it. Each column's edge can be dragged to resize it, and the
+             card's menu hides columns. A subagent row reads across as what ran it: its agent, model, effort and skill. -->
+        <table class="data fixed-cols !min-w-[77rem]" use:resizableColumns={"live-sessions-v3"}>
           <colgroup>
             <col />
-            <col class="w-36" />
-            <col class="w-44" />
-            <col class="w-36" />
-            <col class="w-24" />
             <col class="w-28" />
+            <col class="w-32" />
+            <col class="w-32" />
+            <col class="w-36" />
+            <col class="w-20" />
+            <col class="w-28" />
+            <col class="w-28" />
+            <col class="w-20" />
+            <col class="w-[6.5rem]" />
             <col class="w-[5.5rem]" />
           </colgroup>
           <thead>
@@ -382,6 +407,10 @@
               <th>{t("col.title")}</th>
               <th>{t("col.status")}</th>
               <th>{t("col.project")}</th>
+              <th>{t("col.agent")}</th>
+              <th>{t("col.model")}</th>
+              <th>{t("col.effort")}</th>
+              <th>{t("col.skill")}</th>
               <th>{t("col.lastTool")}</th>
               <th class="num">{t("col.cost")}</th>
               <th class="num">{t("col.lastSeen")}</th>
@@ -410,6 +439,11 @@
                 <td class="truncate text-ink-2" title={[s.project, s.gitBranch].filter(Boolean).join("\n")}>
                   {entityLabel("project", s.project, s.projectLabel)}{#if s.gitBranch}<span class="ml-1 text-muted">· {s.gitBranch}</span>{/if}
                 </td>
+                <!-- The session's own agent is its main one. -->
+                <td class="text-muted">–</td>
+                <td class="truncate text-ink-2" title={s.model ?? undefined}>{s.model ? modelName(s.model) : "–"}</td>
+                <td class="truncate text-ink-2">{s.effort ?? "–"}</td>
+                {@render skillCell(s.skills)}
                 <td class="truncate text-ink-2" title={s.lastFile ?? s.lastTool ?? ""}>
                   {s.lastTool ?? "–"}{#if s.lastFile}<span class="ml-1 text-muted">· {s.lastFile.split(/[\\/]/).pop()}</span>{/if}
                 </td>
@@ -442,8 +476,7 @@
                     <td class="relative">
                       <!-- A tree line from the session's swatch to each of its subagents. -->
                       <span class="absolute top-0 left-[calc(1.25rem+4px)] w-px bg-line {last ? 'h-1/2' : 'bottom-0'}"></span><span class="absolute top-1/2 left-[calc(1.25rem+4px)] h-px w-2.5 bg-line"></span>
-                      <!-- The brief is what tells runs apart, so it gets the title's room. The agent type goes in the Project
-                           column, which a subagent shares with its session anyway. -->
+                      <!-- The brief is what tells runs apart. Its agent has a column of its own. -->
                       <div class="flex items-center gap-2 pl-[18px]">
                         <Link to="#/sessions/{encodeURIComponent(runTarget(s, r))}" class="min-w-0 truncate text-ink" title={r.brief ?? undefined}>{r.brief || r.agent || t("live.runs.subagent")}</Link>
                         {#if r.errors}{@render failed(r.errors, 0)}{/if}
@@ -455,7 +488,12 @@
                         {runStatus(r)}
                       </span>
                     </td>
-                    <td class="truncate text-muted" title={r.agent ?? undefined}>{r.brief ? (r.agent ?? t("live.runs.subagent")) : ""}</td>
+                    <!-- A subagent works in its session's project. -->
+                    <td></td>
+                    <td class="truncate text-ink-2" title={r.agent ?? undefined}>{r.agent ?? t("live.runs.subagent")}</td>
+                    <td class="truncate text-ink-2" title={r.model ?? undefined}>{r.model ? modelName(r.model) : "–"}</td>
+                    <td class="truncate text-ink-2">{r.effort ?? "–"}</td>
+                    {@render skillCell(r.skills)}
                     <td class="truncate text-ink-2" title={r.lastFile ?? r.lastTool ?? ""}>
                       {r.lastTool ?? "–"}{#if r.lastFile}<span class="ml-1 text-muted">· {r.lastFile.split(/[\\/]/).pop()}</span>{/if}
                     </td>
@@ -466,7 +504,7 @@
                 {/each}
                 {#if more > 0}
                   <tr class="cursor-pointer" onclick={() => navigate("sessions", s.id)}>
-                    <td class="relative" colspan="7">
+                    <td class="relative" colspan="11">
                       <span class="absolute top-0 left-[calc(1.25rem+4px)] w-px bg-line h-1/2"></span><span class="absolute top-1/2 left-[calc(1.25rem+4px)] h-px w-2.5 bg-line"></span>
                       <div class="pl-[18px] text-xs text-muted">{t("live.runs.more", { n: more })}</div>
                     </td>
@@ -490,7 +528,7 @@
     >
       {#snippet children(view)}
         <!-- Four columns: it fits a narrow window without scrolling sideways (the shared fixed-cols minimum is for wider tables). -->
-        <table class="data fixed-cols !min-w-[40rem]">
+        <table class="data fixed-cols !min-w-[40rem]" use:resizableColumns={"live-feed"}>
           <colgroup>
             <col class="w-20" />
             <col />

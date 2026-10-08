@@ -7,6 +7,7 @@
   import { compact, entityLabel, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store, type FilterKey } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   /**
    * What the spend bought, split by project, model or provider: the lines each one's edits added and removed, and its
@@ -63,7 +64,7 @@
     exportName={`${dim}-lines`}
   >
     {#snippet children(view)}
-      <table class="data">
+      <table class="data" use:resizableColumns={`lines-${dim}`}>
         <thead>
           <tr>
             <SortTh label={t("col.name")} sort={dir("label")} onclick={() => sortBy("label")} />

@@ -16,6 +16,7 @@
   import { compact, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface CacheData {
     totals: { input: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number; hitRate: number; savings: number; writeCost: number; readCost: number };
@@ -110,7 +111,7 @@
         exportName="cache-by-model"
       >
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"cache"}>
             <colgroup>
               <col />
               <col class="w-44" />

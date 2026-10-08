@@ -13,6 +13,7 @@
   import { compact, entityLabel, percent, relative } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store, keeper } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface FileRow {
     key: string;
@@ -173,7 +174,7 @@
         exportAll={() => getJson<{ rows: (FileRow & { sessions: number; lastTs: number })[] }>(apiUrl("/api/files/list", { q: debounced, sort, limit: 10000, export: 1 })).then((d) => d.rows)}
       >
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"files"}>
             <colgroup>
               <col />
               <col class="w-44" />

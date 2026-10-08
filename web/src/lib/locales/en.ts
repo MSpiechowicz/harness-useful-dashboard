@@ -225,8 +225,13 @@ export const en = {
   "col.savings": "Saved",
   "col.writeCost": "Write cost",
   "col.model": "Model",
+  "col.effort": "Effort",
   "col.agent": "Agent",
   "col.skill": "Skill",
+  "table.resizeColumn": "Resize the {name} column",
+  "table.columns": "Columns",
+  "table.someHidden": "some hidden",
+  "table.showAll": "Show all columns",
   "col.user": "User",
 
   "chart.usageOverTime": "Usage over time",

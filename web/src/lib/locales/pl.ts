@@ -227,8 +227,13 @@ export const pl: Record<MessageKey, string> = {
   "col.savings": "Oszczędność",
   "col.writeCost": "Koszt zapisu",
   "col.model": "Model",
+  "col.effort": "Effort",
   "col.agent": "Agent",
   "col.skill": "Skill",
+  "table.resizeColumn": "Zmień szerokość kolumny {name}",
+  "table.columns": "Kolumny",
+  "table.someHidden": "niektóre ukryte",
+  "table.showAll": "Pokaż wszystkie kolumny",
   "col.user": "Użytkownik",
 
   "chart.usageOverTime": "Zużycie w czasie",

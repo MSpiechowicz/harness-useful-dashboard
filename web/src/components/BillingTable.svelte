@@ -23,6 +23,7 @@
 <script lang="ts">
   import SortTh from "./SortTh.svelte";
   import { compact, usd } from "../lib/format.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface Props {
     rows: BillingRow[];
@@ -57,7 +58,7 @@
   const dir = (k: BillingSortKey) => (sortKey === k ? (asc ? "ascending" : "descending") : undefined);
 </script>
 
-<table class="data">
+<table class="data" use:resizableColumns={"billing"}>
   <thead>
     <tr>
       <SortTh label={t("col.name")} sort={dir("label")} onclick={() => sortBy("label")} />

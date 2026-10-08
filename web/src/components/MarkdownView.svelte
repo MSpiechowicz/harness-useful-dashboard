@@ -1,5 +1,6 @@
 <script lang="ts">
   import { type Inline, parseMarkdown } from "../lib/markdown.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   /** A report's Markdown drawn as elements, from the reader of lib/markdown.ts. Nothing here becomes HTML. */
   let { source }: { source: string } = $props();
@@ -27,7 +28,7 @@
       </svelte:element>
     {:else}
       <div class="overflow-x-auto">
-        <table class="data">
+        <table class="data" use:resizableColumns={undefined}>
           <thead>
             <tr>{#each b.head as cell, j (j)}<th class={b.align[j] === "right" ? "num" : ""}>{@render inline(cell)}</th>{/each}</tr>
           </thead>

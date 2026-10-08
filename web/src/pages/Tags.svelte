@@ -13,6 +13,7 @@
   import { compact, entityLabel, percent, relative, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   type SortKey = "label" | "cost" | "tokens" | "sessions" | "changed" | "costPer100" | "lastTs";
 
@@ -77,7 +78,7 @@
         exportName="tags"
       >
         {#snippet children(view)}
-          <table class="data">
+          <table class="data" use:resizableColumns={"tags-1"}>
             <thead>
               <tr>
                 <SortTh label={t("col.name")} sort={dir("label")} onclick={() => sortBy("label")} />
@@ -126,7 +127,7 @@
 
     {#if kindRows.some((r) => r.key !== "(none)")}
       <Card title={t("kinds.title")} subtitle={t("kinds.subtitle")} pad={false}>
-        <table class="data">
+        <table class="data" use:resizableColumns={"tags-2"}>
           <thead>
             <tr>
               <th>{t("filter.kind")}</th>

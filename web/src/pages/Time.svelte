@@ -15,6 +15,7 @@
   import { compact, dateTime, decimal, duration, entityLabel, integer, percent, usd } from "../lib/format.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { store } from "../lib/state.svelte.ts";
+  import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface TimeData {
     totals: {
@@ -121,7 +122,7 @@
 
       <TableCard title={t("time.byModel")} subtitle={t("time.byModelHint")} rows={models} searchText={(m) => m.key} sorts={MODEL_SORTS} bind:sortKey={modelSort} bind:asc={modelAsc} exportName="time-by-model">
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"time-1"}>
             <colgroup>
               <col />
               <col class="w-28" />
@@ -158,7 +159,7 @@
 
       <TableCard title={t("time.byProject")} subtitle={t("time.byProjectHint")} rows={projects} searchText={(p) => p.label} sorts={PROJECT_SORTS} bind:sortKey={projectSort} exportName="time-by-project">
         {#snippet children(view)}
-          <table class="data fixed-cols">
+          <table class="data fixed-cols" use:resizableColumns={"time-2"}>
             <colgroup>
               <col />
               <col class="w-48" />
