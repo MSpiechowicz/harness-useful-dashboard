@@ -19,7 +19,9 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run check
-      - run: bun test
+      # Windows runners are several times slower at spawning processes and opening SQLite files, so the database tests
+      # get more than bun's default 5 seconds there. Locally the default still applies.
+      - run: bun test --timeout 30000
       - name: Build binary for this platform
         run: bun run build
       - name: Smoke test the binary
