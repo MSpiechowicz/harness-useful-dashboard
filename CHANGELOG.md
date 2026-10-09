@@ -1,3 +1,10 @@
+## [1.22.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.22.0...v1.22.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* Model names stay readable with what-if pricing on, and long translated table headers wrap instead of being cut off ([917c75f](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/917c75f64145edcbc31656fa866b9ec6f73b8a71))
+
 # [1.22.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.21.3...v1.22.0) (2026-10-08)
 
 
