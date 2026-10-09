@@ -1,3 +1,10 @@
+## [1.22.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.22.1...v1.22.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* Plan limits show Claude's weekly Fable limit, read from the newer limits list of the usage reply ([4159391](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/4159391f891893f0f98f775c6e1f2d67f5556dd9))
+
 ## [1.22.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.22.0...v1.22.1) (2026-10-09)
 
 
