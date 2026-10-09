@@ -98,6 +98,72 @@ const SHOTS: Shot[] = [
   { name: "tips", route: "tips" },
   { name: "settings", route: "settings" },
   {
+    name: "note-compare",
+    route: "trends",
+    width: 1600,
+    // The first note's before and after, under the notes list.
+    prepare: async (p) => {
+      await clickButton(p, "Compare");
+      await p.waitFor(`[...document.querySelectorAll("main h2, main h3")].some((h) => h.textContent.trim().startsWith("Before and after"))`, "the before and after card");
+      await p.settle(300);
+      await p.idle();
+    },
+    clip: (p) => cardsClip(p, "Notes", "Before and after"),
+  },
+  {
+    name: "whatif",
+    route: "models",
+    width: 1600,
+    // The models table priced again on another model.
+    prepare: async (p) => {
+      await p.eval(`document.querySelector('main button[title^="Compare with"]').click()`);
+      await p.waitFor(`!!document.querySelector("[role=listbox] [role=option]")`, "the model list");
+      await p.eval(`(() => {
+        const options = [...document.querySelectorAll("[role=listbox] [role=option]")];
+        (options.find((o) => o.textContent.trim().startsWith("claude-haiku-4-5")) ?? options.find((o) => !/In use|No comparison/.test(o.textContent)))?.click();
+      })()`);
+      await p.waitFor(`document.body.innerText.includes("Cost if switched")`, "the what-if columns");
+      await p.settle(300);
+      await p.idle();
+    },
+    clip: (p) => tableClip(p, "Cost if switched"),
+  },
+  {
+    name: "branch-git",
+    route: "branches",
+    prepare: async (p) => {
+      await openFirst(p, "#/branches/");
+      await p.waitFor(`[...document.querySelectorAll("main h2, main h3")].some((h) => h.textContent.trim() === "Commits")`, "the branch's commits");
+    },
+    clip: (p) => cardsClip(p, "Pull requests", "Commits"),
+  },
+  {
+    name: "compactions",
+    route: "sessions",
+    // The session with the most compactions: its context chart with their markers, and their list.
+    prepare: async (p) => {
+      const id = await p.eval<string | null>(`(async () => {
+        const r = await (await fetch("/api/sessions?range=30d&limit=500")).json();
+        const rows = (Array.isArray(r) ? r : r.rows ?? r.sessions ?? []).filter((s) => s.compactions > 0);
+        rows.sort((a, b) => b.compactions - a.compactions);
+        return rows[0]?.id ?? null;
+      })()`);
+      if (!id) fail("no demo session with compactions");
+      await p.eval(`location.hash = ${JSON.stringify(`#/sessions/${encodeURIComponent(id)}`)}`);
+      await p.waitFor(`[...document.querySelectorAll("main h2, main h3")].some((h) => h.textContent.trim() === "Compactions")`, "the compactions list");
+      await p.settle(300);
+      await p.idle();
+      await p.settle(500);
+    },
+    clip: (p) => cardsClip(p, "Context by agent", "Context by agent"),
+  },
+  {
+    name: "api-errors",
+    route: "friction",
+    width: 1600,
+    clip: (p) => cardsClip(p, "API errors over time", "API errors by model"),
+  },
+  {
     name: "palette",
     route: "overview",
     prepare: async (p) => {
@@ -119,6 +185,36 @@ function cardClip(p: Page, title: string): Promise<Clip> {
     const r = card.getBoundingClientRect();
     return { x: r.left - 8, y: r.top + scrollY - 8, width: r.width + 16, height: r.height + 16 };
   })()`);
+}
+
+/** The cards from the one titled `first` to the one titled `last` (a title, or the start of one), wherever they sit. */
+function cardsClip(p: Page, first: string, last: string): Promise<Clip> {
+  return p.eval<Clip>(`(() => {
+    const card = (title) => [...document.querySelectorAll("main h2, main h3")].find((h) => h.textContent.trim().startsWith(title))?.closest(".card");
+    const a = card(${JSON.stringify(first)}), b = card(${JSON.stringify(last)});
+    if (!a || !b) throw new Error(${JSON.stringify(`cards not found: ${first} … ${last}`)});
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const x = Math.min(ra.left, rb.left), r = Math.max(ra.right, rb.right);
+    const y = Math.min(ra.top, rb.top) + scrollY, bottom = Math.max(ra.bottom, rb.bottom) + scrollY;
+    return { x: x - 8, y: y - 8, width: r - x + 16, height: bottom - y + 16 };
+  })()`);
+}
+
+/** The card holding the table with a column headed `column`. */
+function tableClip(p: Page, column: string): Promise<Clip> {
+  return p.eval<Clip>(`(() => {
+    const th = [...document.querySelectorAll("main th")].find((h) => h.textContent.trim().startsWith(${JSON.stringify(column)}));
+    const card = th?.closest(".card");
+    if (!card) throw new Error(${JSON.stringify(`table not found: ${column}`)});
+    const r = card.getBoundingClientRect();
+    return { x: r.left - 8, y: r.top + scrollY - 8, width: r.width + 16, height: Math.min(r.height, 900) + 16 };
+  })()`);
+}
+
+/** Clicks the first button on the page whose text is `text`. */
+async function clickButton(p: Page, text: string): Promise<void> {
+  await p.waitFor(`[...document.querySelectorAll("main button")].some((b) => b.textContent.trim() === ${JSON.stringify(text)})`, `a "${text}" button`);
+  await p.eval(`[...document.querySelectorAll("main button")].find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click()`);
 }
 
 /** Clicks the first row of the page's table, which opens its detail page ("#/sessions/<id>"). */

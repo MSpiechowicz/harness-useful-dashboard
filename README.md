@@ -52,6 +52,9 @@ Everything runs locally. Your usage is never uploaded anywhere.
     <td width="50%"><img src="docs/screenshots/trends.png" alt="Trends: daily usage, a moving average and the running total"><br><sub><b>Trends</b>: daily usage, a moving average and the running total</sub></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/screenshots/note-compare.png" alt="Chart notes: a note on the usage chart, and the 14 days after it against the 14 days before"><br><sub><b>Chart notes</b>: mark a day on Trends, then compare the days after it with the days before</sub></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/screenshots/flow.png" alt="Where the money goes: from tool to model to project"><br><sub><b>Where the money goes</b>: from tool to model to project</sub></td>
     <td width="50%"><img src="docs/screenshots/network.png" alt="Models by project: a network of what used what, with lights along the busiest links"><br><sub><b>Who used what</b>: models and the projects they worked on, as a network</sub></td>
   </tr>
@@ -60,11 +63,19 @@ Everything runs locally. Your usage is never uploaded anywhere.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/projects.png" alt="Projects: where the tokens go, project by project"><br><sub><b>Projects</b>: where the tokens go, project by project</sub></td>
-    <td width="50%"><img src="docs/screenshots/branches.png" alt="Branches: what each piece of work cost, with the lines it changed"><br><sub><b>Branches</b>: what each piece of work cost, with the lines it changed</sub></td>
+    <td width="50%"><img src="docs/screenshots/branches.png" alt="Branches: what each piece of work cost, with the lines it changed and its commits"><br><sub><b>Branches</b>: what each piece of work cost, with the lines it changed and its commits</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/branch-git.png" alt="Commits and pull requests: what the agents committed and opened on one branch"><br><sub><b>Commits and pull requests</b>: what the agents committed and opened on a branch</sub></td>
+    <td width="50%"><img src="docs/screenshots/compactions.png" alt="Compactions: where Claude Code compacted a session, on its context chart"><br><sub><b>Compactions</b>: where Claude Code compacted a session, on its context chart</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/models.png" alt="Models: which models do the work and what they cost"><br><sub><b>Models</b>: which models do the work and what they cost</sub></td>
     <td width="50%"><img src="docs/screenshots/model-drift.png" alt="Model drift: whether a model got slower or clumsier than it usually is"><br><sub><b>Model drift</b>: whether a model got slower or clumsier than it usually is</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/whatif.png" alt="What-if pricing: what each model's usage would have cost on another model"><br><sub><b>What-if pricing</b>: what the same usage would have cost on another model</sub></td>
+    <td width="50%"><img src="docs/screenshots/api-errors.png" alt="API errors: failed model requests over time by cause, and by model"><br><sub><b>API errors</b>: failed model requests over time by cause, and by model</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/providers.png" alt="Providers: Claude Code, Codex, omp, OpenCode and pi side by side"><br><sub><b>Providers</b>: Claude Code, Codex, omp, OpenCode and pi side by side</sub></td>
