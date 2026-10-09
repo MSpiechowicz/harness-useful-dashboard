@@ -28,6 +28,28 @@ describe("Claude limits", () => {
     expect(windows[0]!.resetsAt).toBe(Date.parse("2026-10-05T15:00:00Z"));
   });
 
+  test("reads the limits list, with the per-model weekly limits only it carries", () => {
+    const resets = "2026-10-09T10:00:00+00:00";
+    const windows = claudeWindows({
+      five_hour: { utilization: 3, resets_at: "2026-10-05T15:00:00+00:00" },
+      seven_day: { utilization: 61, resets_at: resets },
+      seven_day_opus: null,
+      limits: [
+        { kind: "session", group: "session", percent: 3, resets_at: "2026-10-05T15:00:00+00:00", scope: null },
+        { kind: "weekly_scoped", group: "weekly", percent: 12, resets_at: resets, scope: { model: { id: null, display_name: "Fable" }, surface: null } },
+        { kind: "weekly_all", group: "weekly", percent: 61, resets_at: resets, scope: null },
+        { kind: "weekly_scoped", group: "weekly", percent: 5, resets_at: resets, scope: { model: null, surface: null } },
+        { kind: "monthly_all", group: "monthly", percent: 1, resets_at: resets, scope: null },
+      ],
+    });
+    expect(windows.map((w) => [w.id, w.windowMs, w.scope, w.usedFraction])).toEqual([
+      ["five_hour", 5 * HOUR, null, 0.03],
+      ["seven_day", 168 * HOUR, null, 0.61],
+      ["seven_day_fable", 168 * HOUR, "Fable", 0.12],
+    ]);
+    expect(windows[2]!.resetsAt).toBe(Date.parse(resets));
+  });
+
   const login = (expiresAt: number) => JSON.stringify({ claudeAiOauth: { accessToken: "secret-token", expiresAt, subscriptionType: "max" } });
   const deps = (file: string | null, fetchImpl: typeof fetch) => ({
     now: () => NOW,

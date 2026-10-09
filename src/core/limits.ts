@@ -122,7 +122,50 @@ function readText(path: string): string | null {
 /** Anthropic's names for the windows: five_hour, seven_day, seven_day_opus, … */
 const CLAUDE_WINDOW = /^(five_hour|seven_day)(?:_(.+))?$/;
 
+/** The groups of the `limits` list, under the ids of the older keys: the history and the status line go by them. */
+const CLAUDE_GROUPS: Record<string, { id: string; windowMs: number }> = {
+  session: { id: "five_hour", windowMs: 5 * HOUR },
+  weekly: { id: "seven_day", windowMs: 7 * DAY },
+};
+
+/** What a scoped limit is limited to: a model ("Fable") or a surface, by its display name. */
+function claudeScope(scope: Record<string, unknown>): string | null {
+  for (const part of [scope.model, scope.surface]) {
+    if (typeof part === "string" && part) return part;
+    const name = part && typeof part === "object" ? (part as { display_name?: unknown }).display_name : null;
+    if (typeof name === "string" && name) return name;
+  }
+  return null;
+}
+
+/** The `limits` list, which also carries the limits the older keys don't (the weekly Fable one). */
+function claudeListed(limits: unknown[]): LimitWindow[] {
+  const windows: LimitWindow[] = [];
+  for (const v of limits) {
+    if (!v || typeof v !== "object") continue;
+    const { group, percent, resets_at, scope } = v as { group?: unknown; percent?: unknown; resets_at?: unknown; scope?: unknown };
+    const g = typeof group === "string" ? CLAUDE_GROUPS[group] : undefined;
+    if (!g || typeof percent !== "number") continue;
+    // A scoped limit without a name can't be told from the overall one.
+    const name = scope && typeof scope === "object" ? claudeScope(scope as Record<string, unknown>) : null;
+    if (scope && !name) continue;
+    const id = name ? `${g.id}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")}` : g.id;
+    if (windows.some((w) => w.id === id)) continue;
+    const resets = typeof resets_at === "string" ? Date.parse(resets_at) : NaN;
+    windows.push({ id, windowMs: g.windowMs, scope: name, label: null, usedFraction: Math.max(0, percent / 100), resetsAt: Number.isFinite(resets) ? resets : null });
+  }
+  return windows;
+}
+
 export function claudeWindows(body: Record<string, unknown>): LimitWindow[] {
+  const listed = Array.isArray(body.limits) ? claudeListed(body.limits) : [];
+  const windows = listed.length ? listed : claudeKeyed(body);
+  // The 5-hour window first, then the weekly ones, the overall one before the per-model ones.
+  return windows.sort((a, b) => (a.windowMs ?? 0) - (b.windowMs ?? 0) || Number(!!a.scope) - Number(!!b.scope));
+}
+
+/** The older keys, for a reply without the `limits` list. */
+function claudeKeyed(body: Record<string, unknown>): LimitWindow[] {
   const windows: LimitWindow[] = [];
   for (const [id, v] of Object.entries(body)) {
     const m = CLAUDE_WINDOW.exec(id);
@@ -141,8 +184,7 @@ export function claudeWindows(body: Record<string, unknown>): LimitWindow[] {
       resetsAt: Number.isFinite(resets) ? resets : null,
     });
   }
-  // The 5-hour window first, then the weekly ones, the overall one before the per-model ones.
-  return windows.sort((a, b) => (a.windowMs ?? 0) - (b.windowMs ?? 0) || Number(!!a.scope) - Number(!!b.scope));
+  return windows;
 }
 
 interface ClaudeLogin {
