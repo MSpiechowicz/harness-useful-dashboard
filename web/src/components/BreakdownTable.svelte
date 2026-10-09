@@ -75,12 +75,12 @@
   {#if fixedCols}
     <colgroup>
       <col />
-      <col class="w-28" />
-      <col class="w-28" />
-      <col class="w-44" />
       <col class="w-24" />
       <col class="w-24" />
-      <col class="w-24" />
+      <col class="w-36" />
+      <col class="w-20" />
+      <col class="w-20" />
+      <col class="w-20" />
       <col class="w-28" />
       {#if showWhatIf}
         <col class="w-36" />

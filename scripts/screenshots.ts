@@ -113,7 +113,6 @@ const SHOTS: Shot[] = [
   {
     name: "whatif",
     route: "models",
-    width: 1600,
     // The models table priced again on another model.
     prepare: async (p) => {
       await p.eval(`document.querySelector('main button[title^="Compare with"]').click()`);

@@ -454,6 +454,12 @@ table.data.fixed-cols {
   table-layout: fixed;
   min-width: 64rem;
 }
+/* Their columns don't grow to fit a header, so a long translated one wraps instead of running into the next. */
+table.data.fixed-cols th,
+table.data.fixed-cols th.num {
+  white-space: normal;
+  vertical-align: bottom;
+}
 table.data.fixed-cols td {
   overflow: hidden;
   text-overflow: ellipsis;
