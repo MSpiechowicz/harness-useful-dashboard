@@ -775,3 +775,20 @@ table.data th.num {
     max-width: 100% !important;
   }
 }
+
+/* The launch splash: the logo animation over the app until it has played, see lib/splash.ts. */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--page);
+  opacity: 1;
+  transition: opacity 250ms ease;
+  --harness-logo-dust: var(--muted);
+}
+
+.splash.is-leaving {
+  opacity: 0;
+}

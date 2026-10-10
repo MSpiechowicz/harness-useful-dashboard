@@ -5,10 +5,10 @@ Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, pi, omp (oh-my-pi)
 Code extensions already write to disk, plus Cursor usage from cursor.com or its CSV export. It stores
 everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
-https://github.com/user-attachments/assets/1f4de765-6d69-4945-9c48-84678b2a6624
+https://github.com/user-attachments/assets/57761571-bb9c-409f-8d19-461babda3b07
 
 <sub>A one-minute tour with sound: where the tokens go, one prompt in full, trimming an expensive skill, and the settings.
-Made with demo data. [Download the full-quality video](docs/video/harness-dashboard-tour.mp4?raw=true) (23 MB).</sub>
+Made with demo data. [Download the full-quality video](docs/video/harness-dashboard-tour.mp4?raw=true) (21 MB).</sub>
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
 - **By project, user, model, provider, skill, agent, session and prompt**: every dimension is a filter
@@ -801,7 +801,7 @@ bun run build      # standalone binary for this platform → dist/
 bun run build:all  # all platforms + dist/checksums.txt
 bun scripts/demo-data.ts /tmp/demo.db   # made-up usage for screenshots: run with --db /tmp/demo.db
 bun run screenshots                     # retake docs/screenshots from demo data (needs build:web and Chrome or Chromium)
-bun scripts/icons.ts                    # app icons for the installers, from web/public/favicon.svg
+bun scripts/icons.ts                    # copies the logo and app icons from harness-useful-logo renders/dashboard
 ```
 
 **Stack:** a TypeScript backend on Bun (`bun:sqlite`, `Bun.serve`, `Bun.Glob`), and a Svelte 5 + Vite + Tailwind CSS 4 frontend

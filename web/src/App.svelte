@@ -266,8 +266,11 @@
     inert={!menuOpen && !wide}
   >
     <div class="flex h-14 items-center gap-2.5 px-4 {collapsed ? 'lg:justify-center lg:px-0' : ''}">
-      <img src="/favicon.svg" alt="" class="h-7 w-7 shrink-0" />
-      <div class="truncate text-[15px] font-semibold tracking-tight" class:lg:hidden={collapsed}>{t("app.name")}</div>
+      <img src="/logo.svg" alt="" class="h-6 w-7 shrink-0 object-contain" />
+      <!-- The wordmark as the logo animation draws it: "harness" muted and regular, the product name in ink and semibold. -->
+      <div class="truncate text-[15px] tracking-tight" class:lg:hidden={collapsed}>
+        <span class="font-normal text-muted">harness</span> <span class="font-semibold">dashboard</span>
+      </div>
       <button bind:this={closeButton} class="ml-auto lg:hidden" aria-label={t("nav.closeMenu")} title={t("nav.closeMenu")} onclick={closeMenu}><X size={18} /></button>
     </div>
     <!-- Search and commands, above the menu: its icon lines up with the menu's (px-2, then px-3 inside). -->

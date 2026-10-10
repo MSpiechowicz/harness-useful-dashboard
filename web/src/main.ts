@@ -4,9 +4,11 @@ import App from "./App.svelte";
 import { loadColorRanking } from "./lib/colors.svelte.ts";
 import { i18n } from "./lib/i18n.svelte.ts";
 import { live } from "./lib/live.svelte.ts";
+import { showSplash } from "./lib/splash.ts";
 
 void loadColorRanking();
 live.start();
+showSplash();
 
 // The saved language first, so the UI doesn't show in English for a moment.
 await i18n.ready;
