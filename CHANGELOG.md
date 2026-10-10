@@ -1,3 +1,10 @@
+# [1.23.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.22.2...v1.23.0) (2026-10-10)
+
+
+### Features
+
+* New Harness logo with a launch animation, and the tour video shows it ([0402313](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/0402313689c8f9051881412bdf48ee0aa42c7693))
+
 ## [1.22.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.22.1...v1.22.2) (2026-10-09)
 
 
