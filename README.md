@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/lockup-dark.svg">
+    <img src="docs/brand/lockup-light.svg" alt="harness dashboard" width="430">
+  </picture>
+</p>
+
 # Harness Dashboard
 
 **Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the sessions that
