@@ -17,6 +17,7 @@ import { PriceBook } from "./core/pricing.ts";
 import { App } from "./server/app.ts";
 import { loadToken, signInUrl } from "./server/auth.ts";
 import { createHandler, loadAssets } from "./server/http.ts";
+import { refreshLauncherIcon } from "./server/launcherIcon.ts";
 import { openUi } from "./server/open.ts";
 import { applyUpdate, checkForUpdate, cleanupOldBinary, installedPath, isCompiledBinary } from "./server/update.ts";
 import { BIN_NAME, VERSION } from "./version.ts";
@@ -122,6 +123,7 @@ async function isOurServer(port: number): Promise<boolean> {
 
 async function serve(args: Args): Promise<void> {
   cleanupOldBinary();
+  if (isCompiledBinary()) refreshLauncherIcon();
   const cfg = loadConfig();
   const port = Number(args.flags.port ?? cfg.port) || 4317;
   const openMode = args.flags["no-open"] ? "none" : args.flags.browser ? "browser" : cfg.openMode;
