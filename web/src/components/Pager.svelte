@@ -32,7 +32,10 @@
 </script>
 
 <div class="table-footer">
-  <span class="tabular">{t("pager.range", { from: num.format(from), to: num.format(to), total: num.format(total) })}</span>
+  <!-- One item per page reads as its place, "2 of 3": a range would say "2–2 of 3". -->
+  <span class="tabular">
+    {#if size === 1}{t("pager.one", { n: num.format(page), total: num.format(total) })}{:else}{t("pager.range", { from: num.format(from), to: num.format(to), total: num.format(total) })}{/if}
+  </span>
   {#if pages > 1}
     <nav class="flex items-center gap-1 transition-opacity" class:loading-dim={loading} aria-label={t("pager.label")}>
       <button class="btn !h-7 !px-1.5" disabled={page <= 1} aria-label={t("pager.prev")} onclick={() => onpage(page - 1)}><ChevronLeft size={14} /></button>

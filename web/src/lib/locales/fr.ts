@@ -1211,6 +1211,7 @@ export const fr: Record<MessageKey, string> = {
   "common.remove": "Supprimer",
   "common.toggleTheme": "Changer de thème",
   "pager.range": "{from}–{to} sur {total}",
+  "pager.one": "{n} sur {total}",
   "pager.label": "Pages",
   "pager.prev": "Page précédente",
   "pager.next": "Page suivante",

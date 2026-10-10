@@ -1209,6 +1209,7 @@ export const en = {
   "common.remove": "Remove",
   "common.toggleTheme": "Toggle theme",
   "pager.range": "{from}–{to} of {total}",
+  "pager.one": "{n} of {total}",
   "pager.label": "Pages",
   "pager.prev": "Previous page",
   "pager.next": "Next page",

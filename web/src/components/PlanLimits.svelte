@@ -57,8 +57,15 @@
   import { MoveRight, TrendingDown } from "@lucide/svelte";
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, relative, until } from "../lib/format.ts";
+  import Pager from "./Pager.svelte";
 
   let { data, now }: { data: LimitsResult; now: number } = $props();
+
+  // One provider per page. The page is kept by the provider's key, so a refresh stays on it, and one that has gone falls
+  // back to the first.
+  let current = $state<string | null>(null);
+  const index = $derived(Math.max(0, data.reports.findIndex((r) => r.key === current)));
+  const shownKey = $derived(data.reports[index]?.key);
 
   // The bar is what's left, like a battery, in the provider's color. Only when little is left does it turn to a
   // warning color, and the number with it.
@@ -87,57 +94,68 @@
   {#if w.reset}{t("live.resetSince")}{:else if w.resetsAt}<span title={new Date(w.resetsAt).toLocaleString()}>{t("live.resetsIn", { time: until(w.resetsAt, now) })}</span>{:else}{t("live.noReset")}{/if}
 {/snippet}
 
-<div class="flex flex-col gap-5">
-  {#each data.reports as r (r.key)}
-    <section class="flex flex-col gap-3">
-      <header class="flex items-center gap-2.5">
-        <span class="h-2.5 w-2.5 shrink-0 rounded-full" style:background={colorFor("provider", r.provider)}></span>
-        <span class="text-[13px] font-semibold text-ink">{NAMES[r.provider] ?? r.provider}</span>
-        {#if r.plan}<span class="rounded-full border border-line px-2 py-px text-[11px] text-ink-2">{planName(r.plan)}</span>{/if}
-        {#if r.account}<span class="truncate font-mono text-[11px] text-muted">{r.account}</span>{/if}
-        {#if now - r.observedAt > STALE_MS}<span class="ml-auto shrink-0 text-[11px] text-muted">{t("live.asOf", { ago: relative(r.observedAt) })}</span>{/if}
-      </header>
-      {#each r.windows as w (w.id)}
-        {@const l = left(w)}
-        {@const p = pace(w)}
-        {@const short = p != null && l < p.timeLeft}
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-baseline justify-between gap-3 text-xs">
-            <span class="truncate text-ink-2">{windowName(w)}</span>
-            <span class="shrink-0 tabular">
-              <span class="font-semibold {ink(l)}">{t("live.left", { pct: Math.round(l * 100) })}</span>
-              {#if w.used != null && w.limit != null}<span class="text-muted"> · {t("live.counted", { used: compact(w.used), limit: compact(w.limit) })}</span>{/if}
-              <span class="text-muted"> · {@render reset(w)}</span>
-            </span>
-          </div>
-          <!-- What's left ending short of the time left means the limit runs out before the window does: the gap between
-               them is hatched, and the tick and the note share the warning colour. On pace, both are white. -->
-          <div class="relative">
-            <div class="relative h-2 overflow-hidden rounded-full bg-surface-3">
-              <div class="h-full rounded-full transition-[width] duration-500" style:width={l > 0 ? `max(${l * 100}%, 4px)` : "0"} style:background={fill(l, r.provider)}></div>
-              {#if p && short}
-                <span class="pace-gap absolute inset-y-0" style:left="{l * 100}%" style:width="{(p.timeLeft - l) * 100}%"></span>
-              {/if}
-            </div>
-            <!-- The time left in the window as a tick with a small ripple. -->
-            {#if p}
-              <span class="absolute top-1/2 h-0 w-0" style:left="{p.timeLeft * 100}%" style:color={short ? "var(--warn-ink)" : "var(--ink)"} title={t("live.pace.marker")}>
-                <span class="pace-mark absolute h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current"></span>
-              </span>
-            {/if}
-          </div>
-          {#if p?.outAt != null}
-            {@const out = p.outAt < (w.resetsAt ?? 0)}
-            <div class="flex items-center gap-1.5 text-[11px] {out ? 'text-warn' : 'text-ink'}">
-              {#if out}<TrendingDown class="size-3.5 shrink-0" aria-hidden="true" />{:else}<MoveRight class="size-3.5 shrink-0" aria-hidden="true" />{/if}
-              <span>{out ? t("live.pace.out", { time: clock(p.outAt) }) : t("live.pace.lasts")}</span>
-            </div>
-          {/if}
-        </div>
-      {/each}
-    </section>
-  {/each}
-  {#each data.problems as p (p.source)}
-    <p class="rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-2">{t(`live.problem.${p.code}` as "live.problem.failed", { source: PROBLEM_SOURCES[p.source], time: p.retryAt ? until(p.retryAt, now) : "" })}</p>
-  {/each}
+<div class="flex h-full flex-col">
+  <div class="flex flex-1 flex-col gap-5 px-5 pb-4">
+    {#if data.reports.length}
+      <!-- Every provider sits in the same grid cell, so the card stays as tall as the tallest one and the pager doesn't
+           jump while paging. The others are hidden, and all show in print. -->
+      <div class="grid">
+        {#each data.reports as r (r.key)}
+          <section class="flex flex-col gap-3 [grid-area:1/1] print:visible print:[grid-area:auto] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
+            <header class="flex items-center gap-2.5">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full" style:background={colorFor("provider", r.provider)}></span>
+              <span class="text-[13px] font-semibold text-ink">{NAMES[r.provider] ?? r.provider}</span>
+              {#if r.plan}<span class="rounded-full border border-line px-2 py-px text-[11px] text-ink-2">{planName(r.plan)}</span>{/if}
+              {#if r.account}<span class="truncate font-mono text-[11px] text-muted">{r.account}</span>{/if}
+              {#if now - r.observedAt > STALE_MS}<span class="ml-auto shrink-0 text-[11px] text-muted">{t("live.asOf", { ago: relative(r.observedAt) })}</span>{/if}
+            </header>
+            {#each r.windows as w (w.id)}
+              {@const l = left(w)}
+              {@const p = pace(w)}
+              {@const short = p != null && l < p.timeLeft}
+              <div class="flex flex-col gap-1.5">
+                <div class="flex items-baseline justify-between gap-3 text-xs">
+                  <span class="truncate text-ink-2">{windowName(w)}</span>
+                  <span class="shrink-0 tabular">
+                    <span class="font-semibold {ink(l)}">{t("live.left", { pct: Math.round(l * 100) })}</span>
+                    {#if w.used != null && w.limit != null}<span class="text-muted"> · {t("live.counted", { used: compact(w.used), limit: compact(w.limit) })}</span>{/if}
+                    <span class="text-muted"> · {@render reset(w)}</span>
+                  </span>
+                </div>
+                <!-- What's left ending short of the time left means the limit runs out before the window does: the gap between
+                     them is hatched, and the tick and the note share the warning colour. On pace, both are white. -->
+                <div class="relative">
+                  <div class="relative h-2 overflow-hidden rounded-full bg-surface-3">
+                    <div class="h-full rounded-full transition-[width] duration-500" style:width={l > 0 ? `max(${l * 100}%, 4px)` : "0"} style:background={fill(l, r.provider)}></div>
+                    {#if p && short}
+                      <span class="pace-gap absolute inset-y-0" style:left="{l * 100}%" style:width="{(p.timeLeft - l) * 100}%"></span>
+                    {/if}
+                  </div>
+                  <!-- The time left in the window as a tick with a small ripple. -->
+                  {#if p}
+                    <span class="absolute top-1/2 h-0 w-0" style:left="{p.timeLeft * 100}%" style:color={short ? "var(--warn-ink)" : "var(--ink)"} title={t("live.pace.marker")}>
+                      <span class="pace-mark absolute h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current"></span>
+                    </span>
+                  {/if}
+                </div>
+                {#if p?.outAt != null}
+                  {@const out = p.outAt < (w.resetsAt ?? 0)}
+                  <div class="flex items-center gap-1.5 text-[11px] {out ? 'text-warn' : 'text-ink'}">
+                    {#if out}<TrendingDown class="size-3.5 shrink-0" aria-hidden="true" />{:else}<MoveRight class="size-3.5 shrink-0" aria-hidden="true" />{/if}
+                    <span>{out ? t("live.pace.out", { time: clock(p.outAt) }) : t("live.pace.lasts")}</span>
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </section>
+        {/each}
+      </div>
+    {/if}
+    {#each data.problems as p (p.source)}
+      <p class="rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-2">{t(`live.problem.${p.code}` as "live.problem.failed", { source: PROBLEM_SOURCES[p.source], time: p.retryAt ? until(p.retryAt, now) : "" })}</p>
+    {/each}
+  </div>
+  {#if data.reports.length > 1}
+    <Pager page={index + 1} total={data.reports.length} size={1} onpage={(p) => (current = data.reports[p - 1]!.key)} />
+  {/if}
 </div>

@@ -347,19 +347,19 @@
           <Chart {option} height={280} fill />
         {/if}
       </Card>
-      <Card title={t("live.limits")} subtitle={t("live.limitsHint")} class="xl:col-span-2">
+      <Card title={t("live.limits")} subtitle={t("live.limitsHint")} class="xl:col-span-2" pad={false}>
         {#snippet actions()}
           <button class="btn !h-7 !px-2 !text-xs" onclick={refreshLimits} disabled={refreshing}>{t("live.refresh")}</button>
         {/snippet}
         {#if limits.data && (limits.data.reports.length || limits.data.problems.length)}
           <PlanLimits data={limits.data} {now} />
         {:else if limits.data?.active && !limits.data.active.length}
-          <div class="flex h-full flex-col justify-center gap-2 py-6 text-center">
+          <div class="flex h-full flex-col justify-center gap-2 px-5 pt-6 pb-10 text-center">
             <div class="text-sm text-ink-2">{t("live.noActive")}</div>
             <div class="text-xs text-muted">{t("live.noActiveHint")}</div>
           </div>
         {:else}
-          <div class="flex h-full flex-col justify-center gap-2 py-6 text-center">
+          <div class="flex h-full flex-col justify-center gap-2 px-5 pt-6 pb-10 text-center">
             <div class="text-sm text-ink-2">{t("live.noLimits")}</div>
             <div class="text-xs text-muted">{t("live.noLimitsHint")}</div>
           </div>
