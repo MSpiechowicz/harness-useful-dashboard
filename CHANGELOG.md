@@ -1,3 +1,10 @@
+# [1.24.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.23.1...v1.24.0) (2026-10-10)
+
+
+### Features
+
+* Plan limits show one provider per page, with a pager below the card ([a2e986a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a2e986adbd26689e4b3b3144c3db29ae0d0273c6))
+
 ## [1.23.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.23.0...v1.23.1) (2026-10-10)
 
 
