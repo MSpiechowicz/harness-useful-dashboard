@@ -1,3 +1,10 @@
+## [1.23.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.23.0...v1.23.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* The applications menu and taskbar show the new icon after an update, not the one from the first install ([9827524](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9827524abd7760c24bcc8801962ce301b532fea5))
+
 # [1.23.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.22.2...v1.23.0) (2026-10-10)
 
 
