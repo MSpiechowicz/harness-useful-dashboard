@@ -84,6 +84,7 @@ const MIME: Record<string, string> = {
   ".ico": "image/x-icon",
   ".json": "application/json",
   ".woff2": "font/woff2",
+  ".wav": "audio/wav",
   ".webmanifest": "application/manifest+json",
 };
 

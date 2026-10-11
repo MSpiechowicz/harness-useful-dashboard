@@ -12,7 +12,7 @@ Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, pi, omp (oh-my-pi)
 Code extensions already write to disk, plus Cursor usage from cursor.com or its CSV export. It stores
 everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
-https://github.com/user-attachments/assets/57761571-bb9c-409f-8d19-461babda3b07
+https://github.com/user-attachments/assets/5f08fadd-f633-47af-8564-6ea9d4880051
 
 <sub>A one-minute tour with sound: where the tokens go, one prompt in full, trimming an expensive skill, and the settings.
 Made with demo data. [Download the full-quality video](docs/video/harness-dashboard-tour.mp4?raw=true) (21 MB).</sub>

@@ -29,6 +29,9 @@ export function showSplash(): void {
   const logo = document.createElement("harness-logo");
   logo.setAttribute("version", "short");
   logo.setAttribute("autoplay", "");
+  // The logo fetches its sound itself and stays silent when it is blocked or fails, so the app never waits for it.
+  logo.setAttribute("sound", "");
+  logo.setAttribute("sound-url", "/brand/sound.wav");
   logo.style.width = "160px";
   overlay.append(logo);
   document.body.append(overlay);

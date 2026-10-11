@@ -7,6 +7,7 @@
  *   app.ico                            assets/icons/harness-dashboard.ico (Windows)
  *   app.icns                           assets/icons/harness-dashboard.icns (macOS)
  *   harness-logo.js + .d.ts            web/src/lib/brand/ (the launch animation)
+ *   sound.wav                          web/public/brand/sound.wav (the sound of the launch animation)
  *   lockup-dark.svg, lockup-light.svg  docs/brand/ (the logo at the top of the README)
  *   OFL.txt                            docs/brand/ (the license of the Inter font the lockups embed)
  *
@@ -34,6 +35,7 @@ const COPIES: [string, string][] = [
   ["app.icns", "assets/icons/harness-dashboard.icns"],
   ["harness-logo.js", "web/src/lib/brand/harness-logo.js"],
   ["harness-logo.d.ts", "web/src/lib/brand/harness-logo.d.ts"],
+  ["sound.wav", "web/public/brand/sound.wav"],
   ["lockup-dark.svg", "docs/brand/lockup-dark.svg"],
   ["lockup-light.svg", "docs/brand/lockup-light.svg"],
   ["OFL.txt", "docs/brand/OFL.txt"],
