@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.24.0...v1.25.0) (2026-10-11)
+
+
+### Features
+
+* The dashboard's own amber logo with launch sound, in the app, the icons, the README and the tour video ([0e89066](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/0e89066157f712add6d97440cbba8d39847c9f8c))
+
 # [1.24.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.23.1...v1.24.0) (2026-10-10)
 
 
