@@ -15,7 +15,7 @@ everything in a local SQLite database and shows clear, interactive charts of whe
 https://github.com/user-attachments/assets/5f08fadd-f633-47af-8564-6ea9d4880051
 
 <sub>A one-minute tour with sound: where the tokens go, one prompt in full, trimming an expensive skill, and the settings.
-Made with demo data. [Download the full-quality video](docs/video/harness-dashboard-tour.mp4?raw=true) (21 MB).</sub>
+Made with demo data. [Download the full-quality video](https://raw.githubusercontent.com/MSpiechowicz/harness-useful-dashboard/main/docs/video/harness-dashboard-tour.mp4) (21 MB).</sub>
 
 - **Overall usage**: tokens, API-equivalent cost, sessions, prompts and cache hit rate, compared with the previous period
 - **By project, user, model, provider, skill, agent, session and prompt**: every dimension is a filter
