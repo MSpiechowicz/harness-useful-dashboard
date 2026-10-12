@@ -912,6 +912,8 @@ and each works on its own.
 
 - [**Harness Sidebar**](https://github.com/MSpiechowicz/harness-useful-sidebar): live token charts and session
   history for Oh My Pi in a tmux sidebar and for Claude Code in a native pane
+- [**Harness Skills**](https://github.com/MSpiechowicz/harness-useful-skills): skills for Oh My Pi and Claude Code that
+  take a request from a plain-language ask to reviewed, verified work, with focused audits, delivery and project memory
 - [**Harness Desktop**](https://github.com/MSpiechowicz/harness-useful-desktop): your coding-agent CLI in a native
   desktop window, with chat, sessions, changes to review and its configuration
 - [**Harness Dashboard**](https://github.com/MSpiechowicz/harness-useful-dashboard) (this repository): token usage
