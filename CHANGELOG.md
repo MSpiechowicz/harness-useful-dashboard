@@ -1,3 +1,28 @@
+# [2.0.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.25.1...v2.0.0) (2026-10-12)
+
+
+* feat!: Harness Dashboard installs as a desktop app with its own window, tray and signed updates ([a63f4ab](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a63f4abff69f7aee938f0f112fb83c8ed27a6c4a))
+
+
+### Bug Fixes
+
+* Version bumps keep the CRLF line endings of a Windows checkout, and the server test no longer expects an exit code Windows doesn't give ([a703e60](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a703e60f6967a0276af84bf34f1438fc4845096f))
+
+
+### Features
+
+* Time to first token for Claude Code, estimated from thinking, and filled in on past responses after an update ([ef53972](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/ef53972a9a3e508ab97b5ff9ad36db03e907bdd4))
+
+
+### BREAKING CHANGES
+
+* the "Open dashboard as" setting, the browser tab and Chromium app window, printing, and the
+self-updating binary are gone. `harness-dashboard update` only reports, `--browser` and `--no-open` do nothing, and
+releases ship installers plus harness-dashboard-cli-<target> binaries instead of harness-dashboard-<os>-<arch>.
+Install the app once with install.sh or install.ps1, then it updates itself.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 ## [1.25.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.25.0...v1.25.1) (2026-10-12)
 
 
