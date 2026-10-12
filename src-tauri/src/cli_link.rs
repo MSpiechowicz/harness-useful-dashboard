@@ -548,7 +548,6 @@ mod tests {
             "harness-dashboard.exe.old.3",
             "harness-dashboard.exe.older",
             "harness-dashboard.exe.old.x",
-            "harness-dashboard.exe.old.",
             "other.exe.old",
         ] {
             fs::write(dir.path().join(name), b"").expect("write");
@@ -567,12 +566,24 @@ mod tests {
             left,
             [
                 "harness-dashboard.exe",
-                "harness-dashboard.exe.old.",
                 "harness-dashboard.exe.old.x",
                 "harness-dashboard.exe.older",
                 "other.exe.old",
             ]
         );
+    }
+
+    // Checked by name only: Windows drops a trailing dot, so "….old." can't be made on disk there.
+    #[test]
+    fn a_name_is_an_aside_only_with_old_and_an_optional_number() {
+        let name = "harness-dashboard.exe";
+
+        assert!(is_aside(name, "harness-dashboard.exe.old"));
+        assert!(is_aside(name, "harness-dashboard.exe.old.12"));
+        assert!(!is_aside(name, "harness-dashboard.exe.old."));
+        assert!(!is_aside(name, "harness-dashboard.exe.old.x"));
+        assert!(!is_aside(name, "harness-dashboard.exe.older"));
+        assert!(!is_aside(name, "other.exe.old"));
     }
 
     #[test]
