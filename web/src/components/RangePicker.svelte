@@ -68,9 +68,12 @@
     if (open && root && !root.contains(e.target as Node)) hide();
   }
 
-  // Tab moves on through the dates and Apply. Once focus leaves the picker, it closes.
+  // Tab moves on through the dates and Apply. Once focus leaves the picker, it closes. WebKit (Safari, the macOS app)
+  // doesn't focus a clicked button, so a click inside blurs to nothing (relatedTarget null) and would close the picker
+  // before the click lands; clicks outside are handled by onWindowClick.
   function onFocusOut(e: FocusEvent) {
-    if (open && !root.contains(e.relatedTarget as Node | null)) hide();
+    const next = e.relatedTarget as Node | null;
+    if (open && next && !root.contains(next)) hide();
   }
 </script>
 
