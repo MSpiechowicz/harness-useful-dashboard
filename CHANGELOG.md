@@ -1,3 +1,10 @@
+## [1.25.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.25.0...v1.25.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* Spotlight and Launchpad show the new icon after an update on macOS, not the one from the first install ([2042dbe](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/2042dbe0ec703cd8ed6c2d7c6fdd73f464f344c7))
+
 # [1.25.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.24.0...v1.25.0) (2026-10-11)
 
 
