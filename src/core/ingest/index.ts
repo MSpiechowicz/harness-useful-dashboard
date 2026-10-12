@@ -171,6 +171,32 @@ function succeeded(path: string): void {
   failing.delete(path);
 }
 
+/**
+ * Parsers that learned to read something new from logs the database already holds. Once per machine their files are
+ * read again from the start, as `scan --full` reads every file, so an update fills in what earlier versions left out.
+ * Not a schema migration: an older app can still write to the database.
+ */
+const REREADS: { key: string; parser: LineParser<any> }[] = [
+  // Claude Code's time to first token, estimated from its thinking blocks (claude.ts claudeTtft).
+  { key: "claude-ttft", parser: claudeParser },
+];
+
+function rereadOnce(db: Database, host: string, files: SourceFile[]): void {
+  const done = db.prepare<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?");
+  const mark = db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
+  const forget = db.prepare("DELETE FROM ingest_files WHERE host = ? AND path = ?");
+
+  for (const r of REREADS) {
+    const key = `reread.${r.key}.${host}`;
+    if (done.get(key)) continue;
+
+    db.transaction(() => {
+      for (const f of files) if (f.parser === r.parser) forget.run(host, f.path);
+      mark.run(key, new Date().toISOString());
+    })();
+  }
+}
+
 /** How long a scan runs before it lets the event loop answer requests and send its progress. */
 const YIELD_MS = 100;
 
@@ -191,6 +217,7 @@ export async function scan(
     db.query("DELETE FROM ingest_files WHERE host = ?").run(identity.host);
     failing.clear();
   }
+  rereadOnce(db, identity.host, files);
   const getState = db.prepare<{ size: number; mtime: number; offset: number; state: string | null }, [string, string]>(
     "SELECT size, mtime, offset, state FROM ingest_files WHERE host = ? AND path = ?",
   );

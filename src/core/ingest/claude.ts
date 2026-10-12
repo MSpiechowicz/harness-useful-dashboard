@@ -139,6 +139,22 @@ function resultLines(r: unknown): LineCount | null {
 /** A logged branch, or null for none or a detached HEAD. */
 const branchOf = (v: unknown): string | null => (typeof v === "string" && v && v !== "HEAD" ? v : null);
 
+/**
+ * Time to the first token of a response, estimated from its first logged line. Claude Code logs that line when its
+ * first content block is done: a thinking block's line also says how long the thinking took (thinkingDurationMs), so
+ * the wait before it is the line's time less the start and the thinking. A text or tool block's time includes writing
+ * it, so it gives no estimate.
+ */
+function claudeTtft(rec: Record<string, any>, content: ContentBlock[], startTs: number | null | undefined, ts: number): number | null {
+  if (startTs == null || content[0]?.type !== "thinking") return null;
+
+  const thinking = rec.thinkingDurationMs;
+  if (typeof thinking !== "number" || !Number.isFinite(thinking)) return null;
+
+  const wait = ts - startTs - thinking;
+  return wait > 0 ? wait : null;
+}
+
 /** The tools that start a subagent (Task in older Claude Code versions). */
 const SPAWN_TOOLS = new Set(["Agent", "Task"]);
 /** A text input's first line, if it has any words. */
@@ -409,12 +425,16 @@ export const claudeParser: LineParser<ClaudeState> = {
         speed: typeof usage.speed === "string" ? usage.speed : null,
       });
 
+      const content: ContentBlock[] = Array.isArray(msg.content) ? msg.content : [];
+
       // One response is logged as a line per content block: it started when its input arrived (or the response
       // before it ended) and ended with its last line.
+      let ttftMs: number | null = null;
       if (state.responseId !== usageId) {
         const prevEnd = state.responseEnd ?? null;
         state.responseId = usageId;
         state.responseStart = Math.max(state.inputTs ?? 0, prevEnd ?? 0) || null;
+        ttftMs = claudeTtft(rec, content, state.responseStart, ts);
       }
       state.responseEnd = ts;
       if (msg.model !== "<synthetic>") state.model = msg.model ?? state.model ?? null;
@@ -423,11 +443,11 @@ export const claudeParser: LineParser<ClaudeState> = {
         usageId,
         startTs: state.responseStart ?? null,
         endTs: ts,
+        ttftMs,
         effort: typeof rec.effort === "string" ? rec.effort : null,
         stopReason: typeof msg.stop_reason === "string" ? msg.stop_reason : null,
       });
 
-      const content: ContentBlock[] = Array.isArray(msg.content) ? msg.content : [];
       for (const block of content) {
         if (block?.type !== "tool_use" || !block.name) continue;
         const input = block.input ?? {};

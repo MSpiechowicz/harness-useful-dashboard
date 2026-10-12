@@ -176,3 +176,101 @@ describe("Claude Code ingest", () => {
     expect(after).toEqual(before);
   });
 });
+
+describe("Claude Code time to first token", () => {
+  const thinking = [{ type: "thinking", thinking: "", signature: "sig" }];
+  const text = [{ type: "text", text: "Done" }];
+  const toolUse = [{ type: "tool_use", id: "toolu_ls", name: "Bash", input: { command: "ls" } }];
+  /** A line of a response as Claude Code logs it, with how long its thinking took when it reports that. */
+  const line = (id: string, ts: string, content: unknown[], thinkingDurationMs?: number, sidechain = false) => ({
+    ...claudeAssistant({ id, ts, content, sidechain }),
+    ...(thinkingDurationMs !== undefined ? { thinkingDurationMs } : {}),
+  });
+
+  function setup() {
+    const root = tempDir();
+    const projDir = join(root, "claude", "projects", "-work-alpha");
+    writeJsonl(join(projDir, `${CLAUDE_SESSION}.jsonl`), [
+      claudeUser("Fix it", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }),
+      // Thinking first: 2.5 s to the thinking block's end, 1.3 s of it thinking.
+      line("msg_think", "2026-09-01T10:00:02.500Z", thinking, 1300),
+      line("msg_think", "2026-09-01T10:00:03.000Z", toolUse),
+      claudeToolResult({ uuid: "r1", ts: "2026-09-01T10:00:10.000Z" }),
+      line("msg_text", "2026-09-01T10:00:12.000Z", text),
+      claudeToolResult({ uuid: "r2", ts: "2026-09-01T10:00:20.000Z" }),
+      line("msg_tool", "2026-09-01T10:00:21.000Z", toolUse),
+      claudeToolResult({ uuid: "r3", ts: "2026-09-01T10:00:30.000Z" }),
+      // Thinking that took longer than the whole wait: no estimate.
+      line("msg_negative", "2026-09-01T10:00:30.500Z", thinking, 900),
+      claudeToolResult({ uuid: "r4", ts: "2026-09-01T10:00:40.000Z" }),
+      line("msg_unmeasured", "2026-09-01T10:00:41.000Z", thinking),
+      claudeToolResult({ uuid: "r5", ts: "2026-09-01T10:00:50.000Z" }),
+      // Only a response's first line counts: a thinking line after its text gives nothing.
+      line("msg_late", "2026-09-01T10:00:51.000Z", text),
+      line("msg_late", "2026-09-01T10:00:52.000Z", thinking, 100),
+    ]);
+    writeJsonl(join(projDir, CLAUDE_SESSION, "subagents", "agent-ttft.jsonl"), [
+      claudeUser("look", { uuid: "s1", ts: "2026-09-01T10:01:00.000Z", sidechain: true }),
+      line("msg_sub", "2026-09-01T10:01:03.000Z", thinking, 2000, true),
+      line("msg_sub", "2026-09-01T10:01:04.000Z", text, undefined, true),
+    ]);
+    return root;
+  }
+
+  const ttfts = (db: ReturnType<typeof memDb>) =>
+    Object.fromEntries(db.query<{ usage_id: string; ttft_ms: number | null }, []>("SELECT usage_id, ttft_ms FROM response_meta").all().map((r) => [r.usage_id, r.ttft_ms]));
+
+  test("is estimated only for a response whose first line is thinking with its duration", async () => {
+    const db = memDb();
+    const res = await scan(db, testConfig(setup()), ID);
+    expect(res.errors).toEqual([]);
+    expect(ttfts(db)).toEqual({
+      "claude:msg_think": 1200,
+      "claude:msg_text": null,
+      "claude:msg_tool": null,
+      "claude:msg_negative": null,
+      "claude:msg_unmeasured": null,
+      "claude:msg_late": null,
+      "claude:msg_sub": 1000,
+    });
+  });
+
+  test("a response split across two scans keeps its first line's estimate", async () => {
+    const root = tempDir();
+    const file = join(root, "claude", "projects", "-work-alpha", `${CLAUDE_SESSION}.jsonl`);
+    const first = [claudeUser("Fix it", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }), line("msg_think", "2026-09-01T10:00:02.500Z", thinking, 1300)];
+    writeJsonl(file, first);
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    writeJsonl(file, [...first, line("msg_think", "2026-09-01T10:00:03.000Z", text)]);
+    await scan(db, testConfig(root), ID);
+    expect(ttfts(db)["claude:msg_think"]).toBe(1200);
+  });
+
+  test("a full rescan fills the estimate in on responses stored without one", async () => {
+    const root = setup();
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    db.exec("UPDATE response_meta SET ttft_ms = NULL");
+    await scan(db, testConfig(root), ID, { full: true });
+    expect(ttfts(db)["claude:msg_think"]).toBe(1200);
+    expect(ttfts(db)["claude:msg_sub"]).toBe(1000);
+  });
+
+  test("an update fills the estimate in on its first ordinary scan, once", async () => {
+    const root = setup();
+    const db = memDb();
+    await scan(db, testConfig(root), ID);
+    // The database as an earlier version left it: logs read to the end, no estimates, no record of the reread.
+    db.exec("UPDATE response_meta SET ttft_ms = NULL");
+    db.exec("DELETE FROM meta WHERE key LIKE 'reread.%'");
+
+    const first = await scan(db, testConfig(root), ID);
+    expect(first.filesParsed).toBeGreaterThan(0);
+    expect(ttfts(db)["claude:msg_think"]).toBe(1200);
+    expect(ttfts(db)["claude:msg_sub"]).toBe(1000);
+
+    const second = await scan(db, testConfig(root), ID);
+    expect(second.filesParsed).toBe(0);
+  });
+});
