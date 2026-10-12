@@ -1,3 +1,10 @@
+## [2.0.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.2...v2.0.3) (2026-10-12)
+
+
+### Bug Fixes
+
+* The window shows the dashboard icon on Linux instead of a generic one ([de4a5a1](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/de4a5a18dc03c936a8d7e11949f1da8f261480b0))
+
 ## [2.0.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.1...v2.0.2) (2026-10-12)
 
 
