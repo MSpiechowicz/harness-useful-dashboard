@@ -109,8 +109,8 @@ jobs:
           - name: Linux arm64 (AppImage, deb, rpm)
             os: ubuntu-22.04-arm
             triple: aarch64-unknown-linux-gnu
-            # Same as x64, with the arm64 library path.
-            args: --bundles appimage,deb,rpm --config src-tauri/tauri.appimage.arm64.conf.json
+            # Same as x64, with the arm64 library path. Verbose, so a failing linuxdeploy says why.
+            args: --verbose --bundles appimage,deb,rpm --config src-tauri/tauri.appimage.arm64.conf.json
           - name: macOS arm64
             os: macos-latest
             triple: aarch64-apple-darwin
@@ -135,7 +135,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
-            build-essential curl wget file libxdo-dev libssl-dev libasound2-dev
+            build-essential curl wget file libxdo-dev libssl-dev libasound2-dev libfuse2
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
       - name: Add Rust target
@@ -162,6 +162,9 @@ jobs:
           # Signs the updater artifacts (not the OS installers). See docs/release-and-updater-keys.md.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # linuxdeploy and its AppImage plugin are AppImages themselves. The arm64 runner image has no FUSE to mount
+          # them, so they unpack themselves and run from there.
+          APPIMAGE_EXTRACT_AND_RUN: 1
         with:
           tauriScript: bun tauri
           tagName: v${{ needs.release.outputs.version }}
