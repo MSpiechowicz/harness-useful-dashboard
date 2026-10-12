@@ -1,3 +1,10 @@
+## [2.0.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.1...v2.0.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* Releases build Linux for x86_64 only, like Harness Desktop ([78ff79b](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/78ff79b60346a13f33848532d449ac65b3a87833))
+
 ## [2.0.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.0...v2.0.1) (2026-10-12)
 
 
