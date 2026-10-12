@@ -905,6 +905,18 @@ needs a signing key that is set up once, see [docs/release-and-updater-keys.md](
 Configuration lives in `.releaserc.json`. To preview the next version locally, run
 `GITHUB_TOKEN=$(gh auth token) npx semantic-release --dry-run --no-ci`.
 
+## Harness Useful family
+
+Harness Dashboard is one of a few small, local tools for coding-agent harnesses. They share one logo and one look,
+and each works on its own.
+
+- [**Harness Sidebar**](https://github.com/MSpiechowicz/harness-useful-sidebar): live token charts and session
+  history for Oh My Pi in a tmux sidebar and for Claude Code in a native pane
+- [**Harness Desktop**](https://github.com/MSpiechowicz/harness-useful-desktop): your coding-agent CLI in a native
+  desktop window, with chat, sessions, changes to review and its configuration
+- [**Harness Dashboard**](https://github.com/MSpiechowicz/harness-useful-dashboard) (this repository): token usage
+  and cost across your AI coding tools, in one local app
+
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE).
