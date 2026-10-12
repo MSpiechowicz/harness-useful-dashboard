@@ -107,6 +107,8 @@ fi
 
 # The keys of the release's latest.json (the updater manifest), which carries each bundle's download URL.
 if [ "$OS" = "linux" ]; then
+  # Like Harness Desktop, the Linux app is built for x86_64 only.
+  [ "$ARCH" = "x86_64" ] || fail "the Linux app is x86_64 only. On arm64, build it from source (see the README)"
   PLATFORM="linux-$ARCH-appimage"
   CLI_ASSET="$BIN-cli-$ARCH-unknown-linux-gnu"
 else

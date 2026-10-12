@@ -137,7 +137,7 @@ curl -fsSL https://raw.githubusercontent.com/MSpiechowicz/harness-useful-dashboa
 ```
 
 On Linux this installs the AppImage to `~/.local/lib/harness-dashboard/` and adds an applications-menu entry (x86_64
-and arm64, AppImages need `libfuse2`). On macOS it installs `~/Applications/Harness Dashboard.app`. Both also get the
+only, AppImages need `libfuse2`). On macOS it installs `~/Applications/Harness Dashboard.app`. Both also get the
 `harness-dashboard` command in `~/.local/bin`, which the installer adds to your `PATH` (via your shell profile:
 `~/.zshrc`, `~/.bashrc`/`~/.bash_profile`, fish `conf.d` or `~/.profile`) if it isn't already. It verifies every
 download against the release checksums and installs nothing without them.
@@ -855,7 +855,7 @@ bun scripts/icons.ts                    # copies the logo and app icons from har
 
 **Stack:** a TypeScript backend on Bun (`bun:sqlite`, `Bun.serve`, `Bun.Glob`), and a Svelte 5 + Vite + Tailwind CSS 4 frontend
 with Apache ECharts. `bun build --compile` embeds the built UI and produces one self-contained executable per
-OS and architecture (macOS x64/arm64, Linux x64/arm64, Windows x64). A small [Tauri 2](https://v2.tauri.app/) shell
+OS and architecture (macOS x64/arm64, Linux x64, Windows x64). A small [Tauri 2](https://v2.tauri.app/) shell
 (`src-tauri/`, Rust) bundles that executable as a sidecar, shows its UI in the system webview, keeps a tray icon and
 installs updates. No runtime dependencies.
 
@@ -898,7 +898,7 @@ decides the next version:
 
 When a release is due, the workflow bumps `package.json`, `Cargo.toml` and `Cargo.lock`, updates `CHANGELOG.md` and
 commits `chore(release): x.y.z [skip ci]`. It then tags `vX.Y.Z` and creates a draft GitHub release. Runners for Linux
-(x64 and arm64), macOS (Apple Silicon and Intel) and Windows build the installers and the plain command line
+(x64), macOS (Apple Silicon and Intel) and Windows build the installers and the plain command line
 binaries, sign the update files and upload everything. The last job writes `checksums.txt`, attests the build
 provenance of every file and publishes the release. Installed apps pick it up through the update banner. The updater
 needs a signing key that is set up once, see [docs/release-and-updater-keys.md](docs/release-and-updater-keys.md).

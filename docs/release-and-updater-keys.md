@@ -30,7 +30,6 @@ Releases are fully automated from Conventional Commits. The only manual work is 
    | Runner | Output |
    | --- | --- |
    | ubuntu-22.04 | AppImage, deb, rpm for x86_64 |
-   | ubuntu-22.04-arm | AppImage, deb, rpm for aarch64 |
    | macos-latest, `aarch64-apple-darwin` | app, dmg |
    | macos-latest, `x86_64-apple-darwin` | app, dmg |
    | windows-latest | NSIS installer, MSI |
@@ -96,7 +95,7 @@ old key can be retired.
 | rpm | `sudo dnf install ./harness-dashboard-X.Y.Z-1.x86_64.rpm`. Same as deb, with `rpm -U`. |
 
 Every format updates in-app: each build knows how it was installed and downloads the matching artifact
-(`latest.json` lists `linux-x86_64-appimage`, `-deb` and `-rpm`, and the same three for `linux-aarch64`). Every
+(`latest.json` lists `linux-x86_64-appimage`, `-deb` and `-rpm`, Linux is x86_64 only, like Harness Desktop). Every
 download is signature-checked before the package manager sees it. Installing the new package by hand works too.
 
 ### The command line tool

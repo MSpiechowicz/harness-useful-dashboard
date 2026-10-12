@@ -106,11 +106,6 @@ jobs:
             # through it, dbusmenu) in the AppImage, built against the GLib the AppImage bundles. Without it the
             # host's copy is loaded, which needs a newer GLib and crashes the app on current distributions.
             args: --bundles appimage,deb,rpm --config src-tauri/tauri.appimage.conf.json
-          - name: Linux arm64 (AppImage, deb, rpm)
-            os: ubuntu-22.04-arm
-            triple: aarch64-unknown-linux-gnu
-            # Same as x64, with the arm64 library path. Verbose, so a failing linuxdeploy says why.
-            args: --verbose --bundles appimage,deb,rpm --config src-tauri/tauri.appimage.arm64.conf.json
           - name: macOS arm64
             os: macos-latest
             triple: aarch64-apple-darwin
@@ -135,7 +130,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
-            build-essential curl wget file libxdo-dev libssl-dev libasound2-dev libfuse2
+            build-essential curl wget file libxdo-dev libssl-dev libasound2-dev
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
       - name: Add Rust target
@@ -162,9 +157,6 @@ jobs:
           # Signs the updater artifacts (not the OS installers). See docs/release-and-updater-keys.md.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # linuxdeploy and its AppImage plugin are AppImages themselves. The arm64 runner image has no FUSE to mount
-          # them, so they unpack themselves and run from there.
-          APPIMAGE_EXTRACT_AND_RUN: 1
         with:
           tauriScript: bun tauri
           tagName: v${{ needs.release.outputs.version }}
@@ -213,7 +205,6 @@ jobs:
           missing=0
           for platform in \
             linux-x86_64 linux-x86_64-appimage linux-x86_64-deb linux-x86_64-rpm \
-            linux-aarch64 linux-aarch64-appimage linux-aarch64-deb linux-aarch64-rpm \
             darwin-aarch64 darwin-aarch64-app darwin-x86_64 darwin-x86_64-app \
             windows-x86_64 windows-x86_64-nsis windows-x86_64-msi; do
             if ! jq -e --arg platform "$platform" '.platforms[$platform] | ((.url // "") | startswith("https://")) and ((.signature // "") | length > 0)' "$manifest" > /dev/null; then
@@ -231,7 +222,7 @@ jobs:
           gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/names.txt"
           missing=0
           for asset in \
-            harness-dashboard-cli-x86_64-unknown-linux-gnu harness-dashboard-cli-aarch64-unknown-linux-gnu \
+            harness-dashboard-cli-x86_64-unknown-linux-gnu \
             harness-dashboard-cli-x86_64-apple-darwin harness-dashboard-cli-aarch64-apple-darwin \
             harness-dashboard-cli-x86_64-pc-windows-msvc.exe; do
             if ! grep -qxF "$asset" "$RUNNER_TEMP/names.txt"; then
