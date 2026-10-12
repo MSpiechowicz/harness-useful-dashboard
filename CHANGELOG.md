@@ -1,3 +1,10 @@
+## [2.0.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.0...v2.0.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* Linux arm64 installers build, the AppImage tools run without FUSE on the arm64 runner ([99b2abc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/99b2abcec8e67973be13840defe5117d8359cc28))
+
 # [2.0.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v1.25.1...v2.0.0) (2026-10-12)
 
 
