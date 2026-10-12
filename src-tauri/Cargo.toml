@@ -1,0 +1,41 @@
+[package]
+name = "harness_dashboard_app"
+description = "Harness Dashboard: the app shell that runs the dashboard server and shows it in a native window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "harness_dashboard_app_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "harness-dashboard-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+serde.workspace = true
+# `generate_context!` embeds the `plugins` section of `tauri.conf.json` as `serde_json` values.
+serde_json.workspace = true
+# `tray-icon` + `image-png`: the system tray icon (see `tray`).
+tauri = { workspace = true, features = ["tray-icon", "image-png"] }
+tauri-plugin-log.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-single-instance.workspace = true
+tauri-plugin-updater.workspace = true
+tauri-plugin-window-state.workspace = true
+base64.workspace = true
+minisign-verify.workspace = true
+rodio.workspace = true
+time.workspace = true
+# `log` feature: the events reach tauri-plugin-log (no tracing subscriber is installed).
+tracing = { workspace = true, features = ["log"] }
+
+[lints]
+workspace = true

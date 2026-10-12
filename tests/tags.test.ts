@@ -223,7 +223,7 @@ describe("API", () => {
     const w = new DbWriter(app.db, new PriceBook(), ID);
     w.session({ id: "claude:s1", provider: "claude", nativeId: "s1", project: "/work/alpha", title: "Alpha" });
     w.usage(usage({ id: "u1" }));
-    handle = createHandler(app, { get: async () => null }, { restart() {}, shutdown() {} }, { token, port: 4317 });
+    handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token, port: 4317 });
   });
   afterAll(() => {
     app.close();

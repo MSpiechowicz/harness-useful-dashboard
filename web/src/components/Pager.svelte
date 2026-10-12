@@ -38,19 +38,19 @@
   </span>
   {#if pages > 1}
     <nav class="flex items-center gap-1 transition-opacity" class:loading-dim={loading} aria-label={t("pager.label")}>
-      <button class="btn !h-7 !px-1.5" disabled={page <= 1} aria-label={t("pager.prev")} onclick={() => onpage(page - 1)}><ChevronLeft size={14} /></button>
+      <button class="btn btn-icon" disabled={page <= 1} aria-label={t("pager.prev")} onclick={() => onpage(page - 1)}><ChevronLeft size={14} /></button>
       {#each items as it, i (it === "gap" ? `gap${i}` : it)}
         {#if it === "gap"}
           <span class="px-1 text-muted">…</span>
         {:else}
           <button
-            class="btn !h-7 min-w-7 justify-center !px-2 tabular {it === page ? '!border-accent/60 !bg-accent-wash text-accent-ink' : ''}"
+            class="btn min-w-8 justify-center !px-2 tabular {it === page ? '!border-accent/60 !bg-accent-wash text-accent-ink' : ''}"
             aria-current={it === page ? "page" : undefined}
             onclick={() => onpage(it)}>{num.format(it)}</button
           >
         {/if}
       {/each}
-      <button class="btn !h-7 !px-1.5" disabled={page >= pages} aria-label={t("pager.next")} onclick={() => onpage(page + 1)}><ChevronRight size={14} /></button>
+      <button class="btn btn-icon" disabled={page >= pages} aria-label={t("pager.next")} onclick={() => onpage(page + 1)}><ChevronRight size={14} /></button>
     </nav>
   {/if}
 </div>

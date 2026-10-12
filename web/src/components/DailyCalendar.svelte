@@ -87,7 +87,7 @@
 {#snippet pager(go: (() => void) | null | undefined, label: string, back: boolean)}
   {#if go !== undefined}
     <!-- A bare chevron at the card's edge, not a boxed button: it shouldn't compete with the day cells. -->
-    <button type="button" class="pager {back ? '-ml-2' : '-mr-2'}" disabled={!go} aria-label={label} title={label} onclick={() => go?.()}>
+    <button type="button" class="pager {back ? '-ml-3' : '-mr-3'}" disabled={!go} aria-label={label} title={label} onclick={() => go?.()}>
       {#if back}<ChevronLeft size={18} />{:else}<ChevronRight size={18} />{/if}
     </button>
   {/if}
@@ -163,7 +163,7 @@
     align-self: center;
     display: grid;
     place-items: center;
-    width: 24px;
+    width: 32px;
     height: 32px;
     border-radius: 6px;
     color: var(--ink-2);
@@ -228,7 +228,9 @@
     z-index: 10;
     white-space: nowrap;
     background: var(--popover);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
     border-radius: 10px;
     padding: 6px 10px;
     box-shadow: var(--shadow-pop);

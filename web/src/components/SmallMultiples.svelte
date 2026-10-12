@@ -29,7 +29,7 @@
   {#each tiles as tile, i (tile.key)}
     <button
       type="button"
-      class="flex min-w-0 flex-col gap-1 rounded-lg border border-line p-3 text-left transition-colors hover:bg-surface-2"
+      class="flex min-w-0 flex-col gap-1 rounded-lg border border-line p-3 text-left transition-colors hover:bg-hover"
       title={tile.label}
       onclick={() => onselect?.(tile.key)}
     >

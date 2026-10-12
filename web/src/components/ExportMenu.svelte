@@ -13,10 +13,8 @@
     /** The file's name part, English and stable: `sessions` saves harness-dashboard-sessions-<date>.csv. */
     name: string;
     rows: () => readonly unknown[] | Promise<readonly unknown[]>;
-    /** The chart cards' size (their table toggle), rather than the table cards' search and sort. */
-    small?: boolean;
   }
-  let { name, rows, small = false }: Props = $props();
+  let { name, rows }: Props = $props();
 
   const FORMATS: { value: ExportFormat; label: string }[] = [
     { value: "csv", label: "CSV" },
@@ -112,7 +110,7 @@
   <button
     bind:this={trigger}
     type="button"
-    class="btn justify-center !px-0 {small ? '!h-7 w-7' : 'w-8'}"
+    class="btn btn-icon"
     title={t("export.label")}
     aria-label={t("export.label")}
     aria-haspopup="menu"

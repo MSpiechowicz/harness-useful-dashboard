@@ -42,6 +42,19 @@
   let failed = $state<"save" | "delete" | "readonly" | null>(null);
   let open = $state(false);
 
+  // The actions column is as wide as a row's buttons plus the cell's padding, so they start under the header and end
+  // at the card's edge in every language. Until a row is shown it is 12rem. A width the person dragged
+  // (columns.svelte.ts) still wins.
+  let actionsWidth = $state(0);
+  function fitActions(node: HTMLElement) {
+    const observer = new ResizeObserver(() => {
+      const cell = getComputedStyle(node.parentElement!);
+      actionsWidth = Math.ceil(node.offsetWidth + parseFloat(cell.paddingLeft) + parseFloat(cell.paddingRight));
+    });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  }
+
   type Sort = "recent" | "oldest" | "text";
   let sortKey = $state<Sort>("recent");
   let sortAsc = $state(false);
@@ -225,17 +238,17 @@
     <!-- The fields of a note being edited belong to this form, whose cells they sit in. -->
     <form id="note-edit-form" onsubmit={(e) => { e.preventDefault(); if (editing) void save(editing); }}></form>
 
-    <table class="data fixed-cols !min-w-[42rem]" use:resizableColumns={"notes"}>
+    <table class="data fixed-cols !min-w-[42rem]" style:--actions-width={actionsWidth ? `${actionsWidth}px` : undefined} use:resizableColumns={"notes"}>
       <colgroup>
         <col class="w-44" />
         <col />
-        <col class="w-60" />
+        <col class="w-[var(--actions-width,12rem)]" />
       </colgroup>
       <thead>
         <tr>
           <th>{t("notes.day")}</th>
           <th>{t("notes.text")}</th>
-          <th data-fixed>{t("palette.actions")}</th>
+          <th data-fixed data-fit>{t("palette.actions")}</th>
         </tr>
       </thead>
       <tbody>
@@ -265,9 +278,9 @@
                 <p id="note-edit-limit" class="mt-1 text-xs text-muted">{t("notes.limit", { n: MAX_TEXT })}</p>
               </td>
               <td class="align-top">
-                <div class="flex flex-nowrap gap-1.5">
-                  <button type="submit" form="note-edit-form" class="btn btn-primary !h-7 !px-2.5 shrink-0" disabled={busy || !valid(edit)}>{t("settings.save")}</button>
-                  <button type="button" class="btn !h-7 !px-2.5 shrink-0" onclick={() => (editing = null)}>{t("common.cancel")}</button>
+                <div class="flex flex-wrap gap-1.5">
+                  <button type="submit" form="note-edit-form" class="btn btn-primary !px-2.5 shrink-0" disabled={busy || !valid(edit)}>{t("settings.save")}</button>
+                  <button type="button" class="btn !px-2.5 shrink-0" onclick={() => (editing = null)}>{t("common.cancel")}</button>
                 </div>
               </td>
             </tr>
@@ -277,9 +290,9 @@
               <td class="text-xs whitespace-nowrap text-muted tabular">{whenText(n)}</td>
               <td class="!whitespace-normal text-ink">{t("notes.deleteConfirm")}</td>
               <td>
-                <div class="flex flex-nowrap gap-1.5">
-                  <button type="button" class="btn btn-danger !h-7 !px-2.5 shrink-0" disabled={busy} onclick={() => remove(n.id)}><Trash2 size={13} />{t("notes.delete")}</button>
-                  <button type="button" class="btn !h-7 !px-2.5 shrink-0" onclick={() => (removing = null)}>{t("common.cancel")}</button>
+                <div class="flex flex-wrap gap-1.5">
+                  <button type="button" class="btn btn-danger !px-2.5 shrink-0" disabled={busy} onclick={() => remove(n.id)}><Trash2 size={13} />{t("notes.delete")}</button>
+                  <button type="button" class="btn !px-2.5 shrink-0" onclick={() => (removing = null)}>{t("common.cancel")}</button>
                 </div>
               </td>
             </tr>
@@ -288,10 +301,10 @@
               <td class="text-xs whitespace-nowrap text-muted tabular">{whenText(n)}</td>
               <td class="!whitespace-normal break-words text-ink">{n.text}</td>
               <td>
-                <div class="flex flex-wrap gap-1.5">
-                  <button type="button" class="btn btn-primary !h-7 !px-2.5" aria-pressed={selected === n.id} onclick={() => onselect(selected === n.id ? "" : n.id)}>{t("notes.compare.open")}</button>
-                  <button type="button" class="btn !h-7 !px-2" aria-label={t("notes.edit")} title={t("notes.edit")} onclick={() => startEdit(n)}><Pencil size={13} /></button>
-                  <button type="button" class="btn btn-danger !h-7 !px-2" aria-label={t("notes.delete")} title={t("notes.delete")} onclick={() => startRemove(n)}><Trash2 size={13} /></button>
+                <div class="flex w-max gap-1.5" use:fitActions>
+                  <button type="button" class="btn btn-primary !px-2.5" aria-pressed={selected === n.id} onclick={() => onselect(selected === n.id ? "" : n.id)}>{t("notes.compare.open")}</button>
+                  <button type="button" class="btn btn-icon" aria-label={t("notes.edit")} title={t("notes.edit")} onclick={() => startEdit(n)}><Pencil size={14} /></button>
+                  <button type="button" class="btn btn-danger btn-icon" aria-label={t("notes.delete")} title={t("notes.delete")} onclick={() => startRemove(n)}><Trash2 size={14} /></button>
                 </div>
               </td>
             </tr>

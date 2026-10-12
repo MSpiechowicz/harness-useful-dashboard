@@ -1,7 +1,6 @@
 <script lang="ts">
   import { getContext, onMount, untrack } from "svelte";
   import { echarts, type EChartsOption } from "../lib/echarts.ts";
-  import { store } from "../lib/state.svelte.ts";
 
   interface Props {
     option: EChartsOption;
@@ -60,8 +59,7 @@
 
   /**
    * The option as drawn: with the legend entries the user switched off kept off, and without motion for those who
-   * asked for less (no grow-in, no ripple on the Live chart). A print takes the chart as it is drawn, so it has no
-   * motion either: it would catch the bars still growing.
+   * asked for less (no grow-in, no ripple on the Live chart).
    */
   function prepared(opt: EChartsOption, hidden: string[]): EChartsOption {
     let out = opt;
@@ -71,7 +69,7 @@
       const keep = hidden.filter((n) => names.has(n));
       if (keep.length) out = { ...out, legend: { ...lg, selected: { ...lg.selected, ...Object.fromEntries(keep.map((n) => [n, false])) } } };
     }
-    if (store.printing || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const series = ((out.series ?? []) as { type?: string }[]).map((x) => (x.type === "effectScatter" ? { ...x, type: "scatter" } : x));
       out = { ...out, animation: false, series: series as EChartsOption["series"] };
     }
@@ -104,16 +102,7 @@
       });
     });
     ro.observe(el!);
-    // The print layout is narrower than the screen (no sidebar, the paper's width), and a ResizeObserver doesn't
-    // run before the browser takes the page: the canvas would be cut off at the paper's edge. It is resized as soon
-    // as the print layout applies, and again once it is gone.
-    const print = matchMedia("print");
-    const fit = () => chart?.resize({ animation: { duration: 0 } });
-    print.addEventListener("change", fit);
-    window.addEventListener("afterprint", fit);
     return () => {
-      print.removeEventListener("change", fit);
-      window.removeEventListener("afterprint", fit);
       ro.disconnect();
       cancelAnimationFrame(frame);
       chart?.dispose();

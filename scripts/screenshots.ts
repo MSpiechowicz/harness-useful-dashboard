@@ -25,7 +25,6 @@ const CONFIG = {
   checkUpdates: false,
   language: "en",
   userName: "alex",
-  openMode: "none",
   // Codex limits come from the demo database (plan_limits), the others would ask providers with this machine's logins.
   limits: { claude: false, omp: false, codex: true, pi: false, opencode: false, copilot: false },
   sources: {

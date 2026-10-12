@@ -81,6 +81,7 @@ export interface Alert {
 
 export type AlertLang = "en" | "de" | "es" | "fr" | "pl";
 
+/** The desktop alerts, and what the server tells the app shell when it can't start (see cli.ts). */
 const MESSAGES: Record<AlertLang, Record<string, string>> = {
   en: {
     title: "Harness Dashboard",
@@ -93,6 +94,9 @@ const MESSAGES: Record<AlertLang, Record<string, string>> = {
     limit: "{plan}: {pct} of the {window} limit used.",
     limitReset: "{plan}: {pct} of the {window} limit used. Resets in {left}.",
     test: "Notifications work. You'll hear from the dashboard here.",
+    portInUse: "Port {port} is used by another program, possibly an older Harness Dashboard. Quit it or choose another port with harness-dashboard config set port <n>.",
+    portSilent: "The program on port {port} did not answer. Try again in a moment or choose another port with harness-dashboard config set port <n>.",
+    startFailed: "The dashboard could not start: {error}",
   },
   de: {
     title: "Harness Dashboard",
@@ -105,6 +109,9 @@ const MESSAGES: Record<AlertLang, Record<string, string>> = {
     limit: "{plan}: {pct} des {window}-Limits verbraucht.",
     limitReset: "{plan}: {pct} des {window}-Limits verbraucht. Zurückgesetzt in {left}.",
     test: "Benachrichtigungen funktionieren. Das Dashboard meldet sich hier.",
+    portInUse: "Port {port} wird von einem anderen Programm verwendet, vielleicht einem älteren Harness Dashboard. Beende es oder wähle einen anderen Port mit harness-dashboard config set port <n>.",
+    portSilent: "Das Programm auf Port {port} hat nicht geantwortet. Versuche es gleich noch einmal oder wähle einen anderen Port mit harness-dashboard config set port <n>.",
+    startFailed: "Das Dashboard konnte nicht starten: {error}",
   },
   es: {
     title: "Harness Dashboard",
@@ -117,6 +124,9 @@ const MESSAGES: Record<AlertLang, Record<string, string>> = {
     limit: "{plan}: {pct} del límite de {window} usado.",
     limitReset: "{plan}: {pct} del límite de {window} usado. Se renueva en {left}.",
     test: "Las notificaciones funcionan. El panel te avisará aquí.",
+    portInUse: "Otro programa usa el puerto {port}, quizá un Harness Dashboard anterior. Ciérralo o elige otro puerto con harness-dashboard config set port <n>.",
+    portSilent: "El programa del puerto {port} no respondió. Inténtalo de nuevo en un momento o elige otro puerto con harness-dashboard config set port <n>.",
+    startFailed: "El panel no pudo iniciarse: {error}",
   },
   fr: {
     title: "Harness Dashboard",
@@ -129,6 +139,9 @@ const MESSAGES: Record<AlertLang, Record<string, string>> = {
     limit: "{plan} : {pct} de la limite de {window} utilisée.",
     limitReset: "{plan} : {pct} de la limite de {window} utilisée. Renouvelée dans {left}.",
     test: "Les notifications fonctionnent. Le tableau de bord vous préviendra ici.",
+    portInUse: "Le port {port} est utilisé par un autre programme, peut-être un ancien Harness Dashboard. Quittez-le ou choisissez un autre port avec harness-dashboard config set port <n>.",
+    portSilent: "Le programme sur le port {port} n'a pas répondu. Réessayez dans un instant ou choisissez un autre port avec harness-dashboard config set port <n>.",
+    startFailed: "Le tableau de bord n'a pas pu démarrer : {error}",
   },
   pl: {
     title: "Harness Dashboard",
@@ -141,6 +154,9 @@ const MESSAGES: Record<AlertLang, Record<string, string>> = {
     limit: "{plan}: wykorzystano {pct} limitu {window}.",
     limitReset: "{plan}: wykorzystano {pct} limitu {window}. Odnowienie za {left}.",
     test: "Powiadomienia działają. Dashboard da znać tutaj.",
+    portInUse: "Port {port} jest używany przez inny program, być może starszy Harness Dashboard. Zamknij go lub wybierz inny port poleceniem harness-dashboard config set port <n>.",
+    portSilent: "Program na porcie {port} nie odpowiedział. Spróbuj ponownie za chwilę lub wybierz inny port poleceniem harness-dashboard config set port <n>.",
+    startFailed: "Dashboard nie mógł się uruchomić: {error}",
   },
 };
 

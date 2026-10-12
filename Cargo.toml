@@ -1,0 +1,46 @@
+# Workspace root: the Tauri shell that hosts the dashboard server (the Bun binary, a sidecar).
+[workspace]
+resolver = "3"
+members = ["src-tauri"]
+
+[workspace.package]
+version = "1.25.1"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/MSpiechowicz/harness-useful-dashboard"
+rust-version = "1.98"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Pinned once here; member crates use `name.workspace = true`.
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tracing = "0.1.44"
+# Updater public-key validation (the same decoders tauri-plugin-updater verifies signatures with).
+base64 = "0.22"
+minisign-verify = "0.2"
+# App shell (Tauri 2 only; Tauri 3 alpha is not used).
+tauri = "2.12.2"
+tauri-build = "2.7.1"
+tauri-plugin-single-instance = "2.5.2"
+tauri-plugin-window-state = "2.5.0"
+tauri-plugin-opener = "2.7.0"
+tauri-plugin-log = "2.10.0"
+# Signed in-app updates over TLS. `zip` (Tauri v1 update bundles) is not needed: the bundler
+# writes v2 updater artifacts (`bundle.createUpdaterArtifacts: true`).
+tauri-plugin-updater = { version = "2.13.2", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# Formats the release date the updater parses (RFC 3339).
+time = { version = "0.3.55", features = ["formatting"] }
+# Plays the launch sound natively: Tauri gives the Linux webview no way to allow audio before a user gesture.
+rodio = { version = "0.22.2", default-features = false, features = ["playback", "wav"] }
+
+# Default codegen units and no cross-crate LTO: the shell mostly waits on the webview and the server,
+# so the slower settings would gain nothing measurable.
+[profile.release]
+opt-level = 3
+strip = true

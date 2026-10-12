@@ -108,7 +108,7 @@
 
 <!-- The backdrop is for the pointer: keyboard users close with Escape. -->
 <div
-  class="palette-backdrop fixed inset-0 z-50 flex items-start justify-center bg-black/30 px-4 pt-[10vh]"
+  class="palette-backdrop fixed inset-0 z-50 flex items-start justify-center bg-scrim [backdrop-filter:var(--scrim-filter)] px-4 pt-[10vh]"
   role="presentation"
   onclick={(e) => {
     if (e.target === e.currentTarget) onclose();
@@ -116,7 +116,7 @@
 >
   <div
     bind:this={dialog}
-    class="palette card flex max-h-[min(36rem,80vh)] w-full max-w-xl flex-col overflow-hidden !shadow-[var(--shadow-pop)]"
+    class="palette card glass flex max-h-[min(36rem,80vh)] w-full max-w-xl flex-col overflow-hidden !shadow-[var(--shadow-pop)]"
     role="dialog"
     aria-modal="true"
     aria-label={t("folder.pickTitle")}
@@ -126,8 +126,8 @@
     <div class="border-b border-line px-4 pt-3.5 pb-3">
       <div class="mb-2.5 text-[13px] font-medium text-ink">{t("folder.pickTitle")}</div>
       <div class="flex items-center gap-2">
-        <button class="btn !w-8 shrink-0 justify-center !px-0" aria-label={t("folder.up")} title={t("folder.up")} disabled={!listing?.parent} onclick={() => listing?.parent && load(listing.parent)}><ArrowUp size={14} /></button>
-        <button class="btn !w-8 shrink-0 justify-center !px-0" aria-label={t("folder.home")} title={t("folder.home")} disabled={!listing} onclick={() => listing && load(listing.home)}><House size={14} /></button>
+        <button class="btn btn-icon" aria-label={t("folder.up")} title={t("folder.up")} disabled={!listing?.parent} onclick={() => listing?.parent && load(listing.parent)}><ArrowUp size={14} /></button>
+        <button class="btn btn-icon" aria-label={t("folder.home")} title={t("folder.home")} disabled={!listing} onclick={() => listing && load(listing.home)}><House size={14} /></button>
         <input bind:this={input} bind:value={typed} class="input min-w-0 flex-1 font-mono text-xs" aria-label={t("folder.path")} spellcheck="false" autocomplete="off" onkeydown={onInputKey} />
       </div>
       <div class="mt-2 flex min-h-4 items-start gap-1.5 text-[11px] text-bad" aria-live="polite">
@@ -140,7 +140,7 @@
         <ul class="flex flex-col" class:opacity-50={loading}>
           {#each listing.dirs as d, i (d.path)}
             <li>
-              <button data-row tabindex="-1" class="flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-ink hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent" onclick={() => load(d.path)} onkeydown={(e) => onRowKey(e, i)}>
+              <button data-row tabindex="-1" class="flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-ink hover:bg-hover focus-visible:bg-hover focus-visible:outline-2 focus-visible:outline-accent" onclick={() => load(d.path)} onkeydown={(e) => onRowKey(e, i)}>
                 <Folder size={14} class="shrink-0 text-muted" /><span class="min-w-0 truncate">{d.name}</span>
               </button>
             </li>

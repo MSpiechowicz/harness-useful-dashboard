@@ -7,7 +7,6 @@ import { DEFAULT_DIGEST, type DigestConfig } from "./digest.ts";
 import { DEFAULT_LABELS, type LabelConfig, MODEL_NAME } from "./labels.ts";
 import { configPath, defaultDbPath, expandHome, localIdentity } from "./paths.ts";
 
-export type OpenMode = "app" | "browser" | "none";
 export type JournalMode = "auto" | "wal" | "delete";
 
 export interface SourceConfig {
@@ -44,7 +43,6 @@ export interface AppConfig {
   /** Display name stored with every usage row ingested on this machine. */
   userName: string;
   port: number;
-  openMode: OpenMode;
   /** Seconds between background incremental scans (0 disables). */
   scanIntervalSec: number;
   /** Max characters of prompt text kept in the database (0 = do not store prompt text). */
@@ -106,7 +104,6 @@ export function defaultConfig(): AppConfig {
     journalMode: "auto",
     userName: localIdentity().user,
     port: 4317,
-    openMode: "app",
     scanIntervalSec: 30,
     promptTextLimit: 2000,
     detailRetentionMonths: 0,
@@ -212,7 +209,9 @@ export function loadConfig(path = configPath()): AppConfig {
   const base = defaultConfig();
   if (!existsSync(path)) return base;
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<AppConfig>;
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<AppConfig> & { openMode?: unknown };
+    // How 1.25 and older opened their window. The app shell has its own now: the key is dropped on the next save.
+    delete raw.openMode;
     return mergeConfig(base, raw);
   } catch (err) {
     console.warn(`[config] could not parse ${path}: ${(err as Error).message}; using defaults`);
@@ -281,10 +280,6 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
   if (has("userName")) {
     if (typeof body.userName !== "string" || body.userName.length > 200) return invalid("userName");
     patch.userName = body.userName.trim();
-  }
-  if (has("openMode")) {
-    if (!["app", "browser", "none"].includes(body.openMode as string)) return invalid("openMode");
-    patch.openMode = body.openMode as OpenMode;
   }
   if (has("journalMode")) {
     if (!["auto", "wal", "delete"].includes(body.journalMode as string)) return invalid("journalMode");

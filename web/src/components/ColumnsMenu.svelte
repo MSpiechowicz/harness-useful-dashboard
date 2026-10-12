@@ -11,10 +11,8 @@
    */
   interface Props {
     sets: ColumnSet[];
-    /** The chart cards' size (their table toggle), rather than the table cards' search and sort. */
-    small?: boolean;
   }
-  let { sets, small = false }: Props = $props();
+  let { sets }: Props = $props();
 
   let open = $state(false);
   let alignRight = $state(true);
@@ -75,7 +73,7 @@
   <button
     bind:this={trigger}
     type="button"
-    class="btn relative justify-center !px-0 {small ? '!h-7 w-7' : 'w-8'}"
+    class="btn btn-icon relative"
     title={t("table.columns")}
     aria-label={anyHidden ? `${t("table.columns")} (${t("table.someHidden")})` : t("table.columns")}
     aria-haspopup="menu"

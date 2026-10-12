@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
-import { readFileSync } from "node:fs";
+import { Console as NodeConsole } from "node:console";
+import { readFileSync, writeSync } from "node:fs";
 import { configPath, ensureAppDataDir } from "./core/paths.ts";
+import { type AlertLang, message } from "./core/budgets.ts";
 import { configKeyPatch, loadConfig, resolveDbPath, updateConfig } from "./core/config.ts";
 import { NewerSchemaError, openDb } from "./core/db.ts";
 import { scan } from "./core/ingest/index.ts";
@@ -15,17 +17,15 @@ import { DbWriter } from "./core/ingest/writer.ts";
 import { localIdentity } from "./core/paths.ts";
 import { PriceBook } from "./core/pricing.ts";
 import { App } from "./server/app.ts";
-import { loadToken, signInUrl } from "./server/auth.ts";
+import { loadToken, probeDashboard, signInUrl } from "./server/auth.ts";
 import { createHandler, loadAssets } from "./server/http.ts";
-import { refreshLauncherIcon } from "./server/launcherIcon.ts";
-import { openUi } from "./server/open.ts";
-import { applyUpdate, checkForUpdate, cleanupOldBinary, installedPath, isCompiledBinary } from "./server/update.ts";
-import { BIN_NAME, VERSION } from "./version.ts";
+import { checkForUpdate } from "./server/update.ts";
+import { BIN_NAME, REPO, VERSION } from "./version.ts";
 
 const HELP = `${BIN_NAME} ${VERSION} — token usage dashboard for Claude Code, Codex and Cursor
 
 Usage:
-  ${BIN_NAME} [serve] [options]      Start the dashboard and open it (default)
+  ${BIN_NAME} [serve] [options]      Start the dashboard server and print its sign-in link (default)
   ${BIN_NAME} scan [--full]          Ingest new usage from local logs and exit
   ${BIN_NAME} import-cursor <file>   Import a Cursor usage CSV export
   ${BIN_NAME} today                  Today's cost, tokens and sessions against yesterday
@@ -34,15 +34,13 @@ Usage:
   ${BIN_NAME} digest [options]       The last week as a Markdown report: cost, projects, budgets, limits, tips
   ${BIN_NAME} statusline             Print one status line for Claude Code (reads its JSON on stdin)
   ${BIN_NAME} mcp                    Serve usage data to AI agents over MCP (stdio, read-only)
-  ${BIN_NAME} update [--check]       Update to the latest release
+  ${BIN_NAME} update [--check]       Show whether a newer release is out
   ${BIN_NAME} config [path|get|set <key> <value>]
   ${BIN_NAME} version
 
 Options:
   --db <path>       Use this SQLite file (e.g. on iCloud Drive / a network share)
   --port <n>        Port to listen on (default 4317)
-  --no-open         Don't open a window
-  --browser         Open in the default browser instead of an app window
 
 Statusline options:
   --format <tpl>    Line template (default "{model} · {session} · {today} · {limit}")
@@ -105,76 +103,166 @@ export function parseArgs(argv: string[]): Args {
   return { cmd, positional, flags };
 }
 
-/** Headers for asking the running dashboard: the token, and the header state-changing requests need. */
-function apiHeaders(): Record<string, string> {
-  return { Authorization: `Bearer ${loadToken()}`, "X-Harness-Dashboard": "1" };
+/**
+ * Asks the dashboard on `port` to quit and waits up to 5 s for the port to be free. Only for one probeDashboard vouched
+ * for: the request carries the token.
+ */
+async function stopRunning(port: number, token: string): Promise<void> {
+  const headers = { Authorization: `Bearer ${token}`, "X-Harness-Dashboard": "1" };
+  await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers, signal: AbortSignal.timeout(2000) }).catch(() => {});
+
+  for (let i = 0; i < 50 && !(await portFree(port)); i++) await Bun.sleep(100);
 }
 
-async function isOurServer(port: number): Promise<boolean> {
+/** Nothing accepts a connection on the port: a server can bind it. */
+async function portFree(port: number): Promise<boolean> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/status`, { headers: apiHeaders(), signal: AbortSignal.timeout(800) });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { version?: string };
-    return typeof body.version === "string";
-  } catch {
+    const socket = await Bun.connect({ hostname: "127.0.0.1", port, socket: { data() {} } });
+    socket.end();
     return false;
+  } catch {
+    return true;
   }
 }
 
-async function serve(args: Args): Promise<void> {
-  cleanupOldBinary();
-  if (isCompiledBinary()) refreshLauncherIcon();
-  const cfg = loadConfig();
-  const port = Number(args.flags.port ?? cfg.port) || 4317;
-  const openMode = args.flags["no-open"] ? "none" : args.flags.browser ? "browser" : cfg.openMode;
+/**
+ * A line for the app shell, which runs this as `serve --shell` and reads its stdout (the contract is in
+ * src-tauri/src/sidecar.rs). Written straight to the file descriptor, so the shell has it at once. In shell mode these
+ * are the only lines on stdout: everything else goes to stderr.
+ *
+ *   HARNESS_DASHBOARD_LANG <en|de|es|fr|pl>   first, the language for the shell's own error text
+ *   HARNESS_DASHBOARD_READY <sign-in link>     this process serves the dashboard and keeps running
+ *   HARNESS_DASHBOARD_ERROR <text>             the dashboard can't start, this process exits non-zero
+ */
+function shellLine(kind: "LANG" | "READY" | "ERROR", value: string): void {
+  writeSync(1, `HARNESS_DASHBOARD_${kind} ${value.replace(/\s+/g, " ").trim()}\n`);
+}
 
-  // Single instance: if the dashboard already runs on this port, just bring up a window.
-  if (await isOurServer(port)) {
-    console.log(`Dashboard already running at http://localhost:${port}`);
-    openUi(signInUrl(`http://localhost:${port}`, loadToken()), openMode);
+/** The port is taken. `silent` when what holds it did not answer the probe: it may be a dashboard too busy to answer. */
+class PortTaken extends Error {
+  constructor(
+    readonly port: number,
+    readonly silent: boolean,
+  ) {
+    super(`port ${port} is in use`);
+  }
+}
+
+/** What the user reads when the dashboard can't start, in their language. */
+function startErrorText(err: unknown, lang: AlertLang): string {
+  if (err instanceof PortTaken) return message(lang, err.silent ? "portSilent" : "portInUse", { port: String(err.port) });
+
+  return message(lang, "startFailed", { error: errorText(err) });
+}
+
+/** A console whose every method writes to stderr, Bun's console.write too. */
+function stderrConsole(): Console {
+  const out = new NodeConsole({ stdout: process.stderr, stderr: process.stderr });
+  const write = (...data: Array<string | ArrayBufferView | ArrayBuffer>): number => {
+    let bytes = 0;
+    for (const chunk of data) {
+      if (typeof chunk === "string") bytes += writeSync(2, chunk);
+      else if (chunk instanceof ArrayBuffer) bytes += writeSync(2, new Uint8Array(chunk));
+      else bytes += writeSync(2, new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    }
+    return bytes;
+  };
+  return Object.assign(out, { write });
+}
+
+/** Bun.serve's error when the port is taken. */
+function portInUse(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown };
+  return e?.code === "EADDRINUSE" || /EADDRINUSE|address already in use/i.test(String(e?.message ?? ""));
+}
+
+/**
+ * The dashboard server. On its own it runs headless and prints the sign-in link. Run by the app shell (--shell) it
+ * talks to the shell in the lines above, replaces a dashboard of this install already running on the port, and quits
+ * when the shell closes its stdin.
+ */
+async function serve(args: Args): Promise<void> {
+  const shell = args.flags.shell === true;
+  // stdout carries the shell's lines only: the server's own output (the banner, scans, the app's logs) goes to stderr,
+  // whichever console method writes it.
+  if (shell) globalThis.console = stderrConsole();
+
+  const cfg = loadConfig();
+  if (shell) shellLine("LANG", cfg.language);
+
+  const port = Number(args.flags.port ?? cfg.port) || 4317;
+
+  try {
+    await startServer(args, port, shell);
+  } catch (err) {
+    if (!shell) throw err instanceof PortTaken ? new Error(startErrorText(err, "en")) : err;
+
+    shellLine("ERROR", startErrorText(err, cfg.language));
+    process.exit(1);
+  }
+}
+
+async function startServer(args: Args, port: number, shell: boolean): Promise<void> {
+  // Single instance: a dashboard of this install already on the port is used instead of a second one, and the app
+  // shell, which always owns its server, replaces it (any version, after an update too). The token goes only to a
+  // server that proved it holds it: another account may hold the port to catch it. Anything else there makes the
+  // start below fail with the port in use. Links point at 127.0.0.1, where the server listens: localhost may resolve to
+  // ::1 first, where another account could listen on the same port and catch the token.
+  const token = loadToken();
+  const probe = await probeDashboard(port, token);
+  if (probe.state === "ours" && shell) {
+    console.log(`Stopping the dashboard ${probe.version} on port ${port}`);
+    await stopRunning(port, token);
+  } else if (probe.state === "ours") {
+    console.log(`Dashboard already running at http://127.0.0.1:${port}`);
+    console.log(`  open: ${signInUrl(`http://127.0.0.1:${port}`, token)}`);
     return;
   }
 
-  const token = loadToken();
   const app = new App(typeof args.flags.db === "string" ? args.flags.db : undefined);
-  const assets = await loadAssets();
   let server: ReturnType<typeof Bun.serve>;
-  const hooks = {
-    restart() {
-      // Hand the port over to the freshly installed binary; open windows reconnect on their own.
-      server.stop(true);
-      app.close();
-      // Detached, as `update` does: the new server must outlive this process and its process group.
-      Bun.spawn([installedPath(), "serve", "--no-open", "--port", String(port)], { stdio: ["ignore", "inherit", "inherit"], detached: true }).unref();
-      setTimeout(() => process.exit(0), 200);
-    },
-    shutdown: () => shutdown(),
-  };
-  const handler = createHandler(app, assets, hooks, { token, port });
-
   const shutdown = () => {
     server.stop(true);
     app.close();
     process.exit(0);
   };
-  server = Bun.serve({ port, hostname: "127.0.0.1", idleTimeout: 60, fetch: handler });
-  const url = `http://localhost:${server.port}`;
+
+  try {
+    const assets = await loadAssets();
+    const handler = createHandler(app, assets, { shutdown }, { token, port, shell });
+    server = Bun.serve({ port, hostname: "127.0.0.1", idleTimeout: 60, fetch: handler });
+  } catch (err) {
+    app.close();
+    throw portInUse(err) ? new PortTaken(port, probe.state === "silent") : err;
+  }
+
+  const url = `http://127.0.0.1:${server.port}`;
   console.log(`${BIN_NAME} ${VERSION}`);
   console.log(`  database: ${app.dbPath}`);
   if (app.readOnly) console.log(`  read-only: ${NEWER_DATABASE}`);
   console.log(`  listening: ${url}`);
-  // Without a window to open, this is how to get in: the API only answers a browser that came through this link.
-  if (openMode === "none") console.log(`  open: ${signInUrl(url, token)}`);
+  // The API only answers a browser that came through this link. The shell gets it on its own line and never logs it.
+  if (shell) shellLine("READY", signInUrl(url, token));
+  else console.log(`  open: ${signInUrl(url, token)}`);
 
   const first = app.scanNow();
   first
     .then((r) => console.log(`  scanned ${r.filesSeen} files (${r.filesParsed} changed, +${r.usageRows} usage rows) in ${r.durationMs} ms`))
     .catch((err) => console.error("[scan]", err));
   app.startBackgroundScan();
-  openUi(signInUrl(url, token), openMode);
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  // The shell keeps stdin open while it runs: the end of it means the shell is gone or quitting.
+  if (shell) void drain(Bun.stdin.stream()).then(shutdown, shutdown);
+}
+
+/** Reads a stream to its end. */
+async function drain(stream: ReadableStream<Uint8Array>): Promise<void> {
+  const reader = stream.getReader();
+  while (!(await reader.read()).done) {
+    /* nothing to read: only the end matters */
+  }
 }
 
 /** Reads stdin, or nothing when it is a terminal or does not finish within `ms`. */
@@ -322,24 +410,13 @@ async function main(): Promise<void> {
     }
 
     case "update": {
+      // Reports only: the Harness Dashboard app installs updates itself, for the CLI that comes with it too.
       const status = await checkForUpdate(true);
       if (status.error) throw new Error(`Update check failed: ${status.error}`);
       if (!status.available) return void console.log(`Up to date (${VERSION}).`);
       console.log(`Update available: ${VERSION} → ${status.latest}`);
-      if (args.flags.check) return;
-      if (!isCompiledBinary()) throw new Error("Running from source; use `git pull && bun run build` instead.");
-      const r = await applyUpdate((m) => console.log(`  ${m}`));
-      // A dashboard still running the old version is stopped and started again from the new one. Its open windows
-      // reconnect on their own.
-      const port = Number(loadConfig().port) || 4317;
-      if (await isOurServer(port)) {
-        await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers: apiHeaders() }).catch(() => {});
-        for (let i = 0; i < 30 && (await isOurServer(port)); i++) await Bun.sleep(100);
-        Bun.spawn([r.path, "serve", "--no-open", "--port", String(port)], { stdio: ["ignore", "ignore", "ignore"], detached: true }).unref();
-        console.log(`Updated to ${r.version} and restarted the dashboard.`);
-      } else {
-        console.log(`Updated to ${r.version}.`);
-      }
+      console.log("  The Harness Dashboard app updates itself and this command with it.");
+      console.log(`  Or download it: ${status.releaseUrl ?? `https://github.com/${REPO}/releases/latest`}`);
       return;
     }
 

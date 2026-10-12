@@ -7,6 +7,11 @@ dist/
 web/dist/
 src/server/assets.generated.ts
 
+# App shell (Tauri): Cargo output, the sidecar binaries build:sidecar compiles, generated ACL schemas
+/target/
+src-tauri/binaries/
+src-tauri/gen/
+
 # HyperFrames project of the README video (the rendered MP4 lives in docs/video)
 videos/
 

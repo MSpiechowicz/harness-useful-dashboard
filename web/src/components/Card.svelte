@@ -46,11 +46,11 @@
       <!-- The buttons start where the title's letters do, not at the top of its line box (about 5px higher). -->
       <div class="flex min-w-0 flex-wrap items-center gap-2 {title ? 'mt-[5px]' : ''}">
         {#if actions}{@render actions()}{/if}
-        {#if sets.length}<ColumnsMenu {sets} small={!actions} />{/if}
-        {#if exportName && exportRows}<ExportMenu name={exportName} rows={exportRows} small />{/if}
+        {#if sets.length}<ColumnsMenu {sets} />{/if}
+        {#if exportName && exportRows}<ExportMenu name={exportName} rows={exportRows} />{/if}
         {#if table}
           <button
-            class="btn !h-7 !px-2"
+            class="btn btn-icon"
             title={showTable ? t("chart.showChart") : t("chart.showTable")}
             aria-label={showTable ? t("chart.showChart") : t("chart.showTable")}
             onclick={() => (showTable = !showTable)}

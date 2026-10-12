@@ -98,7 +98,7 @@
         <button type="button" aria-pressed={windowDays === w} onclick={() => (windowDays = w)}>{daysText(w)}</button>
       {/each}
     </div>
-    <button type="button" class="btn !px-2" aria-label={t("common.close")} title={t("common.close")} onclick={onclose}><X size={14} /></button>
+    <button type="button" class="btn btn-icon" aria-label={t("common.close")} title={t("common.close")} onclick={onclose}><X size={14} /></button>
   {/snippet}
 
   <div class="flex flex-col gap-4 {compare.loading ? 'loading-dim' : ''}">

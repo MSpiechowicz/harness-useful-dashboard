@@ -5,16 +5,26 @@
  *   bun run build          → binary for the current platform in dist/
  *   bun run build --all    → binaries for every supported platform + checksums.txt
  *   bun run build --target bun-linux-arm64
+ *
+ * For the Tauri app (src-tauri), by Rust target triple: --triple <triple>, else TAURI_ENV_TARGET_TRIPLE (set by
+ * `tauri build` and `tauri dev`), else the host's.
+ *
+ *   bun run build:sidecar  → src-tauri/binaries/harness-dashboard-<triple>[.exe], the server the app bundles
+ *   bun run build:sidecar --cli-asset
+ *                          → the same, copied to dist/harness-dashboard-cli-<triple>[.exe] for the release
+ *   bun run scripts/build.ts --cli-asset --triple <triple>
+ *                          → only that copy, of the sidecar `tauri build` just made (nothing is compiled)
  */
 import { $ } from "bun";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { BIN_NAME, VERSION } from "../src/version.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const DIST_WEB = join(ROOT, "web", "dist");
 const OUT = join(ROOT, "dist");
 const GENERATED = join(ROOT, "src", "server", "assets.generated.ts");
+const SIDECARS = join(ROOT, "src-tauri", "binaries");
 
 const TARGETS = ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-x64", "bun-darwin-arm64", "bun-windows-x64"] as const;
 
@@ -27,6 +37,36 @@ function outName(target: string): string {
   const [, os, arch] = target.split("-");
   return `${BIN_NAME}-${os}-${arch}${os === "windows" ? ".exe" : ""}`;
 }
+
+/** The Bun target for each Rust target triple the app is built for. */
+const TRIPLES: Record<string, string> = {
+  "x86_64-unknown-linux-gnu": "bun-linux-x64",
+  "aarch64-unknown-linux-gnu": "bun-linux-arm64",
+  "x86_64-apple-darwin": "bun-darwin-x64",
+  "aarch64-apple-darwin": "bun-darwin-arm64",
+  "x86_64-pc-windows-msvc": "bun-windows-x64",
+};
+
+function hostTriple(): string {
+  const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+  if (process.platform === "darwin") return `${arch}-apple-darwin`;
+  if (process.platform === "win32") return `${arch}-pc-windows-msvc`;
+  return `${arch}-unknown-linux-gnu`;
+}
+
+/** The triple to build the sidecar for, and the Bun target that compiles it. */
+function sidecarTarget(args: string[]): { triple: string; target: string } {
+  const flag = args.indexOf("--triple");
+  const triple = (flag >= 0 ? args[flag + 1] : undefined) || process.env.TAURI_ENV_TARGET_TRIPLE || hostTriple();
+  const target = TRIPLES[triple];
+  if (!target) throw new Error(`No Bun target for ${triple}. Supported: ${Object.keys(TRIPLES).join(", ")}`);
+
+  return { triple, target };
+}
+
+const exe = (triple: string) => (triple.includes("windows") ? ".exe" : "");
+const sidecarPath = (triple: string) => join(SIDECARS, `${BIN_NAME}-${triple}${exe(triple)}`);
+const cliAssetPath = (triple: string) => join(OUT, `${BIN_NAME}-cli-${triple}${exe(triple)}`);
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -56,21 +96,17 @@ async function sha256(path: string): Promise<string> {
   return new Bun.CryptoHasher("sha256").update(await Bun.file(path).arrayBuffer()).digest("hex");
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const targetIdx = args.indexOf("--target");
-  const targets: string[] = args.includes("--all") ? [...TARGETS] : targetIdx >= 0 ? [args[targetIdx + 1]!] : [hostTarget()];
-
+/** Builds the UI and compiles the server with it embedded, once per Bun target and output path. */
+async function compile(builds: { target: string; out: string }[]): Promise<void> {
   console.log(`Building ${BIN_NAME} ${VERSION}`);
   console.log("→ UI");
   await $`bunx vite build --config web/vite.config.ts --logLevel warn`.cwd(ROOT);
   if (!existsSync(join(DIST_WEB, "index.html"))) throw new Error("UI build produced no index.html");
 
   generateAssetsModule();
-  mkdirSync(OUT, { recursive: true });
   try {
-    for (const target of targets) {
-      const out = join(OUT, outName(target));
+    for (const { target, out } of builds) {
+      mkdirSync(dirname(out), { recursive: true });
       console.log(`→ ${target}`);
       await $`bun build src/cli.ts --compile --minify --sourcemap=none --target=${target} --outfile ${out}`.cwd(ROOT).quiet();
       if (target.includes("darwin") && process.platform === "darwin") {
@@ -82,6 +118,28 @@ async function main(): Promise<void> {
   } finally {
     rmSync(GENERATED, { force: true });
   }
+}
+
+/** The sidecar for the app, and with --cli-asset its copy as the release's CLI download. */
+async function sidecar(args: string[]): Promise<void> {
+  const { triple, target } = sidecarTarget(args);
+  const out = sidecarPath(triple);
+  if (args.includes("--sidecar")) await compile([{ target, out }]);
+  if (!args.includes("--cli-asset")) return;
+
+  if (!existsSync(out)) throw new Error(`No sidecar at ${relative(ROOT, out)}. Build it first with: bun run build:sidecar`);
+  mkdirSync(OUT, { recursive: true });
+  copyFileSync(out, cliAssetPath(triple));
+  console.log(`  ${relative(ROOT, cliAssetPath(triple))}`);
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (args.includes("--sidecar") || args.includes("--cli-asset")) return sidecar(args);
+
+  const targetIdx = args.indexOf("--target");
+  const targets: string[] = args.includes("--all") ? [...TARGETS] : targetIdx >= 0 ? [args[targetIdx + 1]!] : [hostTarget()];
+  await compile(targets.map((target) => ({ target, out: join(OUT, outName(target)) })));
 
   if (targets.length > 1) {
     const lines: string[] = [];

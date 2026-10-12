@@ -1,5 +1,6 @@
 import "./brand/harness-logo.js";
-import { shouldShowSplash } from "./splash-policy.ts";
+import { isShell, launchSound } from "./shell.ts";
+import { readIntroPrefs, shouldShowSplash } from "./splash-policy.ts";
 
 const SETTLE_MS = 150;
 const FADE_MS = 250;
@@ -13,15 +14,38 @@ function sessionStorageOrNull(): Storage | null {
   }
 }
 
+function localStorageOrNull(): Storage | null {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 /** The launch animation over the app. It covers the blank moment before the first paint and never delays the mount. */
 export function showSplash(): void {
+  const prefs = readIntroPrefs(localStorageOrNull());
   const play = shouldShowSplash({
-    reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+    enabled: prefs.enabled,
+    reducedMotion: prefersReducedMotion(),
     hidden: document.hidden,
     storage: sessionStorageOrNull(),
   });
   if (!play) return;
 
+  playSplash(prefs.sound);
+}
+
+/** Plays the intro now, whatever the intro setting and whether it already played this session. Not under reduced motion. */
+export function replaySplash(): void {
+  if (prefersReducedMotion() || document.querySelector(".splash")) return;
+
+  playSplash(readIntroPrefs(localStorageOrNull()).sound);
+}
+
+function playSplash(withSound: boolean): void {
   const overlay = document.createElement("div");
   overlay.className = "splash";
   overlay.setAttribute("aria-hidden", "true");
@@ -29,9 +53,13 @@ export function showSplash(): void {
   const logo = document.createElement("harness-logo");
   logo.setAttribute("version", "short");
   logo.setAttribute("autoplay", "");
-  // The logo fetches its sound itself and stays silent when it is blocked or fails, so the app never waits for it.
-  logo.setAttribute("sound", "");
-  logo.setAttribute("sound-url", "/brand/sound.wav");
+  // In a browser the logo fetches its sound itself and stays silent when it is blocked or fails, so the app never
+  // waits for it. The app's webview blocks web audio before a gesture, so the app plays the sound natively instead.
+  const native = isShell();
+  if (withSound && !native) {
+    logo.setAttribute("sound", "");
+    logo.setAttribute("sound-url", "/brand/sound.wav");
+  }
   logo.style.width = "160px";
   overlay.append(logo);
   document.body.append(overlay);
@@ -45,6 +73,7 @@ export function showSplash(): void {
     overlay.remove();
   };
   const skip = () => {
+    if (native && withSound) void launchSound(false);
     const player = logo as { skip?: unknown };
     if (typeof player.skip === "function") player.skip();
     else remove();
@@ -69,4 +98,5 @@ export function showSplash(): void {
   overlay.addEventListener("click", skip);
   window.addEventListener("keydown", onKey, true);
   timers.push(setTimeout(remove, MAX_MS));
+  if (native && withSound) void launchSound(true);
 }

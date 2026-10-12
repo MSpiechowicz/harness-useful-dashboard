@@ -181,7 +181,7 @@
               <li>
                 <button
                   type="button"
-                  class="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1.5 rounded-lg px-2 py-2 text-left hover:bg-surface-2"
+                  class="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1.5 rounded-lg px-2 py-2 text-left hover:bg-hover"
                   title="{branchName(r)} · {r.projectLabel}"
                   onclick={() => navigate("branches", r.id)}
                 >

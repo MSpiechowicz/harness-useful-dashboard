@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bell, Check, Cloud, Copy, Download, ExternalLink, FileText, FileUp, Info, Loader, Plus, Power, RefreshCw, Shrink, Tags, Trash2, TriangleAlert, Users } from "@lucide/svelte";
+  import { Bell, Check, Cloud, Copy, Download, ExternalLink, FileText, FileUp, Info, Loader, Plus, Play, Power, RefreshCw, Shrink, Tags, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import FolderField from "../components/FolderField.svelte";
@@ -16,7 +16,10 @@
   import { decimal, relative } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
-  import { checkUpdate, installUpdate, updater } from "../lib/update.svelte.ts";
+  import { isShell } from "../lib/shell.ts";
+  import { replaySplash } from "../lib/splash.ts";
+  import { store } from "../lib/state.svelte.ts";
+  import { checkUpdate, installText, installUpdate, updater } from "../lib/update.svelte.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
   type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
@@ -26,7 +29,6 @@
     dbPath: string;
     journalMode: "auto" | "wal" | "delete";
     userName: string;
-    openMode: "app" | "browser" | "none";
     scanIntervalSec: number;
     promptTextLimit: number;
     detailRetentionMonths?: number;
@@ -72,6 +74,16 @@
   ];
   /** Where plan limits can be read from (see Live). */
   const LIMIT_SOURCES: LimitKey[] = ["claude", "codex", "copilot", "opencode", "pi", "omp"];
+
+  // The intro can't replay while the system asks for less motion, and the button follows that setting live.
+  let reducedMotion = $state(matchMedia("(prefers-reduced-motion: reduce)").matches);
+  $effect(() => {
+    const query = matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => (reducedMotion = query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  });
 
   let cfg = $state<Config | null>(null);
   let currentDb = $state("");
@@ -362,7 +374,6 @@
       const clean = (a: string[]) => a.map((x) => x.trim()).filter(Boolean);
       const r = await send<Settings>("/api/settings", {
         userName: cfg.userName,
-        openMode: cfg.openMode,
         scanIntervalSec: Number(cfg.scanIntervalSec),
         promptTextLimit: Number(cfg.promptTextLimit),
         checkUpdates: cfg.checkUpdates,
@@ -412,16 +423,14 @@
   // Shared with the sidebar banner: a check here shows there too, and both can install.
   const update = $derived(updater.status);
   let checked = $state(false);
-  const updateText = $derived(
-    updater.message ??
-      (!update || (!checked && !update.available)
-        ? ""
-        : update.error
-          ? t("update.failed", { error: update.error })
-          : update.available
-            ? t("update.available", { v: update.latest })
-            : t("settings.upToDate")),
-  );
+  const updateText = $derived.by(() => {
+    if (updater.message) return updater.message;
+    if (updater.installing) return installText();
+    if (!update || (!checked && !update.available)) return "";
+    if (update.error) return t("update.failed", { error: update.error });
+    if (update.available) return t("update.available", { v: update.latest });
+    return t("settings.upToDate");
+  });
 
   // Which scan is running, so its button spins and counts the files (from the scan progress the server streams).
   let scanning = $state<"quick" | "full" | null>(null);
@@ -541,16 +550,17 @@
     <Card title={t("settings.general")} subtitle={t("settings.generalHint")} divided>
       <SettingRow label={t("settings.language")} hint={t("settings.languageHint")}><LangPicker wide /></SettingRow>
       <SettingRow label={t("settings.theme")} hint={t("settings.themeHint")}><ThemeToggle wide /></SettingRow>
+      <SettingRow label={t("settings.intro")} hint={t("settings.introHint")}>
+        <Switch checked={store.intro} label={t("settings.intro")} onchange={(on) => store.setIntro(on)} />
+      </SettingRow>
+      <SettingRow label={t("settings.introSound")} hint={t("settings.introSoundHint")}>
+        <Switch checked={store.introSound} label={t("settings.introSound")} onchange={(on) => store.setIntroSound(on)} />
+      </SettingRow>
+      <SettingRow label={t("settings.introReplay")} hint={reducedMotion ? t("settings.introReplayMotion") : t("settings.introReplayHint")}>
+        <button class="btn" onclick={replaySplash} disabled={reducedMotion}><Play size={14} />{t("settings.introReplayButton")}</button>
+      </SettingRow>
       <SettingRow label={t("settings.userName")} hint={t("settings.userNameHint")}>
         <input class="input w-full" bind:value={cfg.userName} aria-label={t("settings.userName")} />
-      </SettingRow>
-      <SettingRow label={t("settings.openMode")} hint={t("settings.openModeHint")}>
-        <Dropdown
-          full
-          label={t("settings.openMode")}
-          bind:value={cfg.openMode}
-          options={(["app", "browser", "none"] as const).map((v) => ({ value: v, label: t(`settings.openMode.${v}`) }))}
-        />
       </SettingRow>
       <SettingRow label={t("settings.scanInterval")} hint={t("settings.scanIntervalHint")}>
         <NumberField bind:value={cfg.scanIntervalSec} unit={t("settings.unit.seconds")} label={t("settings.scanInterval")} />
@@ -715,7 +725,7 @@
                   />
                 </div>
                 <div class="w-40 shrink-0"><NumberField bind:value={row.cap} unit="USD" label={t("settings.budgetMonthly")} /></div>
-                <button class="btn !w-8 shrink-0 justify-center !px-0" aria-label={t("common.remove")} onclick={() => (projectBudgets = projectBudgets.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+                <button class="btn btn-icon" aria-label={t("common.remove")} onclick={() => (projectBudgets = projectBudgets.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
               </div>
             {/each}
             <button class="btn" onclick={() => (projectBudgets = [...projectBudgets, { project: "", cap: 0 }])}><Plus size={14} />{t("settings.budgetAddProject")}</button>
@@ -839,7 +849,7 @@
                 <td class="num"><input class="input w-20 text-right" type="number" step="0.001" bind:value={r.cacheRead} placeholder="auto" /></td>
                 <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite5m} placeholder="auto" /></td>
                 <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite1h} placeholder="auto" /></td>
-                <td><button class="btn !w-8 justify-center !px-0" aria-label={t("common.remove")} onclick={() => (userRules = userRules.filter((_, j) => j !== i))}><Trash2 size={14} /></button></td>
+                <td><button class="btn btn-icon" aria-label={t("common.remove")} onclick={() => (userRules = userRules.filter((_, j) => j !== i))}><Trash2 size={14} /></button></td>
               </tr>
             {:else}
               <tr><td colspan="7" class="!py-5 text-center text-xs text-muted">{t("settings.noRules")}</td></tr>
@@ -873,14 +883,14 @@
 
     <Card title={t("settings.app")} subtitle={t("settings.appHint")} divided>
       <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={updateText || live.status?.platform}>
-        {#if update?.available && update.canSelfUpdate && !updater.message}
+        {#if update?.available && isShell() && (!updater.message || !updater.installing)}
           <button class="btn btn-primary" onclick={installUpdate} disabled={updater.installing}>
             {#if updater.installing}<Loader size={14} class="animate-spin" />{t("update.installing")}{:else}<Download size={14} />{t("update.install")}{/if}
           </button>
-        {:else if update?.available && update.releaseUrl && !update.canSelfUpdate}
+        {:else if update?.available && update.releaseUrl && !isShell()}
           <a class="btn" href={update.releaseUrl} target="_blank" rel="noreferrer"><Download size={14} />{t("update.manual")}</a>
         {/if}
-        <button class="btn" onclick={checkNow}><RefreshCw size={14} />{t("settings.checkNow")}</button>
+        <button class="btn" onclick={checkNow} disabled={updater.installing}><RefreshCw size={14} />{t("settings.checkNow")}</button>
       </SettingRow>
       <SettingRow label={t("settings.checkUpdates")} hint={t("settings.checkUpdatesHint")}>
         <Switch bind:checked={cfg.checkUpdates} label={t("settings.checkUpdates")} onchange={() => save()} />

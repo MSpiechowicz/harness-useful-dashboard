@@ -50,7 +50,7 @@
             />
           </div>
           <input class="input w-40 shrink-0" bind:value={row.tag} maxlength="32" autocomplete="off" aria-label={t("settings.tagRuleTag")} placeholder={t("settings.tagRuleTag")} />
-          <button class="btn !w-8 shrink-0 justify-center !px-0" aria-label={t("common.remove")} onclick={() => (rows = rows.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+          <button class="btn btn-icon" aria-label={t("common.remove")} onclick={() => (rows = rows.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
         </div>
       {/each}
       <button class="btn" onclick={() => (rows = [...rows, { project: "", tag: "" }])}><Plus size={14} />{t("settings.tagRuleAdd")}</button>

@@ -452,7 +452,7 @@
                     <!-- Down when closed, up when open, as in the activity table. The count is every subagent in the window. -->
                     <button
                       type="button"
-                      class="btn -my-1 !h-7 !gap-1 !px-2 tabular"
+                      class="btn -my-1 !gap-1 !px-2 tabular"
                       aria-expanded={opened}
                       aria-label={`${t(opened ? "live.runs.hide" : "live.runs.show")} (${s.runCount})`}
                       title={t(opened ? "live.runs.hide" : "live.runs.show")}
@@ -569,7 +569,7 @@
                     <!-- Down, not right: a right chevron is the pager's "next page". -->
                     <button
                       type="button"
-                      class="btn !h-7 !px-2"
+                      class="btn btn-icon"
                       aria-expanded={expanded}
                       aria-label={t(expanded ? "friction.hideError" : "friction.showError")}
                       title={t(expanded ? "friction.hideError" : "friction.showError")}

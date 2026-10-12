@@ -13,7 +13,7 @@
   let { wide = false }: { wide?: boolean } = $props();
 </script>
 
-<div class="seg" class:wide role="radiogroup" aria-label={t("settings.theme")}>
+<div class="seg" class:icons={!wide} class:wide role="radiogroup" aria-label={t("settings.theme")}>
   {#each options as o (o.value)}
     <button
       role="radio"
@@ -22,7 +22,7 @@
       aria-label={t(`settings.theme.${o.value}` as "settings.theme.system")}
       onclick={() => store.setTheme(o.value)}
     >
-      <o.icon size={13} />
+      <o.icon size={14} />
       {#if wide}{t(`settings.theme.${o.value}` as "settings.theme.system")}{/if}
     </button>
   {/each}

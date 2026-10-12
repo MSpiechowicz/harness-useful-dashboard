@@ -22,7 +22,8 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "bun run build:all"
+        "prepareCmd": "bun scripts/set-version.ts ${nextRelease.version}",
+        "successCmd": "printf 'released=true\\nversion=%s\\n' '${nextRelease.version}' >> \"$GITHUB_OUTPUT\""
       }
     ],
     [
@@ -30,6 +31,8 @@
       {
         "assets": [
           "package.json",
+          "Cargo.toml",
+          "Cargo.lock",
           "CHANGELOG.md"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
@@ -38,44 +41,7 @@
     [
       "@semantic-release/github",
       {
-        "assets": [
-          {
-            "path": "dist/harness-dashboard-darwin-arm64",
-            "label": "macOS (Apple Silicon)"
-          },
-          {
-            "path": "dist/harness-dashboard-darwin-x64",
-            "label": "macOS (Intel)"
-          },
-          {
-            "path": "dist/harness-dashboard-linux-x64",
-            "label": "Linux x64"
-          },
-          {
-            "path": "dist/harness-dashboard-linux-arm64",
-            "label": "Linux arm64"
-          },
-          {
-            "path": "dist/harness-dashboard-windows-x64.exe",
-            "label": "Windows x64"
-          },
-          {
-            "path": "assets/icons/harness-dashboard.svg",
-            "label": "App icon (Linux)"
-          },
-          {
-            "path": "assets/icons/harness-dashboard.icns",
-            "label": "App icon (macOS)"
-          },
-          {
-            "path": "assets/icons/harness-dashboard.ico",
-            "label": "App icon (Windows)"
-          },
-          {
-            "path": "dist/checksums.txt",
-            "label": "SHA-256 checksums"
-          }
-        ],
+        "draftRelease": true,
         "successComment": false,
         "failComment": false,
         "releasedLabels": false

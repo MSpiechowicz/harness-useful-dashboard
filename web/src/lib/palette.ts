@@ -131,7 +131,7 @@ function shadeSequence(provider: Provider, mode: Mode): ShadeSequence {
     for (const cf of [space.chroma[0], (space.chroma[0] + space.chroma[1]) / 2, space.chroma[1]])
       for (const dh of [-space.hue, -space.hue / 2, 0, space.hue / 2, space.hue]) {
         const hex = oklchToHex(L, c * cf, h + dh);
-        if (contrast(hex, SURFACE[mode]) < 2 || oklch(hex).c < 0.075 || deltaE(hex, OTHER[mode][0]!) < SHADE_FROM_OTHER) continue;
+        if (contrast(hex, SHADE_SURFACE[mode]) < 2 || oklch(hex).c < 0.075 || deltaE(hex, OTHER[mode][0]!) < SHADE_FROM_OTHER) continue;
         if (hex === base || rest.some((r) => r.hex === hex) || taken.some((t) => deltaE(hex, t) < SHADE_MARGIN)) continue;
         const labs = visionLabs(hex);
         rest.push({ hex, labs, dist: worstDeltaE(labs, baseLabs) });
@@ -174,7 +174,13 @@ export const TOKEN_TYPES = ["cacheRead", "cacheWrite", "input", "output"] as con
 export const OTHER: Family = { light: ["#b5b3ab"], dark: ["#5f5e59"] };
 
 /** Chart surfaces the palette is checked against (the --surface token in app.css). */
-export const SURFACE: Record<Mode, string> = { light: "#fcfcfb", dark: "#1a1a19" };
+export const SURFACE: Record<Mode, string> = { light: "#fcfcfb", dark: "#161618" };
+
+/**
+ * The surface the model shades were generated against. Dark was #1a1a19 before the Graphite theme: keeping it here
+ * means the shades, and so the colors people know their models by, did not move with the theme.
+ */
+export const SHADE_SURFACE: Record<Mode, string> = { light: "#fcfcfb", dark: "#1a1a19" };
 
 /** The general pool in hand-out order: every family's main color, then every family's variant. */
 export function generalPool(mode: Mode): string[] {

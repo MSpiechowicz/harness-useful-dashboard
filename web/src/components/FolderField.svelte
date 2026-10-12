@@ -50,7 +50,7 @@
 
 <div class="flex w-full min-w-0 items-center gap-2">
   <input class="input min-w-0 flex-1 {cls}" bind:value {placeholder} {disabled} aria-label={label} spellcheck="false" autocomplete="off" />
-  <button class="btn shrink-0 {iconOnly ? '!w-8 justify-center !px-0' : ''}" aria-label={iconOnly ? t("folder.browse") : undefined} title={t("folder.browse")} onclick={browse} disabled={disabled || waiting}>
+  <button class="btn shrink-0 {iconOnly ? 'btn-icon' : ''}" aria-label={iconOnly ? t("folder.browse") : undefined} title={t("folder.browse")} onclick={browse} disabled={disabled || waiting}>
     {#if waiting}<Spinner size={14} />{:else}<FolderOpen size={14} />{/if}{#if !iconOnly}{t("folder.browse")}{/if}
   </button>
 </div>

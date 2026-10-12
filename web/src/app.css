@@ -23,6 +23,8 @@
   /* Fill under white text for destructive buttons (delete): the error red, 6.4:1 against white. */
   --danger-fill: #b42323;
   --danger-fill-hover: #962020;
+  /* The switch track under the white knob. Dark takes the darker fill: the light accent behind a white knob is only 2.5:1. */
+  --switch-on: var(--accent);
   /* Neutral ink for single-measure marks (totals, inline bars): color in charts always means identity. */
   --data: #76756f;
   --good-ink: #006300;
@@ -33,6 +35,29 @@
   --popover-hover: #f3f3f0;
   --shadow-pop: 0 2px 6px rgba(11, 11, 11, 0.06), 0 12px 32px rgba(11, 11, 11, 0.12);
 
+  /* Surfaces and strokes the Graphite theme (dark) sets apart from the light one. Light keeps today's look: the
+     tokens below equal what the components used before they existed. */
+  --border-strong: var(--border);
+  /* The wash behind a hovered row, menu item or ghost control. */
+  --hover-wash: var(--surface-2);
+  /* The sidebar and the header bar. Dark lays the surface at 70% over the page, like the desktop app's rail. */
+  --chrome-side: var(--surface);
+  --chrome-solid: var(--surface);
+  --chrome-bar: color-mix(in oklab, var(--page) 85%, transparent);
+  /* The outline of the current menu item. */
+  --btn-bg: var(--surface);
+  --btn-bg-hover: var(--surface-2);
+  --control-shadow: none;
+  --primary-shadow: none;
+  --field-bg: var(--surface);
+  --switch-off: var(--surface-3);
+  --seg-active: var(--surface);
+  --seg-active-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  /* Menus, dialogs and chart tooltips: glass in dark, plain in light. */
+  --glass-filter: none;
+  --scrim: rgba(0, 0, 0, 0.3);
+  --scrim-filter: none;
+  --tip-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
 
   --seq-0: #f0efec;
   --seq-1: #cde2fb;
@@ -52,28 +77,51 @@
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-2: #232321;
-    --surface-3: #2c2c2a;
-    --ink: #ffffff;
-    --ink-2: #c3c2b7;
-    --muted: #999790;
-    --grid: #2c2c2a;
-    --axis: #383835;
-    --border: rgba(255, 255, 255, 0.1);
-    --accent: #3987e5;
-    --accent-ink: #86b6ef;
-    --accent-wash: rgba(57, 135, 229, 0.16);
+    --page: #0f0f11;
+    --surface: #161618;
+    --surface-2: #1c1c1f;
+    --surface-3: #26262a;
+    --ink: #ededef;
+    --ink-2: #b4b4bc;
+    --muted: #8e8e98;
+    --grid: #26262a;
+    --axis: #313136;
+    --border: rgba(255, 255, 255, 0.08);
+    --accent: #5ea8ff;
+    --accent-ink: #79b8ff;
+    --accent-wash: rgba(94, 168, 255, 0.12);
+    --accent-fill: #2563eb;
+    --accent-fill-hover: #1d4ed8;
+    --danger-fill: #c9302c;
+    --danger-fill-hover: #a82824;
+    --switch-on: var(--accent-fill);
     --data: #a3a29a;
     --good-ink: #0ca30c;
     --bad-ink: #e66767;
     --warn-ink: #e0a23a;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --popover: #232321;
-    --popover-hover: #2f2f2d;
-    --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
-    --seq-0: #232321;
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --surface-4: #313136;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    --popover: rgba(24, 24, 27, 0.94);
+    --popover-hover: var(--hover-wash);
+    --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    --hover-wash: rgba(255, 255, 255, 0.05);
+    --chrome-side: color-mix(in oklab, var(--surface) 70%, transparent);
+    --chrome-solid: color-mix(in srgb, var(--surface) 70%, var(--page));
+    --chrome-bar: var(--chrome-side);
+    --btn-bg: var(--surface-2);
+    --btn-bg-hover: var(--surface-3);
+    --control-shadow: var(--shadow);
+    --primary-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    --field-bg: var(--surface-2);
+    --switch-off: var(--surface-4);
+    --seg-active: var(--surface-4);
+    --seg-active-shadow: 0 0 0 1px var(--border-strong), var(--shadow);
+    --glass-filter: blur(24px);
+    --scrim: rgba(0, 0, 0, 0.6);
+    --scrim-filter: blur(4px);
+    --tip-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    --seq-0: #1c1c1f;
     --seq-1: #104281;
     --seq-2: #184f95;
     --seq-3: #1c5cab;
@@ -86,28 +134,51 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-2: #232321;
-  --surface-3: #2c2c2a;
-  --ink: #ffffff;
-  --ink-2: #c3c2b7;
-  --muted: #999790;
-  --grid: #2c2c2a;
-  --axis: #383835;
-  --border: rgba(255, 255, 255, 0.1);
-  --accent: #3987e5;
-  --accent-ink: #86b6ef;
-  --accent-wash: rgba(57, 135, 229, 0.16);
+  --page: #0f0f11;
+  --surface: #161618;
+  --surface-2: #1c1c1f;
+  --surface-3: #26262a;
+  --ink: #ededef;
+  --ink-2: #b4b4bc;
+  --muted: #8e8e98;
+  --grid: #26262a;
+  --axis: #313136;
+  --border: rgba(255, 255, 255, 0.08);
+  --accent: #5ea8ff;
+  --accent-ink: #79b8ff;
+  --accent-wash: rgba(94, 168, 255, 0.12);
+  --accent-fill: #2563eb;
+  --accent-fill-hover: #1d4ed8;
+  --danger-fill: #c9302c;
+  --danger-fill-hover: #a82824;
+  --switch-on: var(--accent-fill);
   --data: #a3a29a;
   --good-ink: #0ca30c;
   --bad-ink: #e66767;
   --warn-ink: #e0a23a;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --popover: #232321;
-  --popover-hover: #2f2f2d;
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --seq-0: #232321;
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --surface-4: #313136;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --popover: rgba(24, 24, 27, 0.94);
+  --popover-hover: var(--hover-wash);
+  --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --hover-wash: rgba(255, 255, 255, 0.05);
+  --chrome-side: color-mix(in oklab, var(--surface) 70%, transparent);
+  --chrome-solid: color-mix(in srgb, var(--surface) 70%, var(--page));
+  --chrome-bar: var(--chrome-side);
+  --btn-bg: var(--surface-2);
+  --btn-bg-hover: var(--surface-3);
+  --control-shadow: var(--shadow);
+  --primary-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --field-bg: var(--surface-2);
+  --switch-off: var(--surface-4);
+  --seg-active: var(--surface-4);
+  --seg-active-shadow: 0 0 0 1px var(--border-strong), var(--shadow);
+  --glass-filter: blur(24px);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --scrim-filter: blur(4px);
+  --tip-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --seq-0: #1c1c1f;
   --seq-1: #104281;
   --seq-2: #184f95;
   --seq-3: #1c5cab;
@@ -127,6 +198,13 @@
   --color-muted: var(--muted);
   --color-grid: var(--grid);
   --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-hover: var(--hover-wash);
+  --color-popover-hover: var(--popover-hover);
+  --color-chrome-side: var(--chrome-side);
+  --color-chrome-solid: var(--chrome-solid);
+  --color-chrome-bar: var(--chrome-bar);
+  --color-scrim: var(--scrim);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-accent-wash: var(--accent-wash);
@@ -155,6 +233,18 @@ body {
 body {
   margin: 0;
   min-height: 100vh;
+}
+
+/* The Graphite theme tints a text selection blue, like the desktop app. Light keeps the browser's own. */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) ::selection {
+    background: rgba(59, 130, 246, 0.32);
+    color: inherit;
+  }
+}
+:root[data-theme="dark"] ::selection {
+  background: rgba(59, 130, 246, 0.32);
+  color: inherit;
 }
 
 /* One focus ring for everything reached by keyboard. Components may draw their own closer one. */
@@ -199,6 +289,13 @@ body {
   border-radius: 14px;
   box-shadow: var(--shadow);
 }
+/* A dialog's glass: over the page, with the stronger hairline menus and dialogs share. After .card, so it wins. */
+.card.glass {
+  background: var(--popover);
+  border-color: var(--border-strong);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
 
 .btn {
   display: inline-flex;
@@ -207,8 +304,9 @@ body {
   height: 2rem;
   padding: 0 0.75rem;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  background: var(--btn-bg);
+  box-shadow: var(--control-shadow);
   color: var(--ink);
   font-size: 0.8125rem;
   font-weight: 500;
@@ -216,15 +314,26 @@ body {
   transition: background 0.12s;
 }
 .btn:hover {
-  background: var(--surface-2);
+  background: var(--btn-bg-hover);
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
+/* A button with only an icon: always a 2rem square, the same size as every other control. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+}
 .btn-primary {
   background: var(--accent-fill);
   border-color: transparent;
+  box-shadow: var(--primary-shadow);
   color: #fff;
 }
 .btn-primary:hover {
@@ -233,6 +342,7 @@ body {
 .btn-danger {
   background: var(--danger-fill);
   border-color: transparent;
+  box-shadow: var(--primary-shadow);
   color: #fff;
 }
 .btn-danger:hover {
@@ -244,10 +354,13 @@ body {
   padding: 0 0.6rem;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--field-bg);
   color: var(--ink);
   font-size: 0.8125rem;
   min-width: 0;
+}
+.input:hover {
+  border-color: var(--border-strong);
 }
 /* The search field folded to its icon (SearchInput.svelte), the size of an icon button. Its open width is always
    kept, so nothing beside it moves: opened, the field grows to the left within it, its icon sliding to the start.
@@ -296,7 +409,7 @@ body {
   color: transparent;
 }
 .search-fold:not(.open) .input:hover {
-  background: var(--surface-2);
+  background: var(--btn-bg-hover);
 }
 .search-fold:not(.open) .input::-webkit-search-cancel-button {
   display: none;
@@ -319,9 +432,11 @@ body {
   margin-top: 4px;
   padding: 4px;
   border-radius: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--popover);
   box-shadow: var(--shadow-pop);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
 }
 .popover-item {
   display: flex;
@@ -351,7 +466,7 @@ body {
   font-weight: 500;
 }
 
-/* An on/off switch. The knob is white on the accent track in both themes, like a system switch. */
+/* An on/off switch. The knob is white on the --switch-on track in both themes, like a system switch. */
 .switch {
   position: relative;
   display: inline-block;
@@ -359,8 +474,8 @@ body {
   height: 1rem;
   flex-shrink: 0;
   border-radius: 999px;
-  background: var(--surface-3);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--switch-off);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
   transition: background 0.15s;
 }
 .switch::after {
@@ -377,7 +492,7 @@ body {
     background 0.15s;
 }
 .switch.on {
-  background: var(--accent);
+  background: var(--switch-on);
   box-shadow: none;
 }
 .switch.on::after {
@@ -411,7 +526,7 @@ button.switch:focus-visible {
 }
 .seg button {
   white-space: nowrap;
-  height: 1.6rem;
+  height: 1.625rem;
   padding: 0 0.6rem;
   border-radius: 7px;
   font-size: 0.75rem;
@@ -438,9 +553,37 @@ button.switch:focus-visible {
 }
 .seg button[aria-pressed="true"],
 .seg button[aria-checked="true"] {
-  background: var(--surface);
+  background: var(--seg-active);
   color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--seg-active-shadow);
+}
+/* Icon-only choices: every segment is a 2rem square, so the group is as high as a button. The hairline is an outline
+   drawn inside that box (not a border around it), and the chosen segment fills its whole square. */
+.seg.icons {
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+.seg.icons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 0;
+}
+.seg.icons button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+.seg.icons button:last-child {
+  border-radius: 0 8px 8px 0;
+}
+.seg.icons button[aria-pressed="true"],
+.seg.icons button[aria-checked="true"] {
+  box-shadow: none;
 }
 
 table.data {
@@ -528,7 +671,7 @@ table.data td {
   vertical-align: middle;
 }
 table.data tbody tr:hover {
-  background: var(--surface-2);
+  background: var(--hover-wash);
 }
 /* Edge-to-edge tables line their outer columns up with the card's 20px header padding,
    and the card border closes the table, so the last row needs no rule of its own. */
@@ -672,108 +815,6 @@ table.data th.num {
   background: var(--surface-3);
   border-radius: 10px;
   border: 2px solid var(--page);
-}
-
-/* Shown only on paper (the page's range and filters under its title). */
-.print-only {
-  display: none;
-}
-
-/* Printing: the page as a report. Only the content, the full width of the paper, dark ink on white whatever the theme,
-   without the controls that only work on screen. The store also redraws the charts light before printing. */
-@media print {
-  :root,
-  :root[data-theme] {
-    color-scheme: light;
-    --page: #fff;
-    --surface: #fff;
-    --surface-2: #f3f3f0;
-    --surface-3: #e9e8e3;
-    --ink: #0b0b0b;
-    --ink-2: #52514e;
-    --muted: #696863;
-    --grid: #e1e0d9;
-    --axis: #c3c2b7;
-    --border: rgba(11, 11, 11, 0.14);
-    --accent-ink: #1c5cab;
-    --accent-wash: rgba(42, 120, 214, 0.1);
-    --good-ink: #006300;
-    --bad-ink: #b42323;
-    --warn-ink: #9a5800;
-    --shadow: none;
-  }
-  @page {
-    margin: 12mm;
-  }
-  html,
-  body {
-    background: #fff;
-    /* Backgrounds that carry meaning (bars, heat cells, swatches) print as they show. */
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-  html {
-    scrollbar-gutter: auto;
-  }
-  .print-only {
-    display: block;
-  }
-
-  /* The sidebar (with the update notice), the filter bar above the content, the skip link, the drawer's backdrop. */
-  aside,
-  header:has(+ main),
-  .skip-link,
-  body button.fixed {
-    display: none !important;
-  }
-  main {
-    max-width: none !important;
-    padding: 0 !important;
-  }
-
-  /* On-screen controls: card actions (exports, view toggles, sort), menus, search fields, pagers, row disclosures. */
-  .card > header > :last-child,
-  .popover,
-  button[aria-haspopup],
-  button[aria-expanded],
-  label:has(> input[type="search"]),
-  .table-footer nav,
-  .pager {
-    display: none !important;
-  }
-
-  .card {
-    box-shadow: none;
-    break-inside: avoid;
-  }
-  h1,
-  h2 {
-    break-after: avoid;
-  }
-
-  /* Tables in full: no scrolling boxes, no sticky or hovered rows, columns fit the paper. */
-  .card .overflow-auto,
-  .card .overflow-x-auto {
-    max-height: none !important;
-    overflow: visible !important;
-  }
-  table.data.fixed-cols {
-    min-width: 0;
-  }
-  table.data th {
-    position: static;
-  }
-  table.data th .col-resize {
-    display: none;
-  }
-  table.data tbody tr:hover {
-    background: transparent;
-  }
-
-  /* Chart canvases are resized to the paper (Chart.svelte). Until then they never run past the card. */
-  canvas {
-    max-width: 100% !important;
-  }
 }
 
 /* The launch splash: the logo animation over the app until it has played, see lib/splash.ts. */

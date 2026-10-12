@@ -137,7 +137,7 @@ describe("routes", () => {
     mkdirSync(join(root, "home"), { recursive: true });
     writeFileSync(join(root, "home", "config.json"), JSON.stringify({ scanIntervalSec: 0, sources: { enabled: { claude: false, codex: false, omp: false, pi: false, opencode: false, zed: false, cline: false, roo: false, kilo: false } } }));
     app = new App(join(root, "test.db"));
-    handle = createHandler(app, { get: async () => null }, { restart() {}, shutdown() {} }, { token, port: 4317 }, picker);
+    handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token, port: 4317 }, picker);
   });
   afterAll(() => {
     app.close();

@@ -26,10 +26,10 @@ import { timing } from "../core/timing.ts";
 import { CONTENT_TYPE, metricsText } from "../core/metrics.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
-import { cookieName, cookieValue, sameToken } from "./auth.ts";
+import { cookieName, cookieValue, HELLO_NONCE, type Hello, helloProof, sameToken } from "./auth.ts";
 import { notify } from "./notify.ts";
 import { type FolderPicker, PickerBusy, folderPicker, listDirs, nativeAvailable } from "./pickFolder.ts";
-import { applyUpdate, checkForUpdate, isCompiledBinary } from "./update.ts";
+import { checkForUpdate, isCompiledBinary } from "./update.ts";
 
 const DIMENSIONS: Dimension[] = ["provider", "project", "user", "model", "skill", "agent", "session", "prompt", "host"];
 const BUCKETS: Bucket[] = ["hour", "day", "week", "month"];
@@ -125,11 +125,11 @@ export async function loadAssets(): Promise<AssetSource> {
 export interface ServerAuth {
   token: string;
   port: number;
+  /** Served to the app shell's window, whose page calls the shell over Tauri's IPC (see securityHeaders). */
+  shell?: boolean;
 }
 
 export interface ServerHooks {
-  /** Called after a self-update installed a new binary; should restart the process. */
-  restart(): void;
   /** Stops the background server (the "Quit" button). */
   shutdown(): void;
 }
@@ -170,22 +170,21 @@ function isLoopbackOrigin(origin: string): boolean {
 }
 
 /**
- * Sent with every response. No other page may frame the app (clickjacking onto Quit or Install & restart), scripts
- * only come from the app itself, and nothing about it leaks through referrers or cross-origin reads.
+ * Sent with every response. No other page may frame the app (clickjacking onto Quit), scripts only come from the app
+ * itself, and nothing about it leaks through referrers or cross-origin reads. In the app shell the page also talks to
+ * the shell (its updater and launch sound), which Tauri carries over the ipc: scheme, or http://ipc.localhost on Windows.
  */
-const SECURITY_HEADERS: Record<string, string> = {
-  "Content-Security-Policy":
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-  "X-Frame-Options": "DENY",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
-  "Cross-Origin-Opener-Policy": "same-origin",
-  "Cross-Origin-Resource-Policy": "same-origin",
-};
-
-function secured(res: Response): Response {
-  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
-  return res;
+export function securityHeaders(shell = false): Record<string, string> {
+  const connect = shell ? "'self' ipc: http://ipc.localhost" : "'self'";
+  return {
+    "Content-Security-Policy":
+      `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src ${connect}; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+  };
 }
 
 /** A request's JSON body, or undefined when it isn't JSON or is longer than `maxChars`. */
@@ -212,11 +211,10 @@ function noteError(result: { error: string }): Response {
 }
 
 /**
- * What a read-only database still allows: leaving, updating the app, and the settings and tip states, which live in the
- * config file (a switch to another database included). The folder picker only serves that switch. Everything else
- * answers 409.
+ * What a read-only database still allows: leaving, and the settings and tip states, which live in the config file (a
+ * switch to another database included). The folder picker only serves that switch. Everything else answers 409.
  */
-const READ_ONLY_ROUTES = new Set(["/api/shutdown", "/api/update", "/api/language", "/api/settings", "/api/tips/state", "/api/pick-folder"]);
+const READ_ONLY_ROUTES = new Set(["/api/shutdown", "/api/language", "/api/settings", "/api/tips/state", "/api/pick-folder"]);
 
 const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const optionalPrice = (v: unknown): number | null => (isPrice(v) ? v : null);
@@ -226,8 +224,12 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
   const signedIn = (req: Request) =>
     !auth || sameToken(req.headers.get("authorization")?.replace(/^Bearer /, ""), auth.token) || sameToken(cookieValue(req.headers.get("cookie"), cookie), auth.token);
 
+  const headers = Object.entries(securityHeaders(auth?.shell));
+
   return async function handle(req: Request): Promise<Response> {
-    return secured(await respond(req));
+    const res = await respond(req);
+    for (const [k, v] of headers) res.headers.set(k, v);
+    return res;
   };
 
   async function respond(req: Request): Promise<Response> {
@@ -247,6 +249,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
       });
     }
     if (path === "/metrics") return metrics(req);
+    if (auth && path === "/api/hello" && req.method === "GET") return hello(sp.get("nonce"), auth);
     if (path === "/api/events" && !signedIn(req)) return signedOutEvents();
     if (path.startsWith("/api/") && !signedIn(req)) return error("unauthorized", 401);
 
@@ -275,6 +278,14 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
     const claudeLive = liveClaudeSessions(claudeRoots(app.cfg));
     const body = metricsText({ db: app.db, queries: app.queries, budgets: app.cfg.budgets, projectLabels: cfg.projectLabels, user, host, version: VERSION, lastScanAt: app.lastScanAt, claudeLive });
     return new Response(req.method === "HEAD" ? null : body, { headers: { "Content-Type": CONTENT_TYPE, "Cache-Control": "no-store" } });
+  }
+
+  /** Proves this server holds the token without sending it (see Hello). Open to anyone: it gives nothing away. */
+  function hello(nonce: string | null, auth: ServerAuth): Response {
+    if (!nonce || !HELLO_NONCE.test(nonce)) return error("invalid nonce");
+
+    const body: Hello = { app: "harness-dashboard", version: VERSION, shell: auth.shell === true, proof: helloProof(auth.token, auth.port, nonce) };
+    return Response.json(body, { headers: { "Cache-Control": "no-store" } });
   }
 
   /** A page of a server-paged list: at most 200 rows, or 10000 for an export of the whole list (`export=1`). */
@@ -600,11 +611,6 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/shutdown":
           setTimeout(() => hooks.shutdown(), 100);
           return json({ ok: true });
-        case "/api/update": {
-          const result = await applyUpdate((m) => console.log(`[update] ${m}`));
-          if (result.version !== VERSION) setTimeout(() => hooks.restart(), 300);
-          return json({ ...result, restarting: result.version !== VERSION });
-        }
       }
     }
     return error(`no route for ${method} ${url.pathname}`, 404);

@@ -44,7 +44,7 @@ Made with demo data. [Download the full-quality video](https://raw.githubusercon
 - **Export**: every table and chart's data as CSV or JSON, following the current filters
 - **Claude Code status line**: this session's cost, today's cost and the 5-hour limit, right in Claude Code
 - **MCP server**: agents in Claude Code, Codex, Cursor, Zed or OpenCode can read your usage, budgets and plan limits themselves
-- **English, German, Spanish, French and Polish UI** (English by default), light and dark themes, responsive layout
+- **English, German, Spanish, French and Polish UI** (English by default), light and Graphite (dark) themes, responsive layout
 - **Shared database**: point several machines at one SQLite file on iCloud Drive, Dropbox, OneDrive or a network share
 
 Everything runs locally. Your usage is never uploaded anywhere.
@@ -125,16 +125,21 @@ Everything runs locally. Your usage is never uploaded anywhere.
 
 ## Install
 
+Harness Dashboard is a desktop app. It opens in its own window, lives in the tray when you close it and keeps
+collecting your usage in the background, so budget alerts still arrive. It plays a short launch sound when it opens.
+The `harness-dashboard` command comes with it.
+
 **macOS and Linux**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/MSpiechowicz/harness-useful-dashboard/main/install.sh | sh
 ```
 
-This installs `harness-dashboard` to `~/.local/bin`, adds that directory to your `PATH` (via your shell profile:
-`~/.zshrc`, `~/.bashrc`/`~/.bash_profile`, fish `conf.d` or `~/.profile`) if it isn't already, verifies the release
-checksum (and installs nothing without one) and adds a launcher: an applications-menu entry on Linux, or
-`~/Applications/Harness Dashboard.app` on macOS.
+On Linux this installs the AppImage to `~/.local/lib/harness-dashboard/` and adds an applications-menu entry (x86_64
+and arm64, AppImages need `libfuse2`). On macOS it installs `~/Applications/Harness Dashboard.app`. Both also get the
+`harness-dashboard` command in `~/.local/bin`, which the installer adds to your `PATH` (via your shell profile:
+`~/.zshrc`, `~/.bashrc`/`~/.bash_profile`, fish `conf.d` or `~/.profile`) if it isn't already. It verifies every
+download against the release checksums and installs nothing without them.
 
 **Windows (PowerShell)**
 
@@ -142,27 +147,39 @@ checksum (and installs nothing without one) and adds a launcher: an applications
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/MSpiechowicz/harness-useful-dashboard/main/install.ps1 | iex"
 ```
 
-This installs to `%LOCALAPPDATA%\Programs\harness-dashboard`, adds it to your `PATH` and creates a Start menu
-shortcut.
+This runs the release's installer for the current user (into `%LOCALAPPDATA%\Harness Dashboard`, with a Start menu
+shortcut) and puts the `harness-dashboard` command in `%LOCALAPPDATA%\Programs\harness-dashboard` and on your `PATH`.
 
-Installer options (environment variables): `HARNESS_DASHBOARD_VERSION=v0.2.0` pins a release,
-`HARNESS_DASHBOARD_INSTALL_DIR=…` picks a custom install directory, `HARNESS_DASHBOARD_NO_SHORTCUT=1` skips the launcher,
-and `HARNESS_DASHBOARD_NO_MODIFY_PATH=1` leaves your shell profile untouched (macOS/Linux).
+Installer options (environment variables): `HARNESS_DASHBOARD_VERSION=v1.26.0` pins a release,
+`HARNESS_DASHBOARD_NO_SHORTCUT=1` skips the Linux applications-menu entry and `HARNESS_DASHBOARD_NO_MODIFY_PATH=1`
+leaves your shell profile untouched (macOS/Linux).
+
+**Other downloads.** The [releases page](https://github.com/MSpiechowicz/harness-useful-dashboard/releases) also has
+a `.deb` and `.rpm` (Linux), a `.dmg` (macOS), an `.msi` (Windows) and plain command line binaries named
+`harness-dashboard-cli-<target>`, for example `harness-dashboard-cli-x86_64-unknown-linux-gnu`. The app is not
+code-signed, so macOS and Windows warn on the first start of a manual download.
+
+**Coming from an earlier version.** Earlier versions were a single binary that opened a browser window, and they
+updated themselves. Run the install command above once to move to the app. It replaces the old launcher and the old
+binary, and the app takes over the `harness-dashboard` command from then on. The installer also quits a dashboard
+server from the earlier version that is still running. Your data and settings stay as they are.
+An old install that runs `harness-dashboard update` finds no new binary and points to the releases page.
 
 ### Updating
 
-The app checks GitHub releases every 5 minutes while a window is open. When a new version is out, a banner in the sidebar offers **Install & restart**:
-it downloads the new binary for your platform, verifies its SHA-256 against `checksums.txt`, swaps it in
-place and restarts. Open windows reload on their own. From a terminal:
+The app checks GitHub releases every 5 minutes while its window is open. When a new version is out, a banner in the
+sidebar offers **Install & restart**. It downloads the update for your platform, checks its signature, installs it and
+restarts the app. Turn the check off with **Settings → Check for updates automatically**. From a terminal:
 
 ```sh
-harness-dashboard update          # install the latest release
-harness-dashboard update --check  # only report whether one is available
+harness-dashboard update --check  # report whether a newer release is available
 ```
 
-Re-running the install command also upgrades.
+The command line tool does not install anything. The app updates itself, and the app keeps the `harness-dashboard`
+command in step with it. Re-running the install command also upgrades. A `.deb` or `.rpm` install asks for your
+administrator password when it updates.
 
-Every release binary has a signed build provenance attestation, which proves it was built by this repository's
+Every release file has a signed build provenance attestation, which proves it was built by this repository's
 release workflow from the tagged commit. To check one yourself:
 
 ```sh
@@ -171,24 +188,35 @@ gh attestation verify ~/.local/bin/harness-dashboard --repo MSpiechowicz/harness
 
 ### Uninstalling
 
+Quit the app first (tray menu → **Quit Harness Dashboard**).
+
 ```sh
 rm ~/.local/bin/harness-dashboard
 rm -rf ~/Applications/"Harness Dashboard.app"                                       # macOS
-grep -l '^Icon=harness-dashboard$' ~/.local/share/applications/*.desktop | xargs rm -f  # Linux launchers
-rm -f ~/.local/share/icons/hicolor/scalable/apps/harness-dashboard.svg               # Linux icon
+rm -rf ~/.local/lib/harness-dashboard                                               # Linux AppImage
+rm -f ~/.local/share/applications/harness-dashboard.desktop                         # Linux menu entry
+rm -f ~/.local/share/icons/hicolor/*/apps/harness-dashboard.{png,svg}               # Linux icon
 # data + config (optional):
 rm -rf ~/.config/harness-dashboard                          # Linux
 rm -rf ~/Library/Application\ Support/harness-dashboard     # macOS
 ```
 
-On Windows, delete `%LOCALAPPDATA%\Programs\harness-dashboard`, the Start menu shortcut and `%APPDATA%\harness-dashboard`.
+With a `.deb` or `.rpm`, remove the package instead (`sudo apt remove harness-dashboard` or
+`sudo dnf remove harness-dashboard`).
+
+On Windows, uninstall **Harness Dashboard** under Settings → Apps, then delete `%LOCALAPPDATA%\Programs\harness-dashboard`
+(the command) and `%APPDATA%\harness-dashboard` (your data, optional). Remove the first folder from your user `PATH` too.
 
 ## Usage
 
+Open **Harness Dashboard** from your applications menu, Spotlight or the Start menu. Closing the window hides it to
+the tray and the app keeps running. Quit it from the tray menu, from **Settings → Quit dashboard** or with `Cmd+Q` on
+macOS. Starting it again while it runs brings the window back.
+
+The `harness-dashboard` command is for the terminal:
+
 ```sh
-harness-dashboard                # start in the background and open the app window
-harness-dashboard --browser      # open in your default browser instead
-harness-dashboard --no-open      # just run the server, and print the link to open it with
+harness-dashboard                # run the server without a window and print the sign-in link
 harness-dashboard --db ~/iCloud/harness/usage.db
 harness-dashboard scan [--full]  # ingest once and exit (cron-friendly)
 harness-dashboard import-cursor usage.csv
@@ -198,13 +226,18 @@ harness-dashboard today          # today's cost and usage against yesterday
 harness-dashboard report --range 7d --by model --csv
 harness-dashboard limits --check # exit code 10 near a plan limit or budget, 11 at it
 harness-dashboard digest         # last week as a short Markdown report
+harness-dashboard update --check # is a newer release out
 ```
 
-The dashboard runs a small local server on `127.0.0.1` and opens it in a chrome-less **app window** when a
-Chromium-based browser (Chrome, Edge, Brave, Chromium, Vivaldi) is installed. Otherwise it opens a normal browser tab.
-Starting it again while it's running just opens another window. Use **Settings → Quit dashboard** to stop it.
-Windows open through a sign-in link (`/api/auth?k=…`), which `--no-open` prints instead. A browser that didn't come in
-through it sees the page but none of your data.
+The app runs a small local server on `127.0.0.1` and shows it in its own window. The server is the same one the
+command line starts. The app always starts a server of its own and never reuses one that is already running. If the
+port is taken, the app says so, and a server from a version before the app has to be quit first (the installers do
+that for you). Run without a window (a server or a headless machine), `harness-dashboard` prints an
+`open:` link (`/api/auth?k=…`) for a browser and never opens one itself. A browser that didn't come in through that
+link sees the page but none of your data.
+
+Under **Settings → Theme**, **System** is the default, **Light** is the light theme and **Graphite** the dark one, a
+neutral dark gray with a blue accent.
 
 ### Data sources
 
@@ -759,7 +792,7 @@ databases, and older ones after one Compact, give the space that trimming frees 
 Every data color comes from one palette (`web/src/lib/palette.ts`), and each color means one thing:
 
 - **Reserved.** Each harness has its own color: Claude Code orange, Codex blue, Cursor gold, omp plum, pi teal,
-  OpenCode crimson, Zed indigo, Cline lime, Roo Code magenta, Kilo Code amber, Gemini CLI cyan (slate blue in the dark
+  OpenCode crimson, Zed indigo, Cline lime, Roo Code magenta, Kilo Code amber, Gemini CLI cyan (slate blue in the Graphite
   theme) and Copilot CLI wine. Models wear their maker's color whichever harness or plan they ran under (a Claude model through
   omp or Copilot is still Claude orange), with shades generated from it so models of one maker stay apart in a stacked
   chart. The four token types have their own set (green-teal, olive, lilac, purple).
@@ -777,7 +810,7 @@ sign-in link (an `HttpOnly`, `SameSite=Strict` cookie) or a program that sends t
 so other accounts on the machine can't read your usage. It rejects requests whose `Host` header isn't a loopback name
 (DNS-rebinding protection) and requests a browser marks as coming from another site, requires a custom header on
 state-changing requests (CSRF protection), and sends a Content-Security-Policy that forbids other pages to frame the
-app. Updates install only when the binary matches the release's `checksums.txt`. Prompt text is stored truncated to 2,000 characters so you can recognise
+app. Updates install only when their signature verifies against the key built into the app. Prompt text is stored truncated to 2,000 characters so you can recognise
 expensive prompts. API keys, tokens and private keys in it are replaced with `[redacted]` before anything is stored. Set **Stored prompt length** to `0` to keep no prompt text at all. Commit subjects are stored only when prompt text is kept. The
 URLs of pull requests the agents opened are stored.
 
@@ -797,7 +830,9 @@ token. Nothing leaves the machine unless something scrapes it.
 
 ## Development
 
-Requires [Bun](https://bun.sh) ≥ 1.2.
+Requires [Bun](https://bun.sh) ≥ 1.2. The desktop app also needs Rust (the pinned version installs itself through
+`rust-toolchain.toml`) and, on Linux, the [Tauri system libraries](https://v2.tauri.app/start/prerequisites/#linux)
+plus `libasound2-dev`.
 
 ```sh
 bun install
@@ -805,7 +840,10 @@ bun run dev        # API on :4318 (watch mode) + Vite UI on http://localhost:517
 bun test           # unit + integration tests
 bun run check      # TypeScript + svelte-check
 bun run build      # standalone binary for this platform → dist/
-bun run build:all  # all platforms + dist/checksums.txt
+bun run build:sidecar   # the server binary the app embeds → src-tauri/binaries/
+bun run dev:app    # the desktop app in dev mode (tauri dev)
+bun run build:app  # installers for this platform (needs the updater signing key, see docs/release-and-updater-keys.md)
+cargo test --workspace   # the Rust shell
 bun scripts/demo-data.ts /tmp/demo.db   # made-up usage for screenshots: run with --db /tmp/demo.db
 bun run screenshots                     # retake docs/screenshots from demo data (needs build:web and Chrome or Chromium)
 bun scripts/icons.ts                    # copies the logo and app icons from harness-useful-logo renders/dashboard
@@ -813,11 +851,13 @@ bun scripts/icons.ts                    # copies the logo and app icons from har
 
 **Stack:** a TypeScript backend on Bun (`bun:sqlite`, `Bun.serve`, `Bun.Glob`), and a Svelte 5 + Vite + Tailwind CSS 4 frontend
 with Apache ECharts. `bun build --compile` embeds the built UI and produces one self-contained executable per
-OS and architecture (macOS x64/arm64, Linux x64/arm64, Windows x64). No runtime dependencies.
+OS and architecture (macOS x64/arm64, Linux x64/arm64, Windows x64). A small [Tauri 2](https://v2.tauri.app/) shell
+(`src-tauri/`, Rust) bundles that executable as a sidecar, shows its UI in the system webview, keeps a tray icon and
+installs updates. No runtime dependencies.
 
 ```
 src/
-  cli.ts                 entry point: serve / scan / import-cursor / update / config
+  cli.ts                 entry point: serve / scan / import-cursor / update --check / config
   core/
     config.ts paths.ts   per-OS config + data locations
     db.ts                schema + migrations
@@ -830,8 +870,8 @@ src/
   server/
     app.ts               state, background scanner, live events
     http.ts              REST + SSE API, static UI, request guards
-    update.ts            GitHub release check + verified self-update
-    open.ts              app-window / browser launcher
+    update.ts            GitHub release check (the app does the installing)
+src-tauri/               Tauri shell: window, tray, sidecar, updater, launch sound
 web/src/
   pages/ components/ lib/   Svelte UI, ECharts builders, i18n (lib/locales/en.ts, de.ts)
 ```
@@ -841,7 +881,7 @@ web/src/
 
 ### Releasing
 
-Releases are fully automated with [semantic-release](https://semantic-release.gitbook.io/). Every push to `main` runs
+Releases are fully automated with [semantic-release](https://semantic-release.gitbook.io/). Every push to `main` that passes CI runs
 the *Release* workflow. It reads the [Conventional Commits](https://www.conventionalcommits.org/) since the last tag and
 decides the next version:
 
@@ -852,9 +892,12 @@ decides the next version:
 | `feat!: …` or a `BREAKING CHANGE:` footer | major (1.2.3 → 2.0.0) |
 | `docs:`, `chore:`, `refactor:`, `test:`, `ci:`, `style:` | no release |
 
-When a release is due, the workflow bumps `package.json`, updates `CHANGELOG.md`, cross-compiles every binary with the
-new version, ad-hoc signs the macOS builds and commits `chore(release): x.y.z [skip ci]`. It then tags `vX.Y.Z` and
-publishes a GitHub release with the binaries and `checksums.txt`. Installed apps pick it up through the update banner.
+When a release is due, the workflow bumps `package.json`, `Cargo.toml` and `Cargo.lock`, updates `CHANGELOG.md` and
+commits `chore(release): x.y.z [skip ci]`. It then tags `vX.Y.Z` and creates a draft GitHub release. Runners for Linux
+(x64 and arm64), macOS (Apple Silicon and Intel) and Windows build the installers and the plain command line
+binaries, sign the update files and upload everything. The last job writes `checksums.txt`, attests the build
+provenance of every file and publishes the release. Installed apps pick it up through the update banner. The updater
+needs a signing key that is set up once, see [docs/release-and-updater-keys.md](docs/release-and-updater-keys.md).
 Configuration lives in `.releaserc.json`. To preview the next version locally, run
 `GITHUB_TOKEN=$(gh auth token) npx semantic-release --dry-run --no-ci`.
 

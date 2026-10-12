@@ -173,11 +173,24 @@ describe("palette colors", () => {
   });
 });
 
+describe("model shades", () => {
+  // Captured before the Graphite theme moved the dark surface: models keep the colors people know them by.
+  const snapshot = JSON.parse(readFileSync(join(ROOT, "tests/fixtures/model-shades.json"), "utf8")) as Record<string, string[]>;
+
+  test("the first twelve shades of every maker are the same as before the Graphite theme", () => {
+    const now: Record<string, string[]> = {};
+    for (const p of MODEL_PROVIDERS) for (const m of MODES) now[`${p}:${m}`] = modelShades(p, m, 12);
+    expect(now).toEqual(snapshot);
+  });
+});
+
 describe("palette usage", () => {
   const css = readFileSync(join(ROOT, "web/src/app.css"), "utf8");
 
   test("the checks run against the real chart surfaces", () => {
     for (const mode of MODES) expect(css).toContain(`--surface: ${SURFACE[mode]};`);
+    // Dark is set twice (the system preference and the chosen theme): both must carry the surface the palette is checked on.
+    expect(css.split(`--surface: ${SURFACE.dark};`).length - 1).toBe(2);
   });
 
   test("app.css defines no data colors of its own", () => {

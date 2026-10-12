@@ -261,7 +261,7 @@
 <div class="flex min-h-screen">
   <!-- Sidebar -->
   <aside
-    class="fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-line bg-surface transition-[translate,width] duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 {collapsed ? 'lg:w-16' : ''}"
+    class="fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-line bg-chrome-solid transition-[translate,width] duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 lg:bg-chrome-side {collapsed ? 'lg:w-16' : ''}"
     class:-translate-x-full={!menuOpen}
     inert={!menuOpen && !wide}
   >
@@ -271,13 +271,13 @@
       <div class="truncate text-[15px] tracking-tight" class:lg:hidden={collapsed}>
         <span class="font-normal text-muted">harness</span> <span class="font-semibold">dashboard</span>
       </div>
-      <button bind:this={closeButton} class="ml-auto lg:hidden" aria-label={t("nav.closeMenu")} title={t("nav.closeMenu")} onclick={closeMenu}><X size={18} /></button>
+      <button bind:this={closeButton} class="btn-icon ml-auto rounded-lg text-ink-2 hover:bg-hover hover:text-ink lg:hidden" aria-label={t("nav.closeMenu")} title={t("nav.closeMenu")} onclick={closeMenu}><X size={14} /></button>
     </div>
     <!-- Search and commands, above the menu: its icon lines up with the menu's (px-2, then px-3 inside). -->
     <div class="px-2 pt-1">
       <button
         type="button"
-        class="btn w-full !gap-2.5 !px-3 font-normal text-muted {collapsed ? 'lg:justify-center lg:!px-0' : ''}"
+        class="btn !h-7 w-full !gap-2.5 !px-3 font-normal text-muted {collapsed ? 'lg:justify-center lg:!px-0' : ''}"
         aria-haspopup="dialog"
         aria-keyshortcuts="Control+K Meta+K"
         aria-label={collapsed ? t("palette.open") : undefined}
@@ -289,7 +289,7 @@
       >
         <Search size={16} class="shrink-0" /><span class="truncate" class:lg:hidden={collapsed}>{t("palette.open")}</span>
         <span class="ml-auto flex shrink-0 gap-0.5" class:lg:hidden={collapsed} aria-hidden="true">
-          {#each [mod, "K"] as k (k)}<kbd class="inline-flex h-[1.125rem] min-w-5 items-center justify-center rounded border border-line bg-surface-2 px-1 font-sans text-[10px] leading-none text-ink-2">{k}</kbd>{/each}
+          {#each [mod, "K"] as k (k)}<kbd class="inline-flex h-[1.125rem] min-w-5 items-center justify-center rounded border border-line-strong bg-surface-2 px-1 font-sans text-[10px] leading-none text-ink-2 shadow-[var(--control-shadow)]">{k}</kbd>{/each}
         </span>
       </button>
     </div>
@@ -304,7 +304,7 @@
           <Link
             to="#/{item.page}"
             onclick={() => (menuOpen = false)}
-            class="flex h-7 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors {collapsed ? 'lg:justify-center lg:px-0' : ''} {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
+            class="flex h-7 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors {collapsed ? 'lg:justify-center lg:px-0' : ''} {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'}"
             aria-current={isActive(item.page) ? "page" : undefined}
             aria-label={collapsed ? t(item.label) : undefined}
             title={collapsed ? t(item.label) : undefined}
@@ -316,7 +316,7 @@
       <!-- The last menu item, under Settings: collapse to icons, or expand again. Wide screens only: small ones use the drawer. -->
       <button
         type="button"
-        class="hidden h-7 w-full items-center gap-2.5 rounded-lg px-3 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink lg:flex {collapsed ? 'lg:justify-center lg:px-0' : ''}"
+        class="hidden h-7 w-full items-center gap-2.5 rounded-lg px-3 text-sm text-ink-2 transition-colors hover:bg-hover hover:text-ink lg:flex {collapsed ? 'lg:justify-center lg:px-0' : ''}"
         aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
         title={collapsed ? t("nav.expand") : t("nav.collapse")}
         aria-expanded={!collapsed}
@@ -358,17 +358,17 @@
   </aside>
   {#if menuOpen}
     <!-- The backdrop is for the pointer: keyboard users have the close button and Escape. -->
-    <button class="fixed inset-0 z-30 bg-black/30 lg:hidden" tabindex="-1" aria-hidden="true" onclick={closeMenu}></button>
+    <button class="fixed inset-0 z-30 bg-scrim lg:hidden" tabindex="-1" aria-hidden="true" onclick={closeMenu}></button>
   {/if}
 
   <!-- Main -->
   <div class="flex min-w-0 flex-1 flex-col">
     <ReadOnlyBanner />
     <!-- On every page, so content starts at the same height. Where the filters don't apply it is an empty row. -->
-    <header class="sticky top-0 z-20 border-b border-line bg-page/85 backdrop-blur">
+    <header class="sticky top-0 z-20 border-b border-line bg-chrome-bar backdrop-blur">
       <!-- Top-aligned: when the filters wrap onto more lines, the menu button stays level with the first one. -->
       <div class="mx-auto flex max-w-[1500px] items-start gap-3 px-4 py-2.5 sm:px-6">
-        <button bind:this={openButton} class="btn shrink-0 !px-2 lg:hidden" aria-label={t("nav.openMenu")} aria-expanded={menuOpen} title={t("nav.openMenu")} onclick={openMenu}><Menu size={16} /></button>
+        <button bind:this={openButton} class="btn btn-icon lg:hidden" aria-label={t("nav.openMenu")} aria-expanded={menuOpen} title={t("nav.openMenu")} onclick={openMenu}><Menu size={14} /></button>
         {#if showFilters}
           <div class="min-w-0 flex-1"><FilterBar /></div>
         {:else}

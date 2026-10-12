@@ -42,7 +42,7 @@ function isolate(root: string): () => void {
 }
 
 function handlerFor(app: App) {
-  const handle = createHandler(app, { get: async () => null }, { restart() {}, shutdown() {} }, { token: TOKEN, port: 4317 });
+  const handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token: TOKEN, port: 4317 });
   return (method: string, path: string, body?: unknown, headers: Record<string, string> = HEADERS) =>
     handle(new Request(`http://localhost:4317${path}`, { method, headers, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) }));
 }

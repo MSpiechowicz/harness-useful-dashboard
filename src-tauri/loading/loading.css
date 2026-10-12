@@ -1,0 +1,92 @@
+/* The page the window shows while the dashboard server starts. Colors follow the app: Graphite or light. */
+:root {
+  color-scheme: light dark;
+  --page: #f4f4f1;
+  --ink: #0b0b0b;
+  --muted: #696863;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #0f0f11;
+    --ink: #ededef;
+    --muted: #8e8e98;
+  }
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.loading {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.mark {
+  width: 120px;
+  height: auto;
+  animation: breathe 1.8s ease-in-out infinite;
+}
+
+.loading.failed .mark {
+  animation: none;
+  opacity: 0.5;
+}
+
+.error {
+  max-width: 460px;
+  text-align: center;
+}
+
+.error[hidden],
+.error-text[hidden] {
+  display: none;
+}
+
+.error-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.error-text {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark {
+    animation: none;
+  }
+}

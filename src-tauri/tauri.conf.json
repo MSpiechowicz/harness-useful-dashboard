@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Harness Dashboard",
+  "mainBinaryName": "harness-dashboard-app",
+  "version": "../package.json",
+  "identifier": "com.mspiechowicz.harness-useful-dashboard",
+  "build": {
+    "beforeDevCommand": { "script": "bun run build:sidecar", "wait": true },
+    "beforeBuildCommand": "bun run build:sidecar",
+    "frontendDist": "loading"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Harness Dashboard",
+        "url": "index.html",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true,
+        "resizable": true,
+        "decorations": true,
+        "visible": true,
+        "backgroundColor": "#0f0f11",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage", "deb", "rpm", "nsis", "msi", "dmg", "app"],
+    "externalBin": ["binaries/harness-dashboard"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Token usage and cost across your AI coding tools",
+    "longDescription": "Harness Dashboard shows the token usage and API-equivalent cost of the AI coding tools on this machine (Claude Code, Codex, OpenCode, pi, omp, Cursor), with budgets, alerts and tips, all local and without telemetry.",
+    "publisher": "Maciej Spiechowicz",
+    "copyright": "Copyright (C) 2026 Maciej Spiechowicz",
+    "license": "GPL-3.0-or-later",
+    "licenseFile": "../LICENSE",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2RjdFMjFFNkZGRDk5MUQKUldRZG1mMXZIdUwzRnVORFcvT2Y5UXFhNERYOUlVM0dFRkdHUUJjeHgxR2NLRWJpdWJCanAwK08K",
+      "endpoints": ["https://github.com/MSpiechowicz/harness-useful-dashboard/releases/latest/download/latest.json"],
+      "requireSignedVersion": true
+    }
+  }
+}

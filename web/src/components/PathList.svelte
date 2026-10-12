@@ -15,7 +15,7 @@
   {#each paths as _, i (i)}
     <div class="flex min-w-0 items-center gap-2">
       <FolderField iconOnly class="font-mono text-xs" bind:value={paths[i]} {placeholder} {disabled} label={t("folder.path")} />
-      <button class="btn !w-8 shrink-0 justify-center !px-0" aria-label={t("common.remove")} title={t("common.remove")} onclick={() => remove(i)} {disabled}><X size={14} /></button>
+      <button class="btn btn-icon" aria-label={t("common.remove")} title={t("common.remove")} onclick={() => remove(i)} {disabled}><X size={14} /></button>
     </div>
   {/each}
   <button class="btn w-fit !h-7 !px-2 !text-xs text-ink-2" onclick={() => (paths = [...paths, ""])} {disabled}><Plus size={13} />{t("settings.addFolder")}</button>

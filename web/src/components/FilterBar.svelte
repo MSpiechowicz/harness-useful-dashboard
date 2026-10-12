@@ -60,7 +60,7 @@
   {/each}
   <!-- Always laid out, only hidden while nothing is filtered: choosing the first filter doesn't squeeze the others. -->
   <button
-    class="btn !px-2 text-ink-2"
+    class="btn btn-icon text-ink-2"
     class:invisible={store.activeFilterCount === 0}
     tabindex={store.activeFilterCount === 0 ? -1 : undefined}
     aria-hidden={store.activeFilterCount === 0}

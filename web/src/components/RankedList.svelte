@@ -29,7 +29,7 @@
     <li>
       <button
         type="button"
-        class="group grid w-full grid-cols-[minmax(0,1fr)_auto_2.75rem] items-baseline gap-x-3 gap-y-1.5 rounded-lg px-2 py-2 text-left hover:bg-surface-2"
+        class="group grid w-full grid-cols-[minmax(0,1fr)_auto_2.75rem] items-baseline gap-x-3 gap-y-1.5 rounded-lg px-2 py-2 text-left hover:bg-hover"
         title="{none && dim === 'project' ? `${t('common.noProjectHint')} · ` : ''}{name} · {usd(r.cost)} · {compact(r.tokens)} {t('metric.tokens')}"
         onclick={() => store.setFilter(filterKey, r.key)}
       >

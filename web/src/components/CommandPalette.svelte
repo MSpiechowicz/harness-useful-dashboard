@@ -335,7 +335,7 @@
 
 <!-- The backdrop is for the pointer: keyboard users close with Escape. -->
 <div
-  class="palette-backdrop fixed inset-0 z-50 flex items-start justify-center bg-black/30 px-4 pt-[12vh]"
+  class="palette-backdrop fixed inset-0 z-50 flex items-start justify-center bg-scrim [backdrop-filter:var(--scrim-filter)] px-4 pt-[12vh]"
   role="presentation"
   onclick={(e) => {
     if (e.target === e.currentTarget) onclose();
@@ -343,7 +343,7 @@
 >
   <div
     bind:this={dialog}
-    class="palette card flex max-h-[min(34rem,76vh)] w-full max-w-xl flex-col overflow-hidden !shadow-[var(--shadow-pop)]"
+    class="palette card glass flex max-h-[min(34rem,76vh)] w-full max-w-xl flex-col overflow-hidden !shadow-[var(--shadow-pop)]"
     role="dialog"
     aria-modal="true"
     aria-label={t("palette.label")}
@@ -481,8 +481,9 @@
     height: 1.125rem;
     padding: 0 0.25rem;
     border-radius: 4px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     background: var(--surface-2);
+    box-shadow: var(--control-shadow);
     font-family: inherit;
     font-size: 10px;
     font-weight: 500;

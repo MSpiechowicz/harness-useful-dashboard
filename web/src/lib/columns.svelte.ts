@@ -10,6 +10,9 @@
  *
  * A table with a key can also hide columns (ColumnsMenu.svelte lists them): any but the first, which names its rows,
  * and those without a name (a row's buttons), nor a column whose header has `data-fixed`. Hidden columns are remembered with the widths.
+ *
+ * A column whose header has `data-fit` (a row's buttons, sized by the page to fit them) has no edge and is never given a
+ * width here, so it keeps fitting its buttons after other columns are resized.
  */
 import type { Action } from "svelte/action";
 import { SvelteSet } from "svelte/reactivity";
@@ -170,6 +173,7 @@ function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet 
   }
 
   const widths = load(table, key);
+  const fit = ths.map((th) => th.hasAttribute("data-fit"));
   // Each column's width as the page lays it out, measured once there is a width to measure, before any is set. The
   // first column's is the least it gets: in a fixed layout what the stylesheet leaves it, else what it has.
   let defaults: number[] | null = null;
@@ -192,11 +196,20 @@ function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet 
   const apply = () => {
     const d = Object.keys(widths).length ? measure() : null;
     if (!d) return reset();
+    // One column takes what's left: the first one not resized, else the first. The others keep their widths, so a
+    // fixed layout doesn't share the card's spare width among all of them, and resizing one column takes the room from
+    // the one that gives way rather than pushing the table past the card. It gets as narrow as MIN, the first column
+    // as narrow as it was.
+    const shown = (i: number) => !fit[i] && !set?.isHidden(i);
+    const free = Math.max(0, ths.findIndex((_, i) => shown(i) && widths[i] === undefined));
     cols.forEach((c, i) => {
-      if (i > 0) c.style.width = `${widths[i] ?? d[i]}px`;
+      if (i === free) c.style.width = "auto";
+      else if (fit[i]) c.style.width = "";
+      else if (i > 0 || widths[i] !== undefined) c.style.width = `${widths[i] ?? d[i]}px`;
     });
     table.style.setProperty("table-layout", "fixed");
-    const width = d.reduce((sum, w, i) => sum + (set?.isHidden(i) ? 0 : (widths[i] ?? w)), 0);
+    const least = (i: number) => (fit[i] ? ths[i]!.getBoundingClientRect().width : i === free ? (i === 0 ? (widths[0] ?? d[0]!) : MIN) : (widths[i] ?? d[i]!));
+    const width = d.reduce((sum, _, i) => sum + (set?.isHidden(i) ? 0 : least(i)), 0);
     table.style.setProperty("min-width", `${width}px`, "important");
   };
   const resize = (i: number, width: number) => {
@@ -204,7 +217,8 @@ function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet 
     apply();
   };
 
-  const handles = ths.map((th, i) => {
+  const handles = ths.flatMap((th, i) => {
+    if (fit[i]) return [];
     const h = document.createElement("span");
     h.className = "col-resize";
     h.tabIndex = 0;
@@ -246,7 +260,7 @@ function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet 
       save(table, key, widths);
     });
     th.append(h);
-    return h;
+    return [h];
   });
   apply();
 

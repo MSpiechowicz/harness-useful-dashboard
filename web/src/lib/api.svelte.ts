@@ -255,7 +255,6 @@ export interface UpdateStatus {
   available: boolean;
   releaseUrl: string | null;
   notes: string | null;
-  canSelfUpdate: boolean;
   error?: string;
   disabled?: boolean;
 }

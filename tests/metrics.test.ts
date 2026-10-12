@@ -79,7 +79,7 @@ describe("GET /metrics", () => {
       "INSERT INTO limit_readings (host, report_key, window_id, slot, provider, plan, window_ms, scope, label, used_fraction, resets_at, observed_at) VALUES (?, 'claude:main', '5h', 1, 'claude', 'max', 18000000, NULL, NULL, 0.42, ?, ?)",
     ).run(app.identity.host, now + 3_600_000, now);
     db.query("INSERT INTO session_tags (session_id, tag) VALUES (?, 'client-a')").run(`claude:${CLAUDE_SESSION}`);
-    handle = createHandler(app, { get: async () => null }, { restart() {}, shutdown() {} }, { token: APP_TOKEN, port: 4317 });
+    handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token: APP_TOKEN, port: 4317 });
   });
 
   afterAll(() => {

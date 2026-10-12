@@ -303,7 +303,7 @@ describe("the app and its routes", () => {
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "config.json"), JSON.stringify({ scanIntervalSec: 0, sources: { enabled: { claude: false, codex: false, omp: false, pi: false, opencode: false, zed: false, cline: false, roo: false, kilo: false, gemini: false, copilot: false } } }));
     app = new App(join(root, "test.db"));
-    handle = createHandler(app, { get: async () => null }, { restart() {}, shutdown() {} }, { token, port: 4317 });
+    handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token, port: 4317 });
   });
   afterAll(() => {
     app.close();

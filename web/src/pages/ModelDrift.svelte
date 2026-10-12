@@ -96,6 +96,12 @@
     );
   });
 
+  // Where the measures come from, said once for the page. A chart whose measure comes from fewer of them says which.
+  const providerList = (ids: string[]) => ids.map(providerName).join(", ");
+  const sources = $derived([...new Set(METRICS.flatMap((m) => series.get(m)?.providers ?? []))].sort());
+  const cardSubtitle = (m: (typeof METRICS)[number], providers: string[]) =>
+    providers.length && providers.length < sources.length ? `${hint(m)} · ${t("drift.from", { providers: providerList(providers) })}` : hint(m);
+
   const tone = (c: DriftComparison) => (c.status !== "changed" ? "neutral" : c.better == null ? "warn" : c.better ? "good" : "bad");
   const statusText = (c: DriftComparison) =>
     c.status === "insufficient" ? t("drift.status.insufficient") : c.status === "stable" ? t("drift.status.stable") : c.better == null ? t("drift.status.changed") : c.better ? t("drift.better") : t("drift.worse");
@@ -161,6 +167,9 @@
       <!-- What the marks on every chart mean, and on the right, a switch for the update lines (remembered in this browser). -->
       <div class="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 text-xs text-ink-2">
         <div class="flex flex-wrap items-center gap-x-5 gap-y-1">
+          {#if sources.length}
+            <span class="text-muted">{t("drift.dataFrom", { providers: providerList(sources) })}</span>
+          {/if}
           <span class="flex items-center gap-1.5"><span class="h-0.5 w-3.5 rounded-full bg-accent"></span>{t("drift.legend.daily")}</span>
           <span class="flex items-center gap-1.5"><span class="h-3 w-3.5 rounded-sm bg-accent/20"></span>{t("drift.usualRange")}</span>
           <span class="flex items-center gap-1.5"><span class="h-3 w-3.5 rounded-sm bg-ink-2/20"></span>{t("drift.legend.recent", { n: d.data.window.recentDays })}</span>
@@ -178,7 +187,7 @@
         {#each METRICS as m (m)}
           {@const s = series.get(m)}
           {#if s}
-            <Card title={label(m)} subtitle={s.providers.length ? `${hint(m)} · ${t("drift.from", { providers: s.providers.map(providerName).join(", ") })}` : hint(m)}>
+            <Card title={label(m)} subtitle={cardSubtitle(m, s.providers)}>
               {#if s.counts.some((n) => n > 0) && options.get(m)}
                 <Chart option={options.get(m)} height={240} dim={d.loading} />
               {:else}

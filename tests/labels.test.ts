@@ -464,7 +464,7 @@ describe("API", () => {
       return answer([{ id: "1", title: "Dark mode switch", kind: "feature" }]);
     });
     app.labelerDeps = { now: () => Date.now() + 3_600_000, which: (n) => (n === "claude" ? "/usr/bin/claude" : null), run: cli.run, dir: join(root, "labeler"), env: {} };
-    handle = createHandler(app, { get: async () => null }, { restart() {}, shutdown() {} }, { token, port: 4317 });
+    handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token, port: 4317 });
   });
   afterAll(() => {
     app.close();

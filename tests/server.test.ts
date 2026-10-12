@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { createHmac } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "../src/cli.ts";
@@ -7,33 +8,18 @@ import { parseSettings, scanInterval } from "../src/core/config.ts";
 import { getMeta } from "../src/core/db.ts";
 import { ensureAppDataDir } from "../src/core/paths.ts";
 import { App } from "../src/server/app.ts";
+import { probeDashboard } from "../src/server/auth.ts";
 import { createHandler, parseFilters } from "../src/server/http.ts";
-import { assetName, compareVersions, installedPath, installedVersion } from "../src/server/update.ts";
+import { compareVersions } from "../src/server/update.ts";
+import { VERSION } from "../src/version.ts";
 import { claudeAssistant, claudeUser, CLAUDE_SESSION, tempDir, writeJsonl } from "./helpers.ts";
 
 describe("update helpers", () => {
-  test("asset names per platform", () => {
-    expect(assetName("darwin", "arm64")).toBe("harness-dashboard-darwin-arm64");
-    expect(assetName("linux", "x64")).toBe("harness-dashboard-linux-x64");
-    expect(assetName("win32", "x64")).toBe("harness-dashboard-windows-x64.exe");
-  });
   test("version comparison", () => {
     expect(compareVersions("0.2.0", "0.1.9")).toBeGreaterThan(0);
     expect(compareVersions("v1.0.0", "1.0.0")).toBe(0);
     expect(compareVersions("1.0.0-beta.1", "1.0.0")).toBeLessThan(0);
     expect(compareVersions("1.10.0", "1.9.3")).toBeGreaterThan(0);
-  });
-  test("the install path drops the suffix Linux adds once the running binary was replaced", () => {
-    expect(installedPath("/home/u/.local/bin/harness-dashboard (deleted)")).toBe("/home/u/.local/bin/harness-dashboard");
-    expect(installedPath("/home/u/.local/bin/harness-dashboard")).toBe("/home/u/.local/bin/harness-dashboard");
-    expect(installedPath("C:\\Users\\u\\harness-dashboard.exe")).toBe("C:\\Users\\u\\harness-dashboard.exe");
-  });
-  test("reads the version of the installed binary, or nothing when there is none", () => {
-    const dir = tempDir();
-    const fake = join(dir, "harness-dashboard");
-    writeFileSync(fake, "#!/bin/sh\necho 1.3.2\n", { mode: 0o755 });
-    if (process.platform !== "win32") expect(installedVersion(fake)).toBe("1.3.2");
-    expect(installedVersion(join(dir, "missing"))).toBeNull();
   });
 });
 
@@ -57,14 +43,14 @@ describe("parseFilters", () => {
 describe("settings input", () => {
   test("keeps known keys of the right type and rounds numbers into range", () => {
     expect(parseSettings({ userName: " ada ", scanIntervalSec: 1.4, promptTextLimit: -5, openMode: "browser", other: 1 })).toEqual({
-      patch: { userName: "ada", scanIntervalSec: 5, promptTextLimit: 0, openMode: "browser" },
+      patch: { userName: "ada", scanIntervalSec: 5, promptTextLimit: 0 },
     });
     expect(parseSettings({ sources: { claudeDirs: ["/a"], enabled: { codex: false } }, limits: { omp: false } })).toEqual({
       patch: { sources: { claudeDirs: ["/a"], enabled: { codex: false } }, limits: { omp: false } },
     });
   });
   test("refuses values of the wrong type", () => {
-    for (const body of [null, [], { scanIntervalSec: "5" }, { scanIntervalSec: Number.NaN }, { port: 70000 }, { openMode: "kiosk" }, { checkUpdates: "yes" }, { sources: { claudeDirs: "/a" } }, { sources: { enabled: { claude: 1 } } }, { limits: [] }]) {
+    for (const body of [null, [], { scanIntervalSec: "5" }, { scanIntervalSec: Number.NaN }, { port: 70000 }, { checkUpdates: "yes" }, { sources: { claudeDirs: "/a" } }, { sources: { enabled: { claude: 1 } } }, { limits: [] }]) {
       expect("error" in parseSettings(body), JSON.stringify(body)).toBe(true);
     }
   });
@@ -110,7 +96,7 @@ describe("HTTP API", () => {
     ]);
     app = new App(join(root, "test.db"));
     await app.scanNow();
-    handle = createHandler(app, { get: async (p) => (p === "/index.html" ? new Response("<html>ui</html>") : null) }, { restart() {}, shutdown() {} });
+    handle = createHandler(app, { get: async (p) => (p === "/index.html" ? new Response("<html>ui</html>") : null) }, { shutdown() {} });
   });
 
   afterAll(() => {
@@ -184,6 +170,54 @@ describe("HTTP API", () => {
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");
       expect(res.headers.get("referrer-policy")).toBe("no-referrer");
     }
+  });
+
+  test("only the app shell's window may reach the shell over Tauri's IPC", async () => {
+    const connect = (res: Response) => /connect-src ([^;]*)/.exec(res.headers.get("content-security-policy") ?? "")?.[1];
+    expect(connect(await get("/"))).toBe("'self'");
+    const shell = createHandler(app, { get: async () => new Response("<html>ui</html>") }, { shutdown() {} }, { token: "a".repeat(64), port: 4317, shell: true });
+    const res = await shell(new Request("http://127.0.0.1:4317/", { headers: { host: "127.0.0.1:4317" } }));
+    expect(connect(res)).toBe("'self' ipc: http://ipc.localhost");
+    expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  });
+
+  test("/api/hello proves the server holds the token without a sign-in, to loopback hosts only", async () => {
+    const secret = "b".repeat(64);
+    const signedIn = createHandler(app, { get: async () => null }, { shutdown() {} }, { token: secret, port: 4399, shell: true });
+    const hello = (query: string, host = "127.0.0.1:4399") => signedIn(new Request(`http://${host}/api/hello${query}`, { headers: { host } }));
+    const nonce = "0123456789abcdef".repeat(2);
+
+    const res = await hello(`?nonce=${nonce}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      app: "harness-dashboard",
+      version: VERSION,
+      shell: true,
+      proof: createHmac("sha256", secret).update(`harness-dashboard-hello 4399 ${nonce}`).digest("hex"),
+    });
+
+    expect((await hello(`?nonce=${nonce}`, "evil.example:4399")).status).toBe(403);
+    expect((await hello("")).status).toBe(400);
+    expect((await hello("?nonce=xyz")).status).toBe(400);
+    // Only the proof is open: the rest of the API still wants the token.
+    expect((await signedIn(new Request("http://127.0.0.1:4399/api/status", { headers: { host: "127.0.0.1:4399" } }))).status).toBe(401);
+  });
+
+  test("a client trusts the dashboard on a port only with the proof for its token", async () => {
+    const secret = "c".repeat(64);
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => handler(req) });
+    const handler = createHandler(app, { get: async () => null }, { shutdown() {} }, { token: secret, port: server.port!, shell: false });
+    try {
+      expect(await probeDashboard(server.port!, secret)).toEqual({ state: "ours", version: VERSION, shell: false });
+      expect(await probeDashboard(server.port!, "d".repeat(64))).toEqual({ state: "other" });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("the server installs no updates: the app does", async () => {
+    const res = await handle(new Request("http://localhost/api/update", { method: "POST", headers: { host: "localhost", "x-harness-dashboard": "1" } }));
+    expect(res.status).toBe(404);
   });
 
   test("the API refuses requests a browser marks as coming from another site", async () => {

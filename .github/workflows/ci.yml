@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  BUN_VERSION: 1.4.2
+
 jobs:
   test:
     strategy:
@@ -14,9 +25,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.4.2
+          bun-version: ${{ env.BUN_VERSION }}
       - run: bun install --frozen-lockfile
       - run: bun run check
       # Windows runners are several times slower at spawning processes and opening SQLite files, so the database tests
@@ -30,3 +43,49 @@ jobs:
           BIN=$(ls dist/harness-dashboard-* | head -n1)
           "$BIN" version
           "$BIN" --help
+
+  # The Tauri shell (src-tauri/) on every OS it ships on: format, lint, unit tests and, on pull requests, a real build.
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Linux system libraries
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            build-essential curl wget file libxdo-dev libssl-dev libasound2-dev
+      # rust-toolchain.toml pins the version, install it when the runner lacks it.
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: cargo fmt --all --check
+      # tauri-build refuses to compile without the sidecar listed in bundle.externalBin. Clippy and the tests never run
+      # it, so an empty stand-in named after the host target is enough. The real build below overwrites it.
+      - name: Stub the sidecar for tauri-build
+        run: |
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          ext=""
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; fi
+          mkdir -p src-tauri/binaries
+          : > "src-tauri/binaries/harness-dashboard-${triple}${ext}"
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # On main the release bundles build the app on every OS right after, so pull requests alone pay for this.
+      # It also runs the real `bun run build:sidecar` (tauri's beforeBuildCommand).
+      - if: ${{ github.event_name == 'pull_request' }}
+        run: bunx tauri build --debug --no-bundle

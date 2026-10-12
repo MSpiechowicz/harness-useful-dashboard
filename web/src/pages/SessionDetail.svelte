@@ -184,7 +184,7 @@
           {@const share = parent.cost ? (tot?.cost ?? 0) / parent.cost : 0}
           <Card title={t("detail.startedBy")} subtitle={t("detail.startedByHint")}>
             <div class="flex flex-col gap-4">
-              <Link to="#/sessions/{encodeURIComponent(parent.id)}" class="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-1 rounded-lg border border-line px-4 py-3 hover:bg-surface-2">
+              <Link to="#/sessions/{encodeURIComponent(parent.id)}" class="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-1 rounded-lg border border-line px-4 py-3 hover:bg-hover">
                 <span class="flex min-w-0 items-center gap-2">
                   {#if parent.provider}<span class="h-2 w-2 shrink-0 rounded-full" style:background={colorFor("provider", parent.provider)}></span>{/if}
                   <span class="truncate text-sm font-medium text-ink group-hover:text-accent-ink">{parent.title ?? t("sessions.untitled")}</span>

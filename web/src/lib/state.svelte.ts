@@ -1,4 +1,5 @@
-import { flushSync, tick } from "svelte";
+import { tick } from "svelte";
+import { INTRO_KEY, INTRO_SOUND_KEY } from "./splash-policy.ts";
 
 export type RangePreset = "today" | "7d" | "30d" | "90d" | "month" | "all" | "custom";
 export type Metric = "tokens" | "cost";
@@ -92,13 +93,15 @@ class Store {
   /** Whether project views list the work done outside any project ("No project"). */
   showNoProject = $state<boolean>(load("hd.showNoProject", ["true", "false"] as const, "true") === "true");
   theme = $state<ThemePref>(load("hd.theme", ["system", "light", "dark"] as const, "system"));
+  /** Whether the intro animation plays when the dashboard opens. Per viewer, like the theme. */
+  intro = $state<boolean>(load(INTRO_KEY, ["true", "false"] as const, "true") === "true");
+  /** Whether the logo's sound plays with the intro. */
+  introSound = $state<boolean>(load(INTRO_SOUND_KEY, ["true", "false"] as const, "false") === "true");
   /** Whether the model drift charts mark client updates. */
   showDriftUpdates = $state<boolean>(load("hd.showDriftUpdates", ["true", "false"] as const, "true") === "true");
   /** The sidebar shows only icons (on wide screens, where it stays open). */
   navCollapsed = $state<boolean>(load("hd.navCollapsed", ["true", "false"] as const, "false") === "true");
   systemDark = $state(typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
-  /** While the page prints: light colors whatever the theme, charts drawn without motion. */
-  printing = $state(false);
   /** Bumped whenever new data was ingested; data hooks refetch on change. */
   refreshTick = $state(0);
   route = $state<Route>(parseHash());
@@ -121,17 +124,6 @@ class Store {
         window.scrollTo({ top: 0 });
       });
       matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => (this.systemDark = e.matches));
-      // A print is dark ink on white paper. The charts take their colors from the theme, so they are redrawn light
-      // before the browser lays out the print, and redrawn in the chosen theme afterwards.
-      window.addEventListener("beforeprint", () => {
-        this.printing = true;
-        document.documentElement.dataset.theme = "light";
-        flushSync();
-      });
-      window.addEventListener("afterprint", () => {
-        this.printing = false;
-        this.setTheme(this.theme);
-      });
       // The range and filters live in the address too, so a view can be bookmarked, shared or reloaded as it is.
       // replaceState: changing a filter adds no history entry of its own.
       $effect.root(() => {
@@ -182,7 +174,6 @@ class Store {
   }
 
   get dark(): boolean {
-    if (this.printing) return false;
     return this.theme === "dark" || (this.theme === "system" && this.systemDark);
   }
 
@@ -191,6 +182,16 @@ class Store {
     save("hd.theme", pref);
     if (pref === "system") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = pref;
+  }
+
+  setIntro(on: boolean): void {
+    this.intro = on;
+    save(INTRO_KEY, String(on));
+  }
+
+  setIntroSound(on: boolean): void {
+    this.introSound = on;
+    save(INTRO_SOUND_KEY, String(on));
   }
 
   setRange(r: RangePreset): void {

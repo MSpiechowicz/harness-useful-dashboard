@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { configKeyPatch, defaultConfig, mergeConfig } from "../src/core/config.ts";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { configKeyPatch, defaultConfig, loadConfig, mergeConfig, updateConfig } from "../src/core/config.ts";
+import { tempDir } from "./helpers.ts";
 
 describe("config set", () => {
   test("a dotted key sets a field inside its section", () => {
@@ -33,5 +36,15 @@ describe("config set", () => {
     const cfg = defaultConfig();
     configKeyPatch(cfg, "limits.claude", false);
     expect(cfg.limits.claude).toBe(true);
+  });
+
+  test("the window setting of older versions is dropped from the config file", () => {
+    const path = join(tempDir(), "config.json");
+    writeFileSync(path, JSON.stringify({ openMode: "browser", port: 4400 }));
+    expect("openMode" in loadConfig(path)).toBe(false);
+    expect(loadConfig(path).port).toBe(4400);
+    updateConfig({ userName: "ada" }, path);
+    expect(JSON.parse(readFileSync(path, "utf8"))).not.toHaveProperty("openMode");
+    expect(() => configKeyPatch(defaultConfig(), "openMode", "app")).toThrow("unknown config key");
   });
 });

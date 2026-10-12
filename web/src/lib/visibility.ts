@@ -19,19 +19,3 @@ export function everyWhileVisible(ms: number, fn: () => void): () => void {
     document.removeEventListener("visibilitychange", onVisible);
   };
 }
-
-/** Resolves after `ms`, or as soon as a hidden tab is shown again (browsers slow down timers in hidden tabs). */
-export function waitOrVisible(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(h);
-      document.removeEventListener("visibilitychange", onVisible);
-      resolve();
-    };
-    const onVisible = () => {
-      if (!document.hidden) done();
-    };
-    const h = setTimeout(done, ms);
-    document.addEventListener("visibilitychange", onVisible);
-  });
-}

@@ -98,10 +98,10 @@
   <div class="flex flex-1 flex-col gap-5 px-5 pb-4">
     {#if data.reports.length}
       <!-- Every provider sits in the same grid cell, so the card stays as tall as the tallest one and the pager doesn't
-           jump while paging. The others are hidden, and all show in print. -->
+           jump while paging. The others are hidden. -->
       <div class="grid">
         {#each data.reports as r (r.key)}
-          <section class="flex flex-col gap-3 [grid-area:1/1] print:visible print:[grid-area:auto] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
+          <section class="flex flex-col gap-3 [grid-area:1/1] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
             <header class="flex items-center gap-2.5">
               <span class="h-2.5 w-2.5 shrink-0 rounded-full" style:background={colorFor("provider", r.provider)}></span>
               <span class="text-[13px] font-semibold text-ink">{NAMES[r.provider] ?? r.provider}</span>
