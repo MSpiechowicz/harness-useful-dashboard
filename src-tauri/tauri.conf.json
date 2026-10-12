@@ -52,7 +52,19 @@
     "copyright": "Copyright (C) 2026 Maciej Spiechowicz",
     "license": "GPL-3.0-or-later",
     "licenseFile": "../LICENSE",
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/applications/harness-dashboard-app.desktop": "linux/harness-dashboard-app.desktop"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/applications/harness-dashboard-app.desktop": "linux/harness-dashboard-app.desktop"
+        }
+      }
+    }
   },
   "plugins": {
     "updater": {

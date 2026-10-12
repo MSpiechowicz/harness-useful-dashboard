@@ -186,7 +186,21 @@ Terminal=false
 Categories=Development;Utility;
 StartupWMClass=$BIN-app
 EOF
+    # Wayland ignores StartupWMClass and takes the window's icon from the entry named after its app id, the program
+    # name. This hidden entry under that name gives the window the app icon (the app keeps it up to date).
+    cat >"$APPS/$BIN-app.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$APP_NAME
+Exec="$APPIMAGE"
+Icon=$BIN
+NoDisplay=true
+EOF
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" >/dev/null 2>&1 || true
+    # KDE reads launchers from its own cache: rebuild it, so the first window already has the icon.
+    for TOOL in kbuildsycoca6 kbuildsycoca5; do
+      command -v "$TOOL" >/dev/null 2>&1 && "$TOOL" >/dev/null 2>&1 || true
+    done
     # Desktops cache icons by name: refresh an existing cache so a changed icon shows without logging out. Never
     # create one, since a cache nothing else keeps up to date would hide icons other apps add later.
     THEME="$(dirname "$(dirname "$ICONS")")"

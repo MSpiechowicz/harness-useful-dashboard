@@ -15,6 +15,7 @@ mod tray;
 mod update;
 mod updates;
 mod window;
+mod window_icon;
 
 use std::process::ExitCode;
 

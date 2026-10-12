@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Harness Dashboard
+Exec=harness-dashboard-app
+Icon=harness-dashboard-app
+NoDisplay=true

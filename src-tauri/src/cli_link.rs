@@ -12,7 +12,8 @@
 //! The releases before the app opened the dashboard through a launcher that ran the command line
 //! tool: a Linux `.desktop` entry (plus hidden entries for the Chromium app window's icon) and a
 //! macOS script app in `~/Applications`. Those launchers would now start a headless server, so
-//! they are removed. Only files exactly of that shape are touched.
+//! they are removed. Only files exactly of that shape are touched. The installer's AppImage launcher
+//! and the hidden `harness-dashboard-app.desktop` next to it (see `window_icon`) are not.
 //!
 //! Debug builds leave all of this alone unless `HD_SHELL_SYNC_CLI=1`: a dev build must not replace
 //! the installed command.
@@ -25,6 +26,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::sidecar::{SERVER_BIN, server_path};
+use crate::window_icon;
 
 /// The command's file name on Windows.
 const WINDOWS_CLI: &str = "harness-dashboard.exe";
@@ -98,7 +100,7 @@ pub fn sync(source: &Path, target: &Path) -> io::Result<Synced> {
 
 /// Creates a new, empty file next to `target` in `dir`. It never opens an existing file or follows
 /// a link someone placed under the name: a taken name is skipped for the next one.
-fn create_temp(dir: &Path, target: &Path) -> io::Result<(PathBuf, File)> {
+pub(crate) fn create_temp(dir: &Path, target: &Path) -> io::Result<(PathBuf, File)> {
     let name = target.file_name().and_then(OsStr::to_str).unwrap_or(SERVER_BIN);
     let pid = std::process::id();
 
@@ -237,8 +239,9 @@ fn same_contents(source: &Path, target: &Path) -> io::Result<bool> {
     }
 }
 
-/// Copies the command and removes the old launchers on a background thread (release builds, or
-/// debug builds with `HD_SHELL_SYNC_CLI=1`).
+/// Copies the command, removes the old launchers and, on Linux, links the AppImage's window to its
+/// launcher icon (see [`window_icon`]) on a background thread (release builds, or debug builds with
+/// `HD_SHELL_SYNC_CLI=1`).
 pub fn sync_in_background<R: Runtime>(app: &AppHandle<R>) {
     if cfg!(debug_assertions) && std::env::var_os("HD_SHELL_SYNC_CLI").as_deref() != Some(OsStr::new("1")) {
         tracing::info!("debug build: the installed command and launchers are left alone");
@@ -254,6 +257,10 @@ pub fn sync_in_background<R: Runtime>(app: &AppHandle<R>) {
     let spawned = std::thread::Builder::new().name("cli-link".to_owned()).spawn(move || {
         sync_cli(home.as_deref(), local_app_data.as_deref());
         remove_legacy_launchers(home.as_deref(), data_home.as_deref());
+
+        if cfg!(target_os = "linux") {
+            window_icon::link_window_icon(data_home.as_deref());
+        }
     });
 
     if let Err(error) = spawned {
@@ -639,6 +646,22 @@ mod tests {
         remove_legacy_linux_entries(apps);
 
         assert!(apps.join("harness-dashboard.desktop").exists());
+    }
+
+    #[test]
+    fn the_linux_cleanup_keeps_the_installers_launcher_and_the_window_icon_entry() {
+        let dir = TempDir::new("cli-legacy-keeps-alias");
+        let apps = dir.path();
+        let launcher = "[Desktop Entry]\nType=Application\nName=Harness Dashboard\nExec=\"/x/harness-dashboard.AppImage\"\nIcon=harness-dashboard\nStartupWMClass=harness-dashboard-app\n";
+        let alias = "[Desktop Entry]\nType=Application\nName=Harness Dashboard\nExec=\"/x/harness-dashboard.AppImage\"\nIcon=harness-dashboard\nNoDisplay=true\n";
+
+        fs::write(apps.join("harness-dashboard.desktop"), launcher).expect("write");
+        fs::write(apps.join("harness-dashboard-app.desktop"), alias).expect("write");
+
+        remove_legacy_linux_entries(apps);
+
+        assert!(apps.join("harness-dashboard.desktop").exists());
+        assert!(apps.join("harness-dashboard-app.desktop").exists());
     }
 
     #[test]

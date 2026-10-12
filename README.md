@@ -195,7 +195,7 @@ Quit the app first (tray menu → **Quit Harness Dashboard**).
 rm ~/.local/bin/harness-dashboard
 rm -rf ~/Applications/"Harness Dashboard.app"                                       # macOS
 rm -rf ~/.local/lib/harness-dashboard                                               # Linux AppImage
-rm -f ~/.local/share/applications/harness-dashboard.desktop                         # Linux menu entry
+rm -f ~/.local/share/applications/harness-dashboard{,-app}.desktop                  # Linux menu entries
 rm -f ~/.local/share/icons/hicolor/*/apps/harness-dashboard.{png,svg}               # Linux icon
 # data + config (optional):
 rm -rf ~/.config/harness-dashboard                          # Linux
