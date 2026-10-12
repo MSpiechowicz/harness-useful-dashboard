@@ -40,12 +40,23 @@ export function refreshLauncherIcon(env: LauncherIconEnv = {
     if (readFileSync(target.path).equals(icon)) return false;
     writeFileSync(target.path, icon);
     if (env.platform === "linux") refreshLinuxIconCaches(dirname(dirname(dirname(target.path))));
-    // Finder and the Dock read an app's icon again once its bundle is newer.
-    if (env.platform === "darwin") utimesSync(dirname(dirname(dirname(target.path))), new Date(), new Date());
+    if (env.platform === "darwin") refreshMacAppIcon(dirname(dirname(dirname(target.path))));
     return true;
   } catch {
     return false;
   }
+}
+
+const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
+/**
+ * Finder and the Dock read an app's icon again once its bundle is newer, but Spotlight and Launchpad show the icon
+ * LaunchServices recorded when the bundle was registered. As in install.sh, the bundle is registered again.
+ */
+function refreshMacAppIcon(bundle: string): void {
+  const now = new Date();
+  utimesSync(bundle, now, now);
+  if (existsSync(LSREGISTER)) Bun.spawnSync([LSREGISTER, "-f", bundle], { stdio: ["ignore", "ignore", "ignore"], timeout: 10_000 });
 }
 
 /**
