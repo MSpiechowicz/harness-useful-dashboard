@@ -297,7 +297,9 @@ describe("the server started in a terminal", () => {
 
     expect(open).toMatch(signInLink(port));
     app.kill("SIGTERM");
-    expect(await app.exited).toBe(0);
+    // Windows has no signals: the process is ended, so it has no exit code of its own to check.
+    const code = await app.exited;
+    if (process.platform !== "win32") expect(code).toBe(0);
   }, 30_000);
 
   test("points to the dashboard already running on the port and leaves it running", async () => {

@@ -98,11 +98,24 @@ describe("set-version", () => {
     cpSync(join(repoRoot, "Cargo.lock"), join(dir, "Cargo.lock"));
     expect(run("9.8.7").code).toBe(0);
     for (const name of ["Cargo.toml", "Cargo.lock"]) {
-      const before = readFileSync(join(repoRoot, name), "utf8").split("\n");
-      const after = read(name).split("\n");
+      const before = readFileSync(join(repoRoot, name), "utf8").split(/\r?\n/);
+      const after = read(name).split(/\r?\n/);
       expect(after.length).toBe(before.length);
       const changed = after.filter((line, index) => line !== before[index]);
       expect(changed).toEqual(['version = "9.8.7"']);
+    }
+  });
+
+  test("keeps the CRLF line endings of a Windows checkout", () => {
+    for (const name of ["Cargo.toml", "Cargo.lock"]) {
+      const lf = readFileSync(join(repoRoot, name), "utf8").replace(/\r\n/g, "\n");
+      writeFileSync(join(dir, name), lf.replace(/\n/g, "\r\n"));
+    }
+    expect(run("9.8.7").code).toBe(0);
+    for (const name of ["Cargo.toml", "Cargo.lock"]) {
+      const text = read(name);
+      expect(text).toContain('version = "9.8.7"\r\n');
+      expect(text.replace(/\r\n/g, "")).not.toContain("\n");
     }
   });
 });

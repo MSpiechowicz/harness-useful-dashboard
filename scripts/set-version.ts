@@ -54,8 +54,14 @@ function blockEnd(lines: string[], from: number): number {
   return index;
 }
 
+/** A manifest's lines and the line ending it uses: a Windows checkout has CRLF, and it is kept. */
+function splitLines(text: string): { lines: string[]; eol: string } {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  return { lines: text.split(eol), eol };
+}
+
 export function updateCargoToml(text: string, version: string): { text: string; change: Change } {
-  const lines = text.split("\n");
+  const { lines, eol } = splitLines(text);
   const header = lines.findIndex((line) => line.trim() === "[workspace.package]");
   if (header === -1) throw new Error("Cargo.toml has no [workspace.package] section");
   const previous = replaceVersionInBlock(
@@ -66,13 +72,13 @@ export function updateCargoToml(text: string, version: string): { text: string; 
     "[workspace.package]",
   );
   return {
-    text: lines.join("\n"),
+    text: lines.join(eol),
     change: { file: "Cargo.toml", target: "[workspace.package]", from: previous, to: version },
   };
 }
 
 export function updateCargoLock(text: string, version: string): { text: string; changes: Change[] } {
-  const lines = text.split("\n");
+  const { lines, eol } = splitLines(text);
   const changes: Change[] = [];
   for (const name of WORKSPACE_PACKAGES) {
     const nameIndexes = lines.flatMap((line, index) =>
@@ -85,7 +91,7 @@ export function updateCargoLock(text: string, version: string): { text: string; 
     const previous = replaceVersionInBlock(lines, at + 1, blockEnd(lines, at + 1), version, name);
     changes.push({ file: "Cargo.lock", target: name, from: previous, to: version });
   }
-  return { text: lines.join("\n"), changes };
+  return { text: lines.join(eol), changes };
 }
 
 /** Apply the version to <root>/Cargo.toml and <root>/Cargo.lock. Writes only files whose content changes. */
