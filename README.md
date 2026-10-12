@@ -126,8 +126,9 @@ Everything runs locally. Your usage is never uploaded anywhere.
 ## Install
 
 Harness Dashboard is a desktop app. It opens in its own window, lives in the tray when you close it and keeps
-collecting your usage in the background, so budget alerts still arrive. It plays a short launch sound when it opens.
-The `harness-dashboard` command comes with it.
+collecting your usage in the background, so budget alerts still arrive. It opens with a short logo animation, and
+**Settings → General** turns it off, adds its sound (off by default) or plays it again. The `harness-dashboard` command
+comes with it.
 
 **macOS and Linux**
 
@@ -150,7 +151,7 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/MSp
 This runs the release's installer for the current user (into `%LOCALAPPDATA%\Harness Dashboard`, with a Start menu
 shortcut) and puts the `harness-dashboard` command in `%LOCALAPPDATA%\Programs\harness-dashboard` and on your `PATH`.
 
-Installer options (environment variables): `HARNESS_DASHBOARD_VERSION=v1.26.0` pins a release,
+Installer options (environment variables): `HARNESS_DASHBOARD_VERSION=v2.0.0` pins a release,
 `HARNESS_DASHBOARD_NO_SHORTCUT=1` skips the Linux applications-menu entry and `HARNESS_DASHBOARD_NO_MODIFY_PATH=1`
 leaves your shell profile untouched (macOS/Linux).
 
@@ -233,7 +234,7 @@ The app runs a small local server on `127.0.0.1` and shows it in its own window.
 command line starts. The app always starts a server of its own and never reuses one that is already running. If the
 port is taken, the app says so, and a server from a version before the app has to be quit first (the installers do
 that for you). Run without a window (a server or a headless machine), `harness-dashboard` prints an
-`open:` link (`/api/auth?k=…`) for a browser and never opens one itself. A browser that didn't come in through that
+`open:` link (`http://127.0.0.1:4317/?k=…`) for a browser and never opens one itself. A browser that didn't come in through that
 link sees the page but none of your data.
 
 Under **Settings → Theme**, **System** is the default, **Light** is the light theme and **Graphite** the dark one, a
@@ -766,7 +767,10 @@ databases, and older ones after one Compact, give the space that trimming frees 
   10%. A rate is flagged when its counts differ by 3 standard errors and it moved at least 20%. Each window needs 50
   samples. The API error rate is the share of model requests that failed per model and day, judged by the same rate rule
   as tool errors, and the `<synthetic>` placeholder rows are left out. Response time is exact for omp, pi and OpenCode.
-  For Claude Code and Codex it runs from the last input the model got to the end of its response. Tool calls the user or the harness stopped don't count as errors. Client
+  For Claude Code and Codex it runs from the last input the model got to the end of its response. Claude Code doesn't
+  log the time to first token, so for responses that start with thinking it is estimated: the time to the first block
+  minus the thinking time Claude Code reports. Responses that start with text or a tool call have none. An update reads
+  Claude Code's logs once more, so earlier responses get the estimate too. Tool calls the user or the harness stopped don't count as errors. Client
   updates are marked on the charts, since a new harness version can change these numbers too. Cursor's export has
   none of this.
 - **Compactions.** Claude Code writes a record each time it compacts a session. The dashboard keeps its trigger (auto or
