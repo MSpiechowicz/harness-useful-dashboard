@@ -1,3 +1,10 @@
+## [2.0.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.3...v2.0.4) (2026-10-12)
+
+
+### Bug Fixes
+
+* The time range picker switches ranges in the macOS app, where a click no longer closes it before it lands ([2704f5a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/2704f5a54e9f748f2470f45ab48c65c10909c9fb))
+
 ## [2.0.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.2...v2.0.3) (2026-10-12)
 
 
