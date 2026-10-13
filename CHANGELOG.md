@@ -1,3 +1,10 @@
+## [2.0.6](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.5...v2.0.6) (2026-10-13)
+
+
+### Bug Fixes
+
+* Refresh reads fresh plan limits from omp, past its own usage cache ([fa2f377](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/fa2f377ff8d9400d3abc6455e7746c118b008158))
+
 ## [2.0.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.4...v2.0.5) (2026-10-13)
 
 
