@@ -1,3 +1,10 @@
+## [2.0.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.4...v2.0.5) (2026-10-13)
+
+
+### Bug Fixes
+
+* Plan limits and session labels find omp, gh, claude and codex in the macOS app started from the Dock ([f86aaa4](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/f86aaa4a3a232b26aa78e493f656921040f987e5))
+
 ## [2.0.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.3...v2.0.4) (2026-10-12)
 
 
