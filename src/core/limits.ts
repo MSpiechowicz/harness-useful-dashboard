@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { toolPath } from "./paths.ts";
 import { recordReports } from "./plans.ts";
 
 /**
@@ -96,9 +97,9 @@ function retryAfter(res: Response, now: number): number | null {
   return Number.isFinite(at) ? Math.max(0, at - now) : null;
 }
 
-async function runCommand(cmd: string[], timeoutMs: number): Promise<string | null> {
+async function runCommand(cmd: string[], timeoutMs: number, env: Record<string, string | undefined>): Promise<string | null> {
   try {
-    const proc = Bun.spawn(cmd, { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const proc = Bun.spawn(cmd, { env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const timer = setTimeout(() => proc.kill(), timeoutMs);
     const out = await new Response(proc.stdout).text();
     clearTimeout(timer);
@@ -598,14 +599,17 @@ export function activePlans(db: Database, from: number): ActivePlan[] {
 // ---------------------------------------------------------------------------------------------------------------
 
 function withDefaults(d: LimitDeps): Required<LimitDeps> {
+  const home = d.home ?? homedir();
+  const platform = d.platform ?? process.platform;
+  const env = d.env ?? process.env;
   return {
     now: d.now ?? Date.now,
     fetch: d.fetch ?? fetch,
-    run: d.run ?? runCommand,
+    run: d.run ?? (async (cmd, timeoutMs) => runCommand(cmd, timeoutMs, { ...env, PATH: await toolPath(env, home, platform) })),
     readFile: d.readFile ?? readText,
-    home: d.home ?? homedir(),
-    platform: d.platform ?? process.platform,
-    env: d.env ?? process.env,
+    home,
+    platform,
+    env,
   };
 }
 

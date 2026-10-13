@@ -58,3 +58,46 @@ export function localIdentity(): { user: string; host: string } {
   }
   return { user, host: hostname() };
 }
+
+/** The login shell's PATH, asked once per process; null when it can't be read. */
+let shellPath: Promise<string | null> | undefined;
+
+async function loginShellPath(env: Record<string, string | undefined>): Promise<string | null> {
+  const shell = env.SHELL || "/bin/sh";
+  const mark = "__HARNESS_PATH__";
+  try {
+    // Interactive too: nvm and the like are set up in .zshrc/.bashrc, not only in the login files.
+    const proc = Bun.spawn([shell, "-ilc", `printf '${mark}%s${mark}' "$PATH"`], { env: { ...env }, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const timer = setTimeout(() => proc.kill(), 10_000);
+    const out = await new Response(proc.stdout).text();
+    clearTimeout(timer);
+    await proc.exited;
+    return out.split(mark)[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PATH for the user's own tools the dashboard runs (omp, gh, claude, codex). An app started from the macOS Dock or
+ * Finder inherits only /usr/bin:/bin:/usr/sbin:/sbin: without more, `gh` isn't found, and scripts such as omp
+ * (`#!/usr/bin/env bun`) or claude (`#!/usr/bin/env node`) can't start. So the login shell's PATH is added, then the
+ * folders where such tools usually live, in case the shell couldn't be asked.
+ */
+export async function toolPath(env: Record<string, string | undefined>, home: string, platform: NodeJS.Platform): Promise<string | undefined> {
+  if (platform === "win32") return env.PATH;
+  shellPath ??= loginShellPath(env);
+  const dirs = [
+    ...(env.PATH ?? "").split(":"),
+    ...((await shellPath) ?? "").split(":"),
+    join(home, ".bun", "bin"),
+    join(home, ".local", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ];
+  return [...new Set(dirs.filter(Boolean))].join(":");
+}

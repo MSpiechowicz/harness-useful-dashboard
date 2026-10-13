@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { getMeta, setMeta } from "./db.ts";
-import { appDataDir } from "./paths.ts";
+import { appDataDir, toolPath } from "./paths.ts";
 import { BATCH_SIZE, buildPrompt, type LabelConfig, labelInputs, labelQueue, noteAttempts, parseLabels, saveLabels, SYSTEM_PROMPT, tagLabelerSessions } from "./labels.ts";
 
 /**
@@ -164,7 +165,6 @@ export async function labelSessions(
   deps: LabelerDeps = {},
 ): Promise<LabelRun> {
   const now = (deps.now ?? Date.now)();
-  const which = deps.which ?? ((n: string) => Bun.which(n));
   const run = deps.run ?? spawnCli;
   const dir = deps.dir ?? labelerDir();
   const state = labelState(db, host, now);
@@ -192,14 +192,15 @@ export async function labelSessions(
     return { ...next, skipped: null };
   };
 
-  const exe = which(l.cli);
+  const baseEnv = deps.env ?? process.env;
+  const env = { ...baseEnv, PATH: await toolPath(baseEnv, homedir(), process.platform), [LABELER_ENV]: "1" };
+  const exe = deps.which ? deps.which(l.cli) : Bun.which(l.cli, { PATH: env.PATH });
   if (!exe) return fail("not-installed", 0, 0, state.sent);
 
   const ids = opts.ids ?? labelQueue(db, dir, remainingToday(state, l.dailyCap), now);
   if (!ids.length) return opts.ids ? skip("none") : skip(remainingToday(state, l.dailyCap) <= 0 ? "cap" : "none");
 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const env = { ...(deps.env ?? process.env), [LABELER_ENV]: "1" };
   let labelled = 0;
   let failed = 0;
   let sent = state.sent;
