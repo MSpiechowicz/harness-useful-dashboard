@@ -238,6 +238,26 @@ describe("omp limits", () => {
     expect(first.problems).toEqual([]);
     expect((await cache.get(db, ID.host, { ...enabled, omp: false })).reports).toEqual([]);
   });
+
+  test("Refresh drops omp's own usage cache before reading, the regular checks don't", async () => {
+    let now = NOW;
+    const ran: string[] = [];
+    const cache = new LimitsCache({
+      now: () => now,
+      home: "/nowhere",
+      platform: "linux",
+      readFile: () => null,
+      run: async (cmd) => (ran.push(cmd.slice(1).join(" ")), JSON.stringify(usage)),
+    });
+    const db = memDb();
+    const on = { omp: true };
+    await cache.get(db, ID.host, on);
+    now += 6 * 60_000;
+    await cache.get(db, ID.host, on);
+    now += 2 * 60_000;
+    await cache.get(db, ID.host, on, true);
+    expect(ran).toEqual(["usage --json --redact", "usage --json --redact", "usage invalidate", "usage --json --redact"]);
+  });
 });
 
 describe("pi and OpenCode logins", () => {

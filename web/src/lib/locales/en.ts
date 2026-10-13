@@ -445,6 +445,7 @@ export const en = {
   "live.lastActivity": "Last activity {ago}",
   "live.limits": "Plan limits",
   "live.limitsHint": "What is left of each limit. The tick marks the time left.",
+  "live.limitsInfo": "This dashboard and omp each keep a reading for about 5 minutes.\nProviders count new use a few minutes late. GitHub Copilot takes about 7.\nRefresh skips both and asks the providers again.",
   "live.refresh": "Refresh",
   "live.noLimits": "No plan limits found",
   "live.noLimitsHint": "Sign in to Claude Code, use Codex, or log in to omp to see them here. The sources can be switched in Settings.",

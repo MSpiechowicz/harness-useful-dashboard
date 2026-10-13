@@ -507,10 +507,15 @@ function ompBinary(d: Required<LimitDeps>): string | null {
   return candidates.find((p): p is string => !!p && existsSync(p)) ?? null;
 }
 
-export async function ompLimits(deps: LimitDeps = {}): Promise<LimitReport[]> {
+/**
+ * omp keeps the usage it fetched for about 5 minutes (±25%), across all its processes: a plain read may answer from
+ * that. `fresh` (the user's Refresh) drops it first, so omp asks the providers again.
+ */
+export async function ompLimits(deps: LimitDeps = {}, fresh = false): Promise<LimitReport[]> {
   const d = withDefaults(deps);
   const bin = deps.run ? "omp" : ompBinary(d);
   if (!bin) throw new LimitError("not-installed");
+  if (fresh) await d.run([bin, "usage", "invalidate"], 30_000);
   // --redact shortens account emails to a prefix: enough to tell accounts apart, nothing more is needed here.
   const out = await d.run([bin, "usage", "--json", "--redact"], 30_000);
   if (out == null) throw new LimitError("failed");
@@ -694,7 +699,7 @@ export class LimitsCache {
     type Loaded = { reports: LimitReport[]; problem: LimitProblem["code"] | null };
     const remote: [LimitSource, () => Promise<Loaded>][] = [
       ["claude", async () => ({ reports: ((r) => (r ? [r] : []))(await claudeLimits(this.deps)), problem: null })],
-      ["omp", async () => ({ reports: await ompLimits(this.deps), problem: null })],
+      ["omp", async () => ({ reports: await ompLimits(this.deps, force), problem: null })],
       ["copilot", async () => ({ reports: ((r) => (r ? [r] : []))(await copilotLimits(this.deps)), problem: null })],
       ["pi", () => loginLimits("pi", this.deps)],
       ["opencode", () => loginLimits("opencode", this.deps)],

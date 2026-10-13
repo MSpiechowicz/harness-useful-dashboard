@@ -347,7 +347,7 @@
           <Chart {option} height={280} fill />
         {/if}
       </Card>
-      <Card title={t("live.limits")} subtitle={t("live.limitsHint")} class="xl:col-span-2" pad={false}>
+      <Card title={t("live.limits")} subtitle={t("live.limitsHint")} info={t("live.limitsInfo")} class="xl:col-span-2" pad={false}>
         {#snippet actions()}
           <button class="btn !h-7 !px-2 !text-xs" onclick={refreshLimits} disabled={refreshing}>{t("live.refresh")}</button>
         {/snippet}

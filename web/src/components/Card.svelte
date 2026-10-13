@@ -1,6 +1,6 @@
 <script lang="ts">
   import { setContext, type Snippet } from "svelte";
-  import { Table2, ChartColumn } from "@lucide/svelte";
+  import { Table2, ChartColumn, Info } from "@lucide/svelte";
   import { t } from "../lib/i18n.svelte.ts";
   import { columnSets } from "../lib/columns.svelte.ts";
   import ColumnsMenu from "./ColumnsMenu.svelte";
@@ -9,6 +9,8 @@
   interface Props {
     title?: string;
     subtitle?: string;
+    /** More about the card than the subtitle should hold, in a tooltip on an icon after the title. One point per line. */
+    info?: string;
     actions?: Snippet;
     children: Snippet;
     /** When provided, the card gets a chart/table toggle and renders this instead of children in table mode. */
@@ -23,7 +25,7 @@
     exportName?: string;
     exportRows?: () => readonly unknown[];
   }
-  let { title, subtitle, actions, children, table, class: cls = "", pad = true, divided = false, footer, exportName, exportRows }: Props = $props();
+  let { title, subtitle, info, actions, children, table, class: cls = "", pad = true, divided = false, footer, exportName, exportRows }: Props = $props();
   let showTable = $state(false);
   // A chart in the card is named after it (see Chart's label).
   setContext("card-title", () => title);
@@ -40,7 +42,23 @@
     <header class="flex flex-wrap items-start justify-between gap-2 px-5 pt-4 {divided ? 'border-b border-line pb-4' : ''}">
       <!-- A long description wraps beside the buttons, rather than pushing them onto a line of their own. -->
       <div class="min-w-0 flex-1 basis-56">
-        {#if title}<h2 class="font-semibold text-ink {divided ? 'text-[15px]' : 'text-sm'}">{title}</h2>{/if}
+        {#if title}
+          <div class="flex items-center gap-1.5">
+            <h2 class="font-semibold text-ink {divided ? 'text-[15px]' : 'text-sm'}">{title}</h2>
+            {#if info}
+              <!-- The app's popover look rather than the browser's plain title tooltip; shown on hover and on keyboard focus. -->
+              <button type="button" class="group relative flex shrink-0 cursor-help rounded-sm text-muted hover:text-ink focus-visible:text-ink" aria-label={info}>
+                <Info size={13} />
+                <span
+                  aria-hidden="true"
+                  class="popover pointer-events-none invisible top-full -left-2 flex w-72 flex-col gap-1.5 !p-3 text-left text-xs leading-relaxed font-normal text-ink-2 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
+                >
+                  {#each info.split("\n") as line, i (i)}<span>{line}</span>{/each}
+                </span>
+              </button>
+            {/if}
+          </div>
+        {/if}
         {#if subtitle}<p class="mt-0.5 text-xs text-muted">{subtitle}</p>{/if}
       </div>
       <!-- The buttons start where the title's letters do, not at the top of its line box (about 5px higher). -->

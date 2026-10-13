@@ -447,6 +447,7 @@ export const es: Record<MessageKey, string> = {
   "live.lastActivity": "Última actividad {ago}",
   "live.limits": "Límites del plan",
   "live.limitsHint": "Lo que queda de cada límite. La marca indica el tiempo restante.",
+  "live.limitsInfo": "Este panel y omp guardan cada uno una lectura durante unos 5 minutos.\nLos proveedores cuentan el uso nuevo con unos minutos de retraso. GitHub Copilot tarda unos 7.\nActualizar omite ambos y vuelve a consultar a los proveedores.",
   "live.refresh": "Actualizar",
   "live.noLimits": "No se encontraron límites del plan",
   "live.noLimitsHint": "Inicia sesión en Claude Code, usa Codex o inicia sesión en omp para verlos aquí. Puedes cambiar las fuentes en Ajustes.",

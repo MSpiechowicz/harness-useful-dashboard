@@ -447,6 +447,7 @@ export const fr: Record<MessageKey, string> = {
   "live.lastActivity": "Dernière activité {ago}",
   "live.limits": "Limites du forfait",
   "live.limitsHint": "Ce qu'il reste de chaque limite. Le repère marque le temps restant.",
+  "live.limitsInfo": "Ce tableau de bord et omp conservent chacun un relevé environ 5 minutes.\nLes fournisseurs comptent le nouvel usage avec quelques minutes de retard. GitHub Copilot met environ 7 minutes.\nActualiser contourne les deux et interroge à nouveau les fournisseurs.",
   "live.refresh": "Actualiser",
   "live.noLimits": "Aucune limite de forfait trouvée",
   "live.noLimitsHint": "Connectez-vous à Claude Code, utilisez Codex ou connectez-vous à omp pour les afficher ici. Vous pouvez choisir les sources dans les paramètres.",
