@@ -285,11 +285,21 @@ class FailureLog {
   }
 }
 
-/** Why Bun.serve couldn't listen. */
-function bindError(err: unknown): IngestErrorCode {
+/** Whether a bind address is one this machine listens on: any, loopback, or one of its interfaces. */
+function ownAddress(bind: string): boolean {
+  const host = bind.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host === "0.0.0.0" || host === "::" || host === "::1" || host.startsWith("127.")) return true;
+  return Object.values(networkInterfaces()).some((list) => list?.some((i) => i.address.toLowerCase() === host));
+}
+
+/**
+ * Why Bun.serve couldn't listen. On macOS and Windows Bun reports every failed bind as EADDRINUSE, so a port "in use"
+ * on an address this machine doesn't have is told as the address it is.
+ */
+export function bindError(err: unknown, bind: string): IngestErrorCode {
   const code = (err as { code?: unknown })?.code;
-  if (code === "EADDRINUSE") return "in-use";
   if (code === "EADDRNOTAVAIL" || code === "ENOTFOUND" || code === "EINVAL") return "address";
+  if (code === "EADDRINUSE") return ownAddress(bind) ? "in-use" : "address";
   return "other";
 }
 
@@ -389,7 +399,7 @@ export class IngestServer {
       this.setState({ state: "listening", address: hostPort(c.bind, this.server.port ?? c.port), error: null, message: null });
     } catch (err) {
       this.server = null;
-      const error = bindError(err);
+      const error = bindError(err, c.bind);
       this.setState({ state: "error", address: null, error, message: (err as Error)?.message ?? String(err) });
       if (error === "in-use" || error === "address") this.retryLater(c);
     }

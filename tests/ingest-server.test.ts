@@ -10,7 +10,7 @@ import { MAX_HOSTS } from "../src/core/otlp/map.ts";
 import { MAX_RECORDS } from "../src/core/otlp/write.ts";
 import { App, type AppEvent } from "../src/server/app.ts";
 import { createHandler } from "../src/server/http.ts";
-import { addressKey, type IngestApp, type IngestDeps, IngestServer, type IngestStatus, MAX_BODY } from "../src/server/ingest.ts";
+import { addressKey, bindError, type IngestApp, type IngestDeps, IngestServer, type IngestStatus, MAX_BODY } from "../src/server/ingest.ts";
 import { AUTH_FILE, IngestAuth } from "../src/server/ingestAuth.ts";
 import { claudeLogs, encodeTraces, hermesSpans, logsJson, T0 } from "./otlpEncode.ts";
 import { tempDir } from "./helpers.ts";
@@ -624,6 +624,16 @@ describe("OTLP listener server", () => {
       server.stop();
       blocker.stop(true);
     }
+  });
+
+  test("a bind that fails as in use on an address this machine doesn't have is the address, as Bun reports it on macOS and Windows", () => {
+    const inUse = Object.assign(new Error("Failed to start server. Is port 45123 in use?"), { code: "EADDRINUSE" });
+    expect(bindError(inUse, "192.0.2.123")).toBe("address");
+    expect(bindError(inUse, "127.0.0.1")).toBe("in-use");
+    expect(bindError(inUse, "0.0.0.0")).toBe("in-use");
+    expect(bindError(inUse, "::")).toBe("in-use");
+    expect(bindError(Object.assign(new Error("x"), { code: "EADDRNOTAVAIL" }), "127.0.0.1")).toBe("address");
+    expect(bindError(new Error("x"), "127.0.0.1")).toBe("other");
   });
 
   test("an address this machine doesn't have is reported, and the dashboard's port is refused without binding", () => {
