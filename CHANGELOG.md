@@ -1,3 +1,16 @@
+# [2.1.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.6...v2.1.0) (2026-10-14)
+
+
+### Bug Fixes
+
+* Redacting secrets stays fast on long text that looks like a JWT ([7ebd1df](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/7ebd1df2696501d1480f0d09a3a7b6fce3357560))
+* Remote agents tell an address this machine doesn't have from a port in use on macOS and Windows ([4c97e02](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/4c97e0207d55ad1eeffdfb971dafbbbfa4fdd644))
+
+
+### Features
+
+* Remote agents report their token usage to the dashboard over OTLP ([f071f09](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/f071f09ecfa1d8d77b140a3425e3f531cd474b71))
+
 ## [2.0.6](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.5...v2.0.6) (2026-10-13)
 
 
