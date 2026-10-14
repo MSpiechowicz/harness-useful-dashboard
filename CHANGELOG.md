@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.1.1...v2.2.0) (2026-10-14)
+
+
+### Features
+
+* The update banner has a Later button and a lighter title ([a5c6a45](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a5c6a45391d1cfd5c83651d13bcd122558e10249))
+
 ## [2.1.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.1.0...v2.1.1) (2026-10-14)
 
 
