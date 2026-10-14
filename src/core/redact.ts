@@ -2,6 +2,14 @@ import type { Database } from "bun:sqlite";
 import { getMeta, setMeta } from "./db.ts";
 
 /**
+ * JWTs: "eyJ" after a word boundary, then three dot-separated parts. Every start within one run of [A-Za-z0-9_-]
+ * shares that run's end, so only the run's first "eyJ" after its start or a "-" can match: the match starts only at
+ * the start of a run and keeps the part before that "eyJ" (group 1). Starting at every "eyJ" read the rest of the run
+ * each time, quadratic in a long run like "eyJ-eyJ-…".
+ */
+const JWT = /(?<![A-Za-z0-9_-])((?:(?!eyJ)[A-Za-z0-9_]*-)*)eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
+
+/**
  * Secrets people paste into prompts: API keys, tokens and private keys. Only shapes specific enough not to catch
  * ordinary text (a known prefix and a long run of key characters).
  */
@@ -14,7 +22,7 @@ const SECRETS: RegExp[] = [
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/g, // Slack
   /\bAIza[0-9A-Za-z_-]{35}/g, // Google
   /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}/g, // Stripe
-  /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWTs
+  JWT,
   /\bBearer [A-Za-z0-9._~+/-]{20,}=*/g,
 ];
 
@@ -23,7 +31,7 @@ export const REDACTED = "[redacted]";
 /** Text with every secret it holds replaced, so the database never keeps one. */
 export function redact(text: string): string {
   let out = text;
-  for (const re of SECRETS) out = out.replace(re, REDACTED);
+  for (const re of SECRETS) out = out.replace(re, re === JWT ? `$1${REDACTED}` : REDACTED);
   return out;
 }
 

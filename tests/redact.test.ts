@@ -11,6 +11,7 @@ const OPENAI = fake("sk-", "proj-", "abcdefghijklmnopqrstuvwxyz0123456789ABCD");
 const GITHUB = fake("ghp", "_", "abcdefghijklmnopqrstuvwxyz0123456789AB");
 const AWS = fake("AKIA", "IOSFODNN7EXAMPLE");
 const SLACK = fake("xoxb", "-1234567890-abcdefghij");
+const JWT = fake("eyJhbGciOiJIUzI1NiJ9", ".", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", ".", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U");
 
 describe("redact", () => {
   test.each([
@@ -19,6 +20,10 @@ describe("redact", () => {
     [`token ${GITHUB}`, `token ${REDACTED}`],
     [`AWS ${AWS} id`, `AWS ${REDACTED} id`],
     [`slack ${SLACK}`, `slack ${REDACTED}`],
+    [`jwt ${JWT}.`, `jwt ${REDACTED}.`],
+    [`session-${JWT}`, `session-${REDACTED}`],
+    [`--a-b-eyJ-${JWT}`, `--a-b-${REDACTED}`],
+    [`Authorization: Bearer ${JWT}`, `Authorization: Bearer ${REDACTED}`],
     ["Authorization: Bearer abcdefghijklmnopqrstuvwxyz.012345", `Authorization: ${REDACTED}`],
     ["-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\nthanks", `${REDACTED}\nthanks`],
   ])("hides %p", (input, expected) => {
@@ -31,6 +36,16 @@ describe("redact", () => {
       expect(redact(text)).toBe(text);
     },
   );
+
+  test.each([
+    ["eyJ- runs", "eyJ-".repeat(25_000)],
+    ["a JWT's first two parts before an eyJ- run", `eyJhbGciOiJIUzI1NiJ9.eyJ${"eyJ-".repeat(25_000)}`],
+    ["eyJ after - in a run", "a-eyJ-".repeat(17_000)],
+  ])("a long text that almost holds a JWT takes no longer than any other: %s", (_name, text) => {
+    const started = performance.now();
+    expect(redact(text)).toBe(text);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
 
   test("a key is hidden before the text is cut, so half of one can't be stored", () => {
     const text = "x".repeat(10) + ` ${ANT}`;
