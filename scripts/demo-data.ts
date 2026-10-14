@@ -248,6 +248,8 @@ const MODELS: Record<Provider, [string, number][]> = {
   kilo: [["claude-sonnet-5-5", 1], ["gpt-5-codex", 1]],
   gemini: [["gemini-3.5-flash", 3], ["gemini-3.1-pro-preview", 2]],
   copilot: [["claude-sonnet-5-5", 3], ["gpt-5", 2]],
+  hermes: [["claude-sonnet-5-5", 2], ["gpt-5", 1]],
+  otel: [["gpt-5", 1]],
 };
 /** Output tokens per second each model usually streams at, for the drift view. */
 const SPEED: Record<string, number> = {

@@ -15,6 +15,8 @@ export interface Filters {
   provider?: string;
   project?: string;
   user?: string;
+  /** The machine the usage was recorded on (a remote agent's own host name for OTLP data). */
+  host?: string;
   model?: string;
   skill?: string;
   agent?: string;
@@ -26,12 +28,12 @@ export interface Filters {
 
 export type Dimension = "provider" | "project" | "user" | "model" | "skill" | "agent" | "session" | "prompt" | "host";
 export type Bucket = "hour" | "day" | "week" | "month";
-export type SeriesGroup = "none" | "type" | "provider" | "project" | "user" | "model" | "skill" | "agent";
+export type SeriesGroup = "none" | "type" | "provider" | "project" | "user" | "host" | "model" | "skill" | "agent";
 export type Metric = "tokens" | "cost";
 
 type Params = Record<string, string | number | null>;
 
-const FILTER_COLUMNS: (keyof Filters)[] = ["provider", "project", "user", "model", "skill", "agent"];
+const FILTER_COLUMNS: (keyof Filters)[] = ["provider", "project", "user", "host", "model", "skill", "agent"];
 
 /**
  * Rows of the sessions a tag reaches, resolved when the query runs, so tagging or untagging a session needs no rewrite
@@ -65,11 +67,13 @@ export function whereClause(f: Filters, alias = "u"): { sql: string; params: Par
   for (const col of FILTER_COLUMNS) {
     const v = f[col];
     if (v == null || v === "") continue;
-    if (v === "(none)") parts.push(`${alias}.${col} IS NULL`);
-    else {
-      parts.push(`${alias}.${col} = $${col}`);
-      params[col] = v as string;
-    }
+
+    // Tool calls carry no host: they are on the machine of their session.
+    const viaSession = col === "host" && alias === "t";
+    const ref = viaSession ? "s.host" : `${alias}.${col}`;
+    const cond = v === "(none)" ? `${ref} IS NULL` : `${ref} = $${col}`;
+    parts.push(viaSession ? `${alias}.session_id IN (SELECT s.id FROM sessions s WHERE ${cond})` : cond);
+    if (v !== "(none)") params[col] = v as string;
   }
   if (f.tag) {
     parts.push(tagCondition(alias));
@@ -1264,7 +1268,7 @@ export class Queries {
   filters(f: Filters = {}) {
     return memo(this.db, `filters:${f.from ?? ""}:${f.to ?? ""}`, () => {
       const time = whereClause({ from: f.from, to: f.to });
-      const cols = ["provider", "project", "user", "model", "skill", "agent"] as const;
+      const cols = ["provider", "project", "user", "host", "model", "skill", "agent"] as const;
       type Col = (typeof cols)[number];
       const combos = this.all<Record<Col, string | null> & { n: number; cost: number }>(
         `SELECT ${cols.map((c) => `u.${c}`).join(", ")}, COUNT(*) AS n, COALESCE(SUM(u.cost_usd), 0) AS cost
@@ -1290,6 +1294,7 @@ export class Queries {
         provider: values("provider"),
         project: values("project"),
         user: values("user"),
+        host: values("host"),
         model: values("model"),
         skill: values("skill").filter((v) => v.value !== "(none)"),
         agent: values("agent"),

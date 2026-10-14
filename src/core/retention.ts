@@ -14,8 +14,10 @@ import { getMeta, setMeta } from "./db.ts";
  *
  * The setting is per machine (config.json), and so is what it trims: only the rows this host ingested. On a shared
  * database each machine keeps its own detail as long as its own setting says, and a machine with trimming off never
- * loses anything to another's. Trimming runs at most once a day, in batches of a few thousand rows per transaction,
- * so the server stays responsive and a database in a synced folder isn't rewritten in one huge commit.
+ * loses anything to another's. The rows remote hosts sent over OTLP (ids `otlp:…`) are trimmed with this machine's
+ * setting too, all of them in one pass whatever host they name (`host` null), never the rows of a machine of the same
+ * name that writes its own. Trimming runs at most once a day, in batches of a few thousand rows per transaction, so
+ * the server stays responsive and a database in a synced folder isn't rewritten in one huge commit.
  *
  * Reading old logs again (a full rescan, a migration) doesn't bring the detail back: the writer leaves out detail
  * older than the cutoff (DbWriter's `detailBefore`), and a stored prompt's text is never overwritten.
@@ -29,8 +31,11 @@ const TITLE_CHARS = 300;
 const VACUUM_PAGES = 2000;
 const DAY = 86_400_000;
 
-/** Where the last trim of a host is noted: `{ months, until, at }`. */
-const metaKey = (host: string) => `detail_trim:${host}`;
+/** Where the last trim of a host is noted: `{ months, until, at }`. The trim of the rows taken over OTLP (null) has one note. */
+const metaKey = (host: string | null) => (host == null ? "detail_trim_otlp" : `detail_trim:${host}`);
+
+/** SQL for ids taken over OTLP (otlp/write.ts). GLOB, not LIKE: it is case-sensitive and can use the id index. */
+export const OTLP_ID = "GLOB 'otlp:*'";
 
 interface TrimNote {
   /** The setting it ran with. */
@@ -49,7 +54,7 @@ export function detailCutoff(months: number, now = Date.now()): number | null {
   return d.getTime();
 }
 
-function note(db: Database, host: string): TrimNote | null {
+function note(db: Database, host: string | null): TrimNote | null {
   try {
     const n = JSON.parse(getMeta(db, metaKey(host)) ?? "null") as TrimNote | null;
     return n && typeof n.until === "number" && typeof n.at === "number" ? n : null;
@@ -58,8 +63,11 @@ function note(db: Database, host: string): TrimNote | null {
   }
 }
 
-/** Whether a trim is due: never ran with this setting, or last ran a day ago. Off with nothing noted is never due. */
-export function trimDue(db: Database, host: string, months: number, now = Date.now()): boolean {
+/**
+ * Whether a trim of a host (or of the rows taken over OTLP, null) is due: never ran with this setting, or last ran a
+ * day ago. Off with nothing noted is never due.
+ */
+export function trimDue(db: Database, host: string | null, months: number, now = Date.now()): boolean {
   const last = note(db, host);
   if (!(months > 0)) return last != null;
   return !last || last.months !== months || now - last.at >= DAY;
@@ -97,11 +105,12 @@ export interface TrimOptions extends StepOptions {
 }
 
 /**
- * Trims this host's detail older than `months` (see the top of this file), then gives the freed pages back to the disk
- * when the database can do that a step at a time. With `months` 0 it only forgets the note of an earlier trim, so
- * turning trimming on again later goes over all history once more.
+ * Trims the detail older than `months` (see the top of this file) of this host, or with `host` null of every row taken
+ * over OTLP whatever host it names, then gives the freed pages back to the disk when the database can do that a step
+ * at a time. With `months` 0 it only forgets the note of an earlier trim, so turning trimming on again later goes over
+ * all history once more.
  */
-export async function trimDetail(db: Database, host: string, months: number, opts: TrimOptions = {}): Promise<TrimResult> {
+export async function trimDetail(db: Database, host: string | null, months: number, opts: TrimOptions = {}): Promise<TrimResult> {
   const now = opts.now ?? Date.now();
   const n = opts.batch ?? TRIM_BATCH;
   const pause = opts.pause ?? nextTick;
@@ -119,14 +128,15 @@ export async function trimDetail(db: Database, host: string, months: number, opt
   const from = last && last.months === months ? Math.max(0, Math.min(last.until, cutoff) - DAY) : 0;
 
   // Each step reads the next rows in time order (keyset on ts and rowid, so a batch never reads the rows of the one
-  // before), then changes those that still hold detail in one transaction.
+  // before), then changes those that still hold detail in one transaction. Rows of this host, or taken over OTLP.
   type Row = { rid: number; ts: number; dirty: number };
+  const rowsOf = (hostCol: string, idCol: string) => (host == null ? `${idCol} ${OTLP_ID}` : `${hostCol} = $host`);
   const steps: { key: "prompts" | "toolCalls" | "outcomes" | "responseMeta" | "sessions" | "gitEvents"; select: string; update: string; from: number }[] = [
     {
       key: "prompts",
       select: `SELECT p.rowid AS rid, p.ts, (length(p.text) > ${TITLE_CHARS} OR p.id IS NOT ${firstPrompt("p")}) AS dirty
                FROM prompts p JOIN sessions s ON s.id = p.session_id
-               WHERE s.host = $host AND p.text IS NOT NULL AND (p.ts, p.rowid) > ($ts, $rid) AND p.ts < $cutoff
+               WHERE ${rowsOf("s.host", "p.id")} AND p.text IS NOT NULL AND (p.ts, p.rowid) > ($ts, $rid) AND p.ts < $cutoff
                ORDER BY p.ts, p.rowid LIMIT $n`,
       // A session's first prompt keeps its start: it is the session's title when the harness gave it none.
       update: `UPDATE prompts SET text = CASE WHEN id IS ${firstPrompt("prompts")} THEN substr(text, 1, ${TITLE_CHARS}) END
@@ -137,7 +147,7 @@ export async function trimDetail(db: Database, host: string, months: number, opt
       key: "toolCalls",
       select: `SELECT t.rowid AS rid, t.ts, (t.file_path IS NOT NULL OR t.brief IS NOT NULL) AS dirty
                FROM tool_calls t JOIN sessions s ON s.id = t.session_id
-               WHERE s.host = $host AND (t.ts, t.rowid) > ($ts, $rid) AND t.ts < $cutoff ORDER BY t.ts, t.rowid LIMIT $n`,
+               WHERE ${rowsOf("s.host", "t.id")} AND (t.ts, t.rowid) > ($ts, $rid) AND t.ts < $cutoff ORDER BY t.ts, t.rowid LIMIT $n`,
       // An edit's line counts and model stay: they are numbers, not detail.
       update: "UPDATE tool_calls SET file_path = NULL, brief = NULL WHERE rowid = $rid",
       from,
@@ -145,7 +155,7 @@ export async function trimDetail(db: Database, host: string, months: number, opt
     {
       key: "outcomes",
       select: `SELECT rowid AS rid, ts, (detail IS NOT NULL OR input IS NOT NULL) AS dirty FROM outcomes
-               WHERE host = $host AND (ts, rowid) > ($ts, $rid) AND ts < $cutoff ORDER BY ts, rowid LIMIT $n`,
+               WHERE ${rowsOf("host", "id")} AND (ts, rowid) > ($ts, $rid) AND ts < $cutoff ORDER BY ts, rowid LIMIT $n`,
       update: "UPDATE outcomes SET detail = NULL, input = NULL WHERE rowid = $rid",
       from,
     },
@@ -153,14 +163,14 @@ export async function trimDetail(db: Database, host: string, months: number, opt
       // Response times hang off usage rows: found through them, by time, and deleted (the usage row stays).
       key: "responseMeta",
       select: `SELECT u.rowid AS rid, u.ts, EXISTS (SELECT 1 FROM response_meta m WHERE m.usage_id = u.id) AS dirty FROM usage u
-               WHERE u.host = $host AND (u.ts, u.rowid) > ($ts, $rid) AND u.ts < $cutoff ORDER BY u.ts, u.rowid LIMIT $n`,
+               WHERE ${rowsOf("u.host", "u.id")} AND (u.ts, u.rowid) > ($ts, $rid) AND u.ts < $cutoff ORDER BY u.ts, u.rowid LIMIT $n`,
       update: "DELETE FROM response_meta WHERE usage_id = (SELECT id FROM usage WHERE rowid = $rid)",
       from,
     },
     {
       key: "sessions",
       select: `SELECT rowid AS rid, COALESCE(ended_at, started_at) AS ts, 1 AS dirty FROM sessions
-               WHERE host = $host AND brief IS NOT NULL AND COALESCE(ended_at, started_at) < $cutoff
+               WHERE ${rowsOf("host", "id")} AND brief IS NOT NULL AND COALESCE(ended_at, started_at) < $cutoff
                AND (COALESCE(ended_at, started_at), rowid) > ($ts, $rid) ORDER BY 2, rowid LIMIT $n`,
       update: "UPDATE sessions SET brief = NULL WHERE rowid = $rid",
       from: 0,
@@ -168,7 +178,7 @@ export async function trimDetail(db: Database, host: string, months: number, opt
     {
       key: "gitEvents",
       select: `SELECT rowid AS rid, ts, (subject IS NOT NULL) AS dirty FROM git_events
-               WHERE host = $host AND (ts, rowid) > ($ts, $rid) AND ts < $cutoff ORDER BY ts, rowid LIMIT $n`,
+               WHERE ${rowsOf("host", "id")} AND (ts, rowid) > ($ts, $rid) AND ts < $cutoff ORDER BY ts, rowid LIMIT $n`,
       update: "UPDATE git_events SET subject = NULL WHERE rowid = $rid",
       from,
     },
@@ -181,7 +191,7 @@ export async function trimDetail(db: Database, host: string, months: number, opt
     // From `from` on: (ts, rowid) > (from - 1, max) is every row with ts >= from.
     while (true) {
       if (stop()) return { ...result, done: false };
-      const rows = select.all({ host, cutoff, n, ts: cursor.ts, rid: cursor.rid });
+      const rows = select.all({ host: host ?? "", cutoff, n, ts: cursor.ts, rid: cursor.rid });
       const dirty = rows.filter((r) => r.dirty);
       if (dirty.length) {
         db.transaction(() => {
@@ -197,6 +207,8 @@ export async function trimDetail(db: Database, host: string, months: number, opt
   }
   if (stop()) return { ...result, done: false };
   setMeta(db, metaKey(host), JSON.stringify({ months, until: cutoff, at: now } satisfies TrimNote));
+  // Notes of a trim per remote host, as an earlier build kept them: the one note above stands for them all.
+  if (host == null) db.query("DELETE FROM meta WHERE key GLOB 'detail_trim_otlp:*'").run();
   result.freedPages = await vacuumFree(db, { pause, stop });
   return result;
 }

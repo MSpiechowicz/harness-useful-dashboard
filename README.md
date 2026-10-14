@@ -256,6 +256,9 @@ neutral dark gray with a blue accent.
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/` (or `$GEMINI_CLI_HOME/.gemini`) | per-response usage with cached and thinking tokens, prompts, tools and their errors, subagent chats, session summaries as titles. The project comes from the folder's `.project_root`. Chats from before v0.39 (one JSON file each) are read too |
 | GitHub Copilot CLI | `~/.copilot/session-state/<id>/events.jsonl` and `~/.copilot/session-store.db` (or `$COPILOT_HOME`) | prompts, tools and their errors, and the tokens and premium requests per model and agent that Copilot writes when a session ends, as one row per model on that moment. When `session-store.db` exists, its `assistant_usage_events` table gives the tokens of each call, opened read-only. A session with rows there keeps only its premium requests from the end-of-session totals, so nothing is counted twice. GitHub does not document that database, so support is best effort and was tested with made-up data only. A session whose store holds only some of its calls is undercounted. Without the file, or for a session that never ended cleanly, there are no tokens per call. Compactions Copilot runs itself show up as compactions. Billed through GitHub Copilot, cost shown at API prices |
 | Cursor | cursor.com, asked with the login the Cursor editor keeps on the machine (`~/.config/Cursor/User/globalStorage/state.vscdb`, macOS `~/Library/Application Support/Cursor/…`, Windows `%APPDATA%\Cursor\…`), or the CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Turn on **Settings → Sync Cursor usage** (off by default) to fetch it every 6 hours, or import the CSV in **Settings** or with `import-cursor`. A row per model call with its tokens and the cost Cursor charged. A call that is both synced and imported counts once. The login is read from Cursor's database each time (read-only), never stored, logged or renewed, and sent to cursor.com only. An expired one is reported until Cursor signs in again |
+| Hermes Agent | sent over OTLP by the `hermes_otel` plugin (see [Remote agents](#remote-agents)) | a row per model call with the cost Hermes reports, tools and their outcomes, subagent sessions |
+| Claude Code on other machines | sent over OTLP by Claude Code's own telemetry (see [Remote agents](#remote-agents)) | a row per API request priced with the price book, tools and their outcomes, prompts. The machine the dashboard runs on is read from its logs instead |
+| OpenTelemetry (GenAI) | sent over OTLP by any exporter that follows the `gen_ai.*` conventions | a row per chat or completion span that carries token counts |
 
 Folders can be changed, or extra ones added, in **Settings → Data sources**. Ingestion is incremental: each scan only reads
 bytes appended since the last one, so rescans take milliseconds.
@@ -559,8 +562,8 @@ handshake-based versions before it (2025-11-25, 2025-06-18, 2025-03-26 and 2024-
 ### Budgets and alerts
 
 In **Settings → Budgets and alerts**, set a daily or monthly cap, or a monthly cap per project. Caps count your own
-usage (the name in **Settings → Your name**) at API-equivalent prices, and **Overview** shows how each stands, with the
-month's pace. The dashboard sends a desktop notification when a budget reaches 80% and when it's used up, and when a
+usage (the name in **Settings → Your name**) at API-equivalent prices. Usage from
+[remote agents](#remote-agents) is never counted. **Overview** shows how each stands, with the month's pace. The dashboard sends a desktop notification when a budget reaches 80% and when it's used up, and when a
 plan limit is 80% used. Each one once per day, month or limit window. Notifications come from the background server, so
 they arrive with no dashboard window open: through `notify-send` on Linux (from libnotify), the Notification Center on
 macOS and a toast on Windows. **Send test** checks that your system lets them through.
@@ -697,9 +700,139 @@ harness_plan_limit_used_ratio{provider="claude", window="5h"}
 sum(increase(harness_lines_added_total[1d])) + sum(increase(harness_lines_removed_total[1d]))
 ```
 
-The server listens on `127.0.0.1` only, so a Prometheus on another machine needs a reverse proxy in front of it or an SSH
+The dashboard's own server listens on `127.0.0.1` only (the optional port for [remote agents](#remote-agents) is a
+separate one and never serves `/metrics`), so a Prometheus on another machine needs a reverse proxy in front of it or an SSH
 tunnel (`ssh -L 4317:127.0.0.1:4317 your-machine`). In Home Assistant, the Prometheus integration is for exporting its
 own data, so read this endpoint with a REST sensor instead, sending the token in an `Authorization: Bearer` header.
+
+### Remote agents
+
+Agents on other machines can send their usage to the dashboard over OTLP/HTTP. Turn it on and the running dashboard opens a
+second port that only takes data in. It accepts protobuf or JSON, gzip included, on `/v1/traces`, `/v1/logs` and
+`/v1/metrics`, and gives nothing out. It is off by default and needs no second process. Agents can report only while the
+dashboard runs, so a sender that finds it down keeps its data and retries.
+
+Turn it on in **Settings → Remote agents** with **Receive remote usage**. **Listen address** is an address and a port, by
+default `127.0.0.1:4319`. Use `0.0.0.0` to listen on all networks. A change restarts the listener, and the card shows where it
+listens and when it last received data. On a server without a window:
+
+```sh
+harness-dashboard config set ingest.enabled true
+harness-dashboard config set ingest.bind 0.0.0.0
+harness-dashboard config set ingest.port 4319
+```
+
+Then restart `serve`, because `config set` does not reach a running server.
+
+**Credentials.** Every request needs one. A token is made for each agent, with a label that names its rows:
+
+```sh
+harness-dashboard ingest token add my-laptop     # printed once, copy it now
+harness-dashboard ingest token list
+harness-dashboard ingest token revoke <id>
+```
+
+The **Tokens** list in Settings does the same. Revoking a token cuts that agent off. For senders that can only do basic
+auth, set one username and password (at least 12 characters, read from stdin so it never shows in a process list):
+
+```sh
+printf '%s' "$PASSWORD" | harness-dashboard ingest basic my-user
+harness-dashboard ingest basic --clear
+```
+
+Changes made on the command line reach a running dashboard on its next request. Only hashes are kept, in
+`ingest-auth.json` in the app data folder, never in `config.json`. If that file can't be read, the dashboard refuses every
+agent and every credential change until you fix or delete the file. After deleting it, create the tokens and basic auth
+again.
+
+Rows are kept apart per credential. Sending the same data with a different token or basic user counts it again, so give
+each agent one credential and keep it.
+
+**Hermes Agent.** Install the `hermes_otel` plugin and set its environment on the agent's machine:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://<host>:4319
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_RESOURCE_ATTRIBUTES=host.name=<name>
+```
+
+`hermes_otel` sends the full content of prompts and replies by default. Set `HERMES_OTEL_CONTENT_CAPTURE=off` to keep that
+text on the agent's machine.
+
+**Claude Code.** Turn its telemetry on and send the logs, which carry the usage. gRPC is not supported, so use
+`http/protobuf`:
+
+```sh
+CLAUDE_CODE_ENABLE_TELEMETRY=1
+OTEL_LOGS_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_ENDPOINT=http://<host>:4319
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>
+OTEL_RESOURCE_ATTRIBUTES=host.name=<name>
+```
+
+With basic auth, the header is `Authorization=Basic <base64 of user:password>` instead. Settings shows both snippets with
+your address filled in, and says when only metrics arrive, which means `OTEL_LOGS_EXPORTER=otlp` is missing.
+
+`host.name` is how the dashboard tells machines apart. It also drops Claude Code usage sent from the dashboard's own
+machine, where the local logs already count. That check ignores case, and a short name and a full domain name of the same
+machine both match.
+
+**Who a row belongs to.** Set these resource attributes with `OTEL_RESOURCE_ATTRIBUTES` (comma separated):
+
+| Attribute | Used for |
+|---|---|
+| `host.name` | The host of the rows. Without it, the label of the token (or the basic auth user) |
+| `harness.user` | The user of the rows. Without it, the label of the token (or the basic auth user) |
+| `harness.project` | The project of the rows. Without it, none. It is a label and never a path |
+
+The **Hosts** page and the **Host** filter show the machines. A host named like the machine the dashboard runs on, or like a
+machine whose own logs are already in the database, is stored as `<name> (remote)`. A remote agent can then never write
+into or trim the local data of another machine. Retention runs as one pass over all data that arrived over OTLP, with this
+machine's retention setting.
+
+Usage from remote agents never counts toward this machine's [budgets and alerts](#budgets-and-alerts), also when it names
+your user.
+
+**What is counted.**
+
+- Hermes: each model call (`api.*` span) as one row, with the cost Hermes reports when it reports one, plus its tool and
+  subagent spans. Its per-turn totals are left out, as they repeat the calls.
+- Claude Code: the `api_request`, `tool_result` and `user_prompt` log events. Cost is worked out from the price book, as
+  for local usage, and not taken from Claude Code's own estimate. Its spans repeat the same calls and are skipped.
+- Other agents: `gen_ai` chat and completion spans with token counts.
+- Metrics are accepted and dropped, so nothing counts twice.
+
+**Limits.**
+
+- A request may be up to 4 MiB, and 8 MiB once unzipped. It may hold up to 10,000 spans or log records.
+- A request may name at most 50 host and user identities, and one credential at most 200 hosts. Records past that are
+  skipped.
+- Token counts above 1,000,000,000 per call are capped. A reported cost outside 0 to 1,000,000 USD is replaced by the price
+  book.
+
+**Prompt text.** Off by default. **Store prompt text** keeps the prompts, replies, tool arguments and file paths that remote
+agents send. With it on they get the same secret removal and length limit as local prompts. With it off they never reach the
+database.
+
+**Security.** The listener speaks plain HTTP, so tokens and passwords travel unencrypted. Put it on Tailscale or WireGuard,
+or behind a reverse proxy with TLS, and Settings warns you while it listens beyond this machine. The port never serves
+the dashboard or its API. Only password sign-ins are paused, after 10 failures from one address within a minute (an IPv6
+address counts by its /64). A valid token always gets through, and wrong tokens only slow down further wrong tokens. At
+most 600 failed password sign-ins a minute are checked in all, and after that password sign-ins wait briefly. The
+collector handles 4 requests at once and asks the rest to retry, which OTLP exporters do. Behind a reverse proxy, every
+agent shares the address of the proxy, so ten failed password sign-ins pause basic auth for all agents for a minute.
+Tokens keep working, so prefer tokens behind a proxy. macOS and Windows may ask to allow incoming connections when you
+listen on `0.0.0.0`.
+
+**Good to know.**
+
+- Don't point agents on the dashboard's own machine at it. Their local logs already count, and Claude Code logs from that
+  host name are dropped.
+- Don't also merge the database of a remote machine into the same shared database. Its usage would count twice.
+- Remote usage has no logs on this machine. A full rescan can't rebuild it, and deleting the database loses it.
+- The AI session labeler never reads remote sessions.
 
 ### Database size
 
@@ -797,7 +930,7 @@ Every data color comes from one palette (`web/src/lib/palette.ts`), and each col
 
 - **Reserved.** Each harness has its own color: Claude Code orange, Codex blue, Cursor gold, omp plum, pi teal,
   OpenCode crimson, Zed indigo, Cline lime, Roo Code magenta, Kilo Code amber, Gemini CLI cyan (slate blue in the Graphite
-  theme) and Copilot CLI wine. Models wear their maker's color whichever harness or plan they ran under (a Claude model through
+  theme), Copilot CLI wine, Hermes Agent deep navy (pale pink in the Graphite theme) and OpenTelemetry dusty mauve (yellow in Graphite). Models wear their maker's color whichever harness or plan they ran under (a Claude model through
   omp or Copilot is still Claude orange), with shades generated from it so models of one maker stay apart in a stacked
   chart. The four token types have their own set (green-teal, olive, lilac, purple).
 - **General pool.** Projects, users, skills, agents and sources take the top values' colors by hue first (green, sky,
@@ -809,7 +942,7 @@ or when colors shown together get too similar, also for colour-blind readers.
 ## Privacy
 
 The database lives on your machine, or wherever you point it. The app data folder and its files are readable by your
-account only. The server only listens on `127.0.0.1`, and its API answers only a browser that came in through the
+account only. The dashboard and its API only listen on `127.0.0.1` (the optional port for [remote agents](#remote-agents) listens where you configure it, and only takes data in), and the API answers only a browser that came in through the
 sign-in link (an `HttpOnly`, `SameSite=Strict` cookie) or a program that sends the token kept in the app data folder,
 so other accounts on the machine can't read your usage. It rejects requests whose `Host` header isn't a loopback name
 (DNS-rebinding protection) and requests a browser marks as coming from another site, requires a custom header on
@@ -831,6 +964,9 @@ only. Opt-in: session labels, sent to the model of the CLI you choose, with your
 
 The Prometheus endpoint sends nothing: it is off by default, and once on it only answers a request that carries its own
 token. Nothing leaves the machine unless something scrapes it.
+
+The remote agents port is off by default as well. Once on, it only accepts data from a sender that signs in with a token
+or the basic auth user, and it never gives any back.
 
 ## Development
 

@@ -329,7 +329,8 @@ export function tagLabelerSessions(db: Database, dir: string): number {
 
 /**
  * The sessions to label next: root sessions with prompt text that have been quiet for 15 minutes, newest first. Not
- * the labeler's own, not ones that are labelled, cleared or came back unlabelled too often.
+ * the labeler's own, not ones that are labelled, cleared or came back unlabelled too often, and never one a remote
+ * agent sent over OTLP: its prompts are another machine's, not this user's to send to their model.
  */
 export function labelQueue(db: Database, dir: string, limit: number, now = Date.now()): string[] {
   if (limit <= 0) return [];
@@ -338,7 +339,7 @@ export function labelQueue(db: Database, dir: string, limit: number, now = Date.
   return db
     .query<{ id: string }, (string | number)[]>(
       `SELECT s.id FROM sessions s JOIN usage u ON u.session_id = s.id
-       WHERE s.parent_session_id IS NULL AND s.agent IS NULL
+       WHERE s.parent_session_id IS NULL AND s.agent IS NULL AND s.id NOT GLOB 'otlp:*'
          AND COALESCE(s.project, '') NOT IN (${marks})
          AND NOT EXISTS (SELECT 1 FROM session_labels l WHERE l.session_id = s.id)
          AND NOT EXISTS (SELECT 1 FROM label_attempts a WHERE a.session_id = s.id AND a.attempts >= ${MAX_ATTEMPTS})

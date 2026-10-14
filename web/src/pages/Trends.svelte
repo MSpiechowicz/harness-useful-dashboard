@@ -20,7 +20,7 @@
   import { store } from "../lib/state.svelte.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
-  type Group = "none" | "type" | "provider" | "model" | "project" | "user" | "agent" | "skill";
+  type Group = "none" | "type" | "provider" | "model" | "project" | "user" | "host" | "agent" | "skill";
   type Bucket = "hour" | "day" | "week" | "month";
   let group = $state<Group>("provider");
   let bucket = $state<Bucket | "auto">("auto");
@@ -86,7 +86,7 @@
     return timeSeriesChart({ buckets: x.buckets, series: [{ key: "all", name: t("lines.kpi"), data }] }, { dim: "none", metric: "tokens", bucket: effBucket, kind });
   });
 
-  const groups: Group[] = ["none", "type", "provider", "model", "project", "user", "agent", "skill"];
+  const groups: Group[] = ["none", "type", "provider", "model", "project", "user", "host", "agent", "skill"];
   function groupLabel(g: Group): string {
     if (g === "none") return t("trends.none");
     if (g === "type") return t("trends.type");

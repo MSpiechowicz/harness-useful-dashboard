@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { budgetAlerts, budgetStatus, DEFAULT_BUDGETS, limitAlerts, takeNew } from "../src/core/budgets.ts";
 import { parseSettings } from "../src/core/config.ts";
 import type { LimitReport } from "../src/core/limits.ts";
+import { decodeOtlp, writeOtlp } from "../src/core/otlp/write.ts";
+import { PriceBook } from "../src/core/pricing.ts";
 import { notifyCommand } from "../src/server/notify.ts";
 import { memDb } from "./helpers.ts";
+import { dbl, encodeTraces, hermesSpans } from "./otlpEncode.ts";
 
 const NOW = new Date(2026, 9, 15, 12, 0); // Oct 15, local noon
 const at = (d: number, h = 10) => new Date(2026, 9, d, h).getTime();
@@ -30,6 +33,25 @@ describe("budget status", () => {
     expect(items[0]!.fraction).toBeCloseTo(0.9);
     // 118 over 14.5 days, carried to 31 days.
     expect(items[1]!.projected).toBeCloseTo((118 / 14.5) * 31, 6);
+  });
+
+  test("usage remote agents sent never counts, also when it names this user", () => {
+    const d = db();
+    const cfg = { ...DEFAULT_BUDGETS, daily: 20, monthly: 200, projects: { "/work/alpha": 100 } };
+    const before = budgetStatus(d, cfg, "ada", NOW);
+
+    const [r] = hermesSpans({ host: "elsewhere" });
+    const today = at(15, 9);
+    const records = r!.records.map((s) => ({ ...s, startMs: today, endMs: today + 1000, attrs: { ...s.attrs, "hermes.cost.usage": dbl(-1000) } }));
+    const remote = [{ ...r!, resource: { ...r!.resource, "harness.user": "ada", "harness.project": "/work/alpha" }, records }];
+    const cred = { kind: "token" as const, label: "ci", key: "tci" };
+    const written = writeOtlp(d, new PriceBook(), decodeOtlp("traces", encodeTraces(remote), "protobuf"), cred, {
+      storeText: false, promptTextLimit: 2000, detailBefore: 0, localHost: "laptop", now: NOW.getTime(),
+    });
+    expect(written.usage).toBeGreaterThan(0);
+    expect(d.query("SELECT DISTINCT user FROM usage WHERE id GLOB 'otlp:*'").all()).toEqual([{ user: "ada" }]);
+
+    expect(budgetStatus(d, cfg, "ada", NOW)).toEqual(before);
   });
 
   test("no caps, no items", () => {

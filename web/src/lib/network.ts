@@ -13,7 +13,7 @@ export interface PairRow {
 }
 
 /** What each breakdown page is split by: who used what, from the page's side. */
-export const SPLIT_BY: Record<string, string> = { project: "model", model: "project", provider: "model", user: "project", skill: "project", agent: "project" };
+export const SPLIT_BY: Record<string, string> = { project: "model", model: "project", provider: "model", user: "project", host: "project", skill: "project", agent: "project" };
 
 /** The key the server sums the rest into. */
 export const OTHER = "__other__";

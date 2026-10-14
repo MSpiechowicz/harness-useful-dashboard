@@ -27,13 +27,14 @@ import { CONTENT_TYPE, metricsText } from "../core/metrics.ts";
 import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
 import { cookieName, cookieValue, HELLO_NONCE, type Hello, helloProof, sameToken } from "./auth.ts";
+import { type IngestServer, isLoopback } from "./ingest.ts";
 import { notify } from "./notify.ts";
 import { type FolderPicker, PickerBusy, folderPicker, listDirs, nativeAvailable } from "./pickFolder.ts";
 import { checkForUpdate, isCompiledBinary } from "./update.ts";
 
 const DIMENSIONS: Dimension[] = ["provider", "project", "user", "model", "skill", "agent", "session", "prompt", "host"];
 const BUCKETS: Bucket[] = ["hour", "day", "week", "month"];
-const GROUPS: SeriesGroup[] = ["none", "type", "provider", "project", "user", "model", "skill", "agent"];
+const GROUPS: SeriesGroup[] = ["none", "type", "provider", "project", "user", "host", "model", "skill", "agent"];
 
 export function parseFilters(sp: URLSearchParams): Filters {
   const n = (k: string) => {
@@ -43,7 +44,7 @@ export function parseFilters(sp: URLSearchParams): Filters {
     return Number.isFinite(x) ? x : undefined;
   };
   const s = (k: string) => sp.get(k) || undefined;
-  return { from: n("from"), to: n("to"), provider: s("provider"), project: s("project"), user: s("user"), model: s("model"), skill: s("skill"), agent: s("agent"), tag: s("tag")?.trim().toLowerCase().slice(0, 100), kind: isKind(sp.get("kind")) ? sp.get("kind")! : undefined };
+  return { from: n("from"), to: n("to"), provider: s("provider"), project: s("project"), user: s("user"), host: s("host"), model: s("model"), skill: s("skill"), agent: s("agent"), tag: s("tag")?.trim().toLowerCase().slice(0, 100), kind: isKind(sp.get("kind")) ? sp.get("kind")! : undefined };
 }
 
 function pick<T extends string>(v: string | null, allowed: readonly T[], fallback: T): T {
@@ -132,6 +133,8 @@ export interface ServerAuth {
 export interface ServerHooks {
   /** Stops the background server (the "Quit" button). */
   shutdown(): void;
+  /** The OTLP listener for remote agents, with its tokens and basic auth user. Without it, its routes are not there. */
+  ingest?: Pick<IngestServer, "status" | "endpoints" | "stats" | "auth">;
 }
 
 const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
@@ -214,7 +217,10 @@ function noteError(result: { error: string }): Response {
  * What a read-only database still allows: leaving, and the settings and tip states, which live in the config file (a
  * switch to another database included). The folder picker only serves that switch. Everything else answers 409.
  */
-const READ_ONLY_ROUTES = new Set(["/api/shutdown", "/api/language", "/api/settings", "/api/tips/state", "/api/pick-folder"]);
+const READ_ONLY_ROUTES = new Set(["/api/shutdown", "/api/language", "/api/settings", "/api/tips/state", "/api/pick-folder", "/api/ingest/tokens", "/api/ingest/basic"]);
+
+/** The routes that delete something: every other DELETE is answered 404. */
+const DELETE_ROUTES = new Set(["/api/tags", "/api/session/label", "/api/notes", "/api/ingest/tokens", "/api/ingest/basic"]);
 
 const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const optionalPrice = (v: unknown): number | null => (isPrice(v) ? v : null);
@@ -449,11 +455,14 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           return json(app.cfg.checkUpdates || sp.get("force") ? await checkForUpdate(sp.get("force") === "1") : { current: VERSION, available: false, disabled: true });
         case "/api/events":
           return events(req);
+        case "/api/ingest":
+          if (!hooks.ingest) break;
+          return json(ingestState(hooks.ingest));
       }
     }
 
     if (method === "POST" || method === "PUT" || method === "DELETE") {
-      if (method === "DELETE" && path !== "/api/tags" && path !== "/api/session/label" && path !== "/api/notes") return error(`no route for ${method} ${url.pathname}`, 404);
+      if (method === "DELETE" && !DELETE_ROUTES.has(path)) return error(`no route for ${method} ${url.pathname}`, 404);
       // A database a newer app migrated, at the start or since, is read-only: nothing that would write it is tried.
       // Asked again once a request's body is read, since another machine may have migrated it meanwhile.
       if (!READ_ONLY_ROUTES.has(path) && !app.writable()) return newerDatabase();
@@ -531,7 +540,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         }
         case "/api/settings": {
           const body = await jsonBody(req);
-          const parsed = parseSettings(body);
+          const parsed = parseSettings(body, app.cfg);
           if ("error" in parsed) return error(parsed.error);
           const { dbPath, copyDb } = body as { dbPath?: unknown; copyDb?: unknown };
           if (dbPath !== undefined && (typeof dbPath !== "string" || dbPath.length > 4096)) return error("invalid value for dbPath");
@@ -611,9 +620,37 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/shutdown":
           setTimeout(() => hooks.shutdown(), 100);
           return json({ ok: true });
+        // Who may send to the OTLP listener. Kept in its own file, not the database. A new token is shown this once.
+        case "/api/ingest/tokens": {
+          if (!hooks.ingest || method === "PUT") break;
+          const body = ((await jsonBody(req, 4096)) ?? {}) as Record<string, unknown>;
+          const auth = hooks.ingest.auth;
+          if (method === "DELETE") return auth.revokeToken(body.id) ? json({ ok: true }) : error("no such token", 404);
+
+          const made = auth.addToken(body.label);
+          return "error" in made ? error(made.error) : json(made);
+        }
+        case "/api/ingest/basic": {
+          if (!hooks.ingest || method === "POST") break;
+          const auth = hooks.ingest.auth;
+          if (method === "DELETE") {
+            auth.clearBasic();
+            return json({ basic: null });
+          }
+
+          const body = ((await jsonBody(req, 4096)) ?? {}) as Record<string, unknown>;
+          const set = await auth.setBasic(body.user, body.password);
+          return "error" in set ? error(set.error) : json({ basic: set });
+        }
       }
     }
     return error(`no route for ${method} ${url.pathname}`, 404);
+  }
+
+  /** What Settings shows about the OTLP listener: never a token, a hash or the password. */
+  function ingestState(ingest: NonNullable<ServerHooks["ingest"]>) {
+    const config = app.cfg.ingest;
+    return { config, status: ingest.status(), loopback: isLoopback(config.bind), endpoints: ingest.endpoints(), basic: ingest.auth.basic(), tokens: ingest.auth.tokens(), stats: ingest.stats() };
   }
 
   /**

@@ -1,8 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { getMeta, setMeta } from "./db.ts";
 import type { LimitReport } from "./limits.ts";
+import { OTLP_ID } from "./retention.ts";
 
-/** Spending caps in USD at API-equivalent prices, for this machine's user. Null or 0: no cap. */
+/**
+ * Spending caps in USD at API-equivalent prices, for this machine's user. Null or 0: no cap. Usage remote agents sent
+ * over OTLP never counts, also when it names the same user: the budgets are this machine's.
+ */
 export interface BudgetConfig {
   daily: number | null;
   monthly: number | null;
@@ -34,6 +38,9 @@ export interface BudgetItem {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** Usage of this machine's own harnesses, never one taken over OTLP (otlp/write.ts). */
+const LOCAL = `id NOT ${OTLP_ID}`;
+
 /** How the caps stand now, in local time: today, and this month so far. */
 export function budgetStatus(db: Database, cfg: BudgetConfig, user: string, now = new Date()): BudgetItem[] {
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -42,7 +49,7 @@ export function budgetStatus(db: Database, cfg: BudgetConfig, user: string, now 
   const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const month = day.slice(0, 7);
   const spent = (from: number) =>
-    db.query<{ c: number }, [number, number, string]>("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM usage WHERE ts >= ? AND ts < ? AND user = ?").get(from, monthEnd, user)!.c;
+    db.query<{ c: number }, [number, number, string]>(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM usage WHERE ts >= ? AND ts < ? AND user = ? AND ${LOCAL}`).get(from, monthEnd, user)!.c;
   // The month's pace: what it spent per elapsed day so far, carried to the month's last day.
   const elapsed = Math.max(1, (now.getTime() - monthStart) / 86_400_000);
   const pace = (s: number) => (s / elapsed) * ((monthEnd - monthStart) / 86_400_000);
@@ -60,7 +67,7 @@ export function budgetStatus(db: Database, cfg: BudgetConfig, user: string, now 
   if (projects.length) {
     const rows = db
       .query<{ project: string; c: number }, [number, number, string]>(
-        "SELECT project, COALESCE(SUM(cost_usd), 0) AS c FROM usage WHERE ts >= ? AND ts < ? AND user = ? AND project IS NOT NULL GROUP BY project",
+        `SELECT project, COALESCE(SUM(cost_usd), 0) AS c FROM usage WHERE ts >= ? AND ts < ? AND user = ? AND project IS NOT NULL AND ${LOCAL} GROUP BY project`,
       )
       .all(monthStart, monthEnd, user);
     const by = new Map(rows.map((r) => [r.project, r.c]));

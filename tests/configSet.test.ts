@@ -38,6 +38,29 @@ describe("config set", () => {
     expect(cfg.limits.claude).toBe(true);
   });
 
+  test("the listener's fields are checked like Settings checks them", () => {
+    const cfg = defaultConfig();
+    expect(mergeConfig(cfg, configKeyPatch(cfg, "ingest.port", 4400)).ingest).toEqual({ enabled: false, bind: "127.0.0.1", port: 4400, storeText: false });
+    expect(configKeyPatch(cfg, "ingest.bind", "::").ingest?.bind).toBe("::");
+    expect(configKeyPatch(cfg, "ingest", { enabled: true }).ingest).toEqual({ ...cfg.ingest, enabled: true });
+
+    expect(() => configKeyPatch(cfg, "ingest.port", 80)).toThrow("invalid value for ingest.port");
+    expect(() => configKeyPatch(cfg, "ingest.port", cfg.port)).toThrow("invalid value for ingest.port");
+    expect(() => configKeyPatch(cfg, "ingest.bind", "my-host")).toThrow("invalid value for ingest.bind");
+    expect(() => configKeyPatch(cfg, "ingest.enabled", "yes")).toThrow("invalid value for ingest.enabled");
+    expect(() => configKeyPatch(cfg, "ingest.token", "x")).toThrow("unknown config key");
+    expect(() => configKeyPatch(cfg, "ingest.toString", "x")).toThrow("unknown config key");
+    expect(() => configKeyPatch(cfg, "ingest.port.x", 1)).toThrow("unknown config key");
+  });
+
+  test("a hand-edited listener section falls back to the defaults for what is wrong", () => {
+    const path = join(tempDir(), "config.json");
+    writeFileSync(path, JSON.stringify({ ingest: { enabled: true, bind: "not an address", port: 22, storeText: "yes" } }));
+    expect(loadConfig(path).ingest).toEqual({ enabled: true, bind: "127.0.0.1", port: 4319, storeText: false });
+    writeFileSync(path, JSON.stringify({ ingest: "on" }));
+    expect(loadConfig(path).ingest).toEqual(defaultConfig().ingest);
+  });
+
   test("the window setting of older versions is dropped from the config file", () => {
     const path = join(tempDir(), "config.json");
     writeFileSync(path, JSON.stringify({ openMode: "browser", port: 4400 }));

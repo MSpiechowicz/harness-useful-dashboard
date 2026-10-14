@@ -48,6 +48,8 @@
     kilo: "settings.source.kilo",
     gemini: "settings.source.gemini",
     copilot: "settings.source.copilot",
+    hermes: "settings.source.hermes",
+    otel: "settings.source.otel",
   };
   const providerName = (p: string) => (PROVIDERS[p] ? t(PROVIDERS[p]) : p);
 

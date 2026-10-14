@@ -30,8 +30,6 @@ const MAX_BRANCH = 200;
 /** IngestSink that upserts into SQLite. Callers wrap usage in a transaction. */
 export class DbWriter implements IngestSink {
   readonly stats: WriterStats = { usage: 0, prompts: 0, tools: 0 };
-  /** Maps each record's working directory to its project (repo root), cached for the writer's lifetime. */
-  readonly project = projectResolver();
   private sSession: Statement;
   private sPrompt: Statement;
   private sUsage: Statement;
@@ -67,6 +65,11 @@ export class DbWriter implements IngestSink {
      * must not write them again next to their count.
      */
     private rollupBefore = rollupCutoff(),
+    /**
+     * Maps each record's working directory to its project (repo root), cached for the writer's lifetime. Records from
+     * another machine (otlp/) name their project already: they pass it through unchanged.
+     */
+    readonly project: (cwd: string | null | undefined) => string | null = projectResolver(),
   ) {
     this.sSession = db.prepare(`
       INSERT INTO sessions (id, provider, native_id, project, user, host, title, git_branch, client, client_version,
@@ -504,12 +507,12 @@ export function resolveSpawnRefs(db: Database): void {
 
 /**
  * Re-prices every usage row (after pricing edits), and the estimated compaction costs. Provider-reported costs (Cursor,
- * Cline, Roo Code, Kilo Code) are kept.
+ * Cline, Roo Code, Kilo Code, Hermes) are kept.
  * Cost is linear in the token counts, so each model (and fast mode) is one UPDATE with its rates: the same sum in the
  * same order as PriceBook.cost, rather than every row read into JS and written back one by one.
  */
 export function recomputeCosts(db: Database, prices: PriceBook): number {
-  const repriced = "(provider NOT IN ('cursor', 'cline', 'roo', 'kilo') OR cost_estimated = 1)";
+  const repriced = "(provider NOT IN ('cursor', 'cline', 'roo', 'kilo', 'hermes') OR cost_estimated = 1)";
   const models = db.query<{ model: string | null }, []>(`SELECT DISTINCT model FROM usage WHERE ${repriced}`).all();
   const upd = db.prepare(
     `UPDATE usage SET cost_usd = (input_tokens * ? + output_tokens * ? + cache_read_tokens * ? + cache_write_tokens * ? + cache_write_1h_tokens * ?) / 1000000.0 * ?,

@@ -1,6 +1,6 @@
 import { redact } from "../redact.ts";
 
-export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
+export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot" | "hermes" | "otel";
 
 export interface SessionRecord {
   id: string;
@@ -251,10 +251,17 @@ export function parseTs(v: unknown): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-/** Text as it is stored: secrets in it replaced first (so a key cut in half can't slip through), then cut to the limit. */
+/** Characters past the limit a text is redacted over before it is cut. */
+const REDACT_MARGIN = 1024;
+
+/**
+ * Text as it is stored: secrets in it replaced first (so a key cut in half can't slip through), then cut to the limit.
+ * Only the start is redacted, REDACT_MARGIN past the limit: a secret that begins within the limit ends within that, and
+ * a huge text costs no more than a short one.
+ */
 export function truncate(text: string | null | undefined, limit: number): string | null {
   if (!text || limit <= 0) return null;
-  const t = redact(text.trim());
+  const t = redact(text.trim().slice(0, limit + REDACT_MARGIN));
   return t.length > limit ? t.slice(0, limit) + "…" : t;
 }
 

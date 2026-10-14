@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { type AlertLang, type BudgetConfig, DEFAULT_BUDGETS } from "./budgets.ts";
@@ -75,7 +76,24 @@ export interface AppConfig {
   metrics: MetricsConfig;
   /** Tips the user put away: `hidden` holds rule ids (never shown again), `read` holds tip keys (seen, kept on the Tips page). */
   tips: TipState;
+  /** The OTLP listener remote agents send their usage to (see server/ingest.ts). */
+  ingest: IngestConfig;
 }
+
+/**
+ * The OTLP/HTTP listener: off until turned on, on this machine only until another address is set. Who may send to it is
+ * kept in its own file, never here (see server/ingestAuth.ts).
+ */
+export interface IngestConfig {
+  enabled: boolean;
+  /** An IP address of this machine, 0.0.0.0 or :: for every network, or "localhost". */
+  bind: string;
+  port: number;
+  /** Keep the prompt text, replies and tool arguments remote agents send. Off, only numbers and names are kept. */
+  storeText: boolean;
+}
+
+export const DEFAULT_INGEST: IngestConfig = { enabled: false, bind: "127.0.0.1", port: 4319, storeText: false };
 
 /** The Prometheus endpoint (see metrics.ts): off until turned on, and read with its own token, never the app's. */
 export interface MetricsConfig {
@@ -131,6 +149,7 @@ export function defaultConfig(): AppConfig {
     language: "en",
     metrics: { enabled: false, token: "", projectLabels: true },
     tips: { hidden: [], read: [] },
+    ingest: { ...DEFAULT_INGEST },
   };
 }
 
@@ -202,6 +221,26 @@ export function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConf
     labels: { ...base.labels, ...(patch.labels ?? {}) },
     metrics: { ...base.metrics, ...(patch.metrics ?? {}) },
     tips: { ...base.tips, ...(patch.tips ?? {}) },
+    ingest: ingestConfig({ ...base.ingest, ...(patch.ingest ?? {}) }),
+  };
+}
+
+/** An address the listener may bind: an IPv4 or IPv6 literal, or "localhost". */
+export function isBindAddress(v: unknown): v is string {
+  return typeof v === "string" && (v === "localhost" || isIP(v) !== 0);
+}
+
+/** A port the listener may use: none of the privileged ones. */
+const isIngestPort = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1024 && v <= 65_535;
+
+/** The listener's settings as a hand-edited config file has them: a value of the wrong kind is the default. */
+export function ingestConfig(raw: unknown): IngestConfig {
+  const v = isObject(raw) ? raw : {};
+  return {
+    enabled: typeof v.enabled === "boolean" ? v.enabled : DEFAULT_INGEST.enabled,
+    bind: isBindAddress(v.bind) ? v.bind : DEFAULT_INGEST.bind,
+    port: isIngestPort(v.port) ? v.port : DEFAULT_INGEST.port,
+    storeText: typeof v.storeText === "boolean" ? v.storeText : DEFAULT_INGEST.storeText,
   };
 }
 
@@ -247,7 +286,7 @@ const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "ro
 const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode", "copilot"] as const;
 
 /** A settings change: what `parseSettings` lets through, merged into the config by the server. */
-export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips" | "budgets" | "digest" | "labels" | "metrics">> & {
+export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips" | "budgets" | "digest" | "labels" | "metrics" | "ingest">> & {
   /** The client may switch the endpoint and its labels, and ask for a new token: the server makes it. */
   metrics?: Partial<Pick<MetricsConfig, "enabled" | "projectLabels">> & { regenerateToken?: boolean };
   budgets?: Partial<BudgetConfig>;
@@ -255,13 +294,15 @@ export type SettingsPatch = Partial<Omit<AppConfig, "sources" | "limits" | "tips
   labels?: Partial<LabelConfig>;
   sources?: Partial<Omit<SourceConfig, "enabled">> & { enabled?: Partial<SourceConfig["enabled"]> };
   limits?: Partial<AppConfig["limits"]>;
+  ingest?: Partial<IngestConfig>;
 };
 
 /**
  * Checks a settings change sent to the server: only known keys, each of the right type. Numbers are rounded and kept
- * in range. Anything else is refused, so a bad value can't end up in the config file.
+ * in range. Anything else is refused, so a bad value can't end up in the config file. `current` is the config the
+ * change goes into: the listener can't take the dashboard's port.
  */
-export function parseSettings(body: unknown): { patch: SettingsPatch } | { error: string } {
+export function parseSettings(body: unknown, current?: AppConfig): { patch: SettingsPatch } | { error: string } {
   if (!isObject(body)) return { error: "expected an object" };
   const patch: SettingsPatch = {};
   const invalid = (key: string) => ({ error: `invalid value for ${key}` });
@@ -415,6 +456,27 @@ export function parseSettings(body: unknown): { patch: SettingsPatch } | { error
     }
     patch.metrics = metrics;
   }
+  if (has("ingest")) {
+    const g = body.ingest;
+    if (!isObject(g)) return invalid("ingest");
+    const ingest: Partial<IngestConfig> = {};
+    for (const k of ["enabled", "storeText"] as const) {
+      if (!(k in g)) continue;
+      if (typeof g[k] !== "boolean") return invalid(`ingest.${k}`);
+      ingest[k] = g[k] as boolean;
+    }
+    if ("bind" in g) {
+      const bind = typeof g.bind === "string" ? g.bind.trim() : null;
+      if (!isBindAddress(bind)) return invalid("ingest.bind");
+      ingest.bind = bind;
+    }
+    if ("port" in g) {
+      const dashboard = patch.port ?? current?.port;
+      if (!isIngestPort(g.port) || g.port === dashboard) return invalid("ingest.port");
+      ingest.port = g.port;
+    }
+    patch.ingest = ingest;
+  }
   if (has("language")) {
     if (!["en", "de", "es", "fr", "pl"].includes(body.language as string)) return invalid("language");
     patch.language = body.language as AlertLang;
@@ -451,6 +513,12 @@ export function configKeyPatch(cfg: AppConfig, key: string, value: unknown): Par
   const [top, ...rest] = key.split(".");
   const defaults = defaultConfig() as unknown as Record<string, unknown>;
   if (!top || !(top in defaults)) throw new Error(`unknown config key: ${key}`);
+  // The listener's fields are checked like Settings checks them: a bad address or port would only fail at the next start.
+  if (top === "ingest") {
+    const field = rest[0] ?? null;
+    if (rest.length > 1 || (field !== null && !Object.hasOwn(DEFAULT_INGEST, field))) throw new Error(`unknown config key: ${key}`);
+    return { ingest: ingestPatch(cfg, field as keyof IngestConfig | null, value) };
+  }
   if (!rest.length) return { [top]: value } as Partial<AppConfig>;
   const section = structuredClone((cfg as unknown as Record<string, unknown>)[top]);
   if (!isObject(section)) throw new Error(`${top} has no fields, use: config set ${top} <value>`);
@@ -462,6 +530,13 @@ export function configKeyPatch(cfg: AppConfig, key: string, value: unknown): Par
   node[rest[rest.length - 1] as string] = value;
   if (top === "metrics") return { metrics: applyMetrics(section as unknown as MetricsConfig, {}) };
   return { [top]: section } as Partial<AppConfig>;
+}
+
+/** The listener's settings with one field set (or all of them, `field` null), refused like a bad Settings change. */
+function ingestPatch(cfg: AppConfig, field: keyof IngestConfig | null, value: unknown): IngestConfig {
+  const parsed = parseSettings({ ingest: field ? { [field]: value } : value }, cfg);
+  if ("error" in parsed) throw new Error(parsed.error);
+  return { ...cfg.ingest, ...parsed.patch.ingest };
 }
 
 export function updateConfig(patch: Partial<AppConfig>, path = configPath()): AppConfig {

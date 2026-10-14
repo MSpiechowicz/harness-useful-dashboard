@@ -214,6 +214,7 @@ export interface FilterOptions {
   provider: FilterOption[];
   project: FilterOption[];
   user: FilterOption[];
+  host: FilterOption[];
   model: FilterOption[];
   skill: FilterOption[];
   agent: FilterOption[];

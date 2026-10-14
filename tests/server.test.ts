@@ -4,7 +4,7 @@ import { createHmac } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "../src/cli.ts";
-import { parseSettings, scanInterval } from "../src/core/config.ts";
+import { defaultConfig, parseSettings, scanInterval } from "../src/core/config.ts";
 import { getMeta } from "../src/core/db.ts";
 import { ensureAppDataDir } from "../src/core/paths.ts";
 import { App } from "../src/server/app.ts";
@@ -53,6 +53,20 @@ describe("settings input", () => {
     for (const body of [null, [], { scanIntervalSec: "5" }, { scanIntervalSec: Number.NaN }, { port: 70000 }, { checkUpdates: "yes" }, { sources: { claudeDirs: "/a" } }, { sources: { enabled: { claude: 1 } } }, { limits: [] }]) {
       expect("error" in parseSettings(body), JSON.stringify(body)).toBe(true);
     }
+  });
+  test("the OTLP listener takes an IP address or localhost, a port of 1024 and up that isn't the dashboard's", () => {
+    const current = { ...defaultConfig(), port: 4317 };
+    expect(parseSettings({ ingest: { enabled: true, bind: " 0.0.0.0 ", port: 4319, storeText: false } }, current)).toEqual({
+      patch: { ingest: { enabled: true, bind: "0.0.0.0", port: 4319, storeText: false } },
+    });
+    for (const bind of ["::", "::1", "fe80::1", "192.168.1.20", "localhost"]) expect(parseSettings({ ingest: { bind } }, current), bind).toEqual({ patch: { ingest: { bind } } });
+
+    for (const ingest of [null, [], { bind: "example.com" }, { bind: "1.2.3" }, { bind: 4 }, { port: 1023 }, { port: 65_536 }, { port: 4319.5 }, { port: "4319" }, { port: 4317 }, { enabled: 1 }, { storeText: "no" }]) {
+      const result = parseSettings({ ingest }, current);
+      expect("error" in result && result.error.startsWith("invalid value for ingest"), JSON.stringify(ingest)).toBe(true);
+    }
+    // The dashboard's port as the change itself sets it.
+    expect("error" in parseSettings({ port: 5000, ingest: { port: 5000 } }, current)).toBe(true);
   });
   test("a scan interval is off, or between 5 seconds and a day", () => {
     expect([scanInterval(0), scanInterval(-1), scanInterval("x"), scanInterval(0.001), scanInterval(30), scanInterval(1e9)]).toEqual([0, 0, 0, 5, 30, 86_400]);

@@ -19,6 +19,8 @@ import { PriceBook } from "./core/pricing.ts";
 import { App } from "./server/app.ts";
 import { loadToken, probeDashboard, signInUrl } from "./server/auth.ts";
 import { createHandler, loadAssets } from "./server/http.ts";
+import { IngestServer } from "./server/ingest.ts";
+import { IngestAuth, IngestAuthUnreadable } from "./server/ingestAuth.ts";
 import { checkForUpdate } from "./server/update.ts";
 import { BIN_NAME, REPO, VERSION } from "./version.ts";
 
@@ -36,6 +38,10 @@ Usage:
   ${BIN_NAME} mcp                    Serve usage data to AI agents over MCP (stdio, read-only)
   ${BIN_NAME} update [--check]       Show whether a newer release is out
   ${BIN_NAME} config [path|get|set <key> <value>]
+  ${BIN_NAME} ingest token add <label>   A token remote agents send usage with over OTLP, printed once
+  ${BIN_NAME} ingest token list|revoke <id>
+  ${BIN_NAME} ingest basic <user>        Basic auth for the OTLP listener, the password read from stdin
+  ${BIN_NAME} ingest basic --clear
   ${BIN_NAME} version
 
 Options:
@@ -220,8 +226,19 @@ async function startServer(args: Args, port: number, shell: boolean): Promise<vo
   }
 
   const app = new App(typeof args.flags.db === "string" ? args.flags.db : undefined);
+  // The OTLP listener for remote agents: a server of its own, started once the dashboard's has its port. Its status is
+  // logged each time it changes: when it starts, fails, or binds on a later try.
+  const ingest = new IngestServer({
+    app,
+    auth: new IngestAuth(),
+    onStatus: (s) => {
+      if (s.state === "listening") console.log(`  ingest: listening on ${s.address}`);
+      else if (s.state === "error") console.log(`  ingest: not listening (${s.error}${s.message ? `: ${s.message}` : ""})`);
+    },
+  });
   let server: ReturnType<typeof Bun.serve>;
   const shutdown = () => {
+    ingest.stop();
     server.stop(true);
     app.close();
     process.exit(0);
@@ -229,7 +246,7 @@ async function startServer(args: Args, port: number, shell: boolean): Promise<vo
 
   try {
     const assets = await loadAssets();
-    const handler = createHandler(app, assets, { shutdown }, { token, port, shell });
+    const handler = createHandler(app, assets, { shutdown, ingest }, { token, port, shell });
     server = Bun.serve({ port, hostname: "127.0.0.1", idleTimeout: 60, fetch: handler });
   } catch (err) {
     app.close();
@@ -244,6 +261,11 @@ async function startServer(args: Args, port: number, shell: boolean): Promise<vo
   // The API only answers a browser that came through this link. The shell gets it on its own line and never logs it.
   if (shell) shellLine("READY", signInUrl(url, token));
   else console.log(`  open: ${signInUrl(url, token)}`);
+
+  // Never fatal: a listener that can't start says why here and in Settings, and follows every settings change.
+  const listen = (cfg: typeof app.cfg) => void ingest.reconcile(cfg, server.port ?? port);
+  listen(app.cfg);
+  app.onConfigChange(listen);
 
   const first = app.scanNow();
   first
@@ -367,6 +389,64 @@ function digest(args: Args, dbFlag: string | undefined): void {
   }
 }
 
+/**
+ * `ingest`: who may send usage to the OTLP listener. Edits the same file Settings does, which a running dashboard reads
+ * again on the next request. A file that can't be read is never written over: the error says where it is and what to do.
+ */
+async function ingestCommand(args: Args): Promise<void> {
+  const auth = new IngestAuth();
+  try {
+    const broken = auth.readError();
+    if (broken) throw new IngestAuthUnreadable(auth.path, broken);
+    await ingestChange(auth, args);
+  } catch (err) {
+    if (!(err instanceof IngestAuthUnreadable)) throw err;
+    throw new Error(`can't read ${err.path} (${err.reason}). Repair it, or delete it to start over without tokens and basic auth.`);
+  }
+}
+
+async function ingestChange(auth: IngestAuth, args: Args): Promise<void> {
+  const [what, sub, ...rest] = args.positional;
+
+  if (what === "token" && sub === "add") {
+    const made = auth.addToken(rest.join(" "));
+    if ("error" in made) throw new Error(made.error);
+    console.log(made.token);
+    console.error("Shown this once: copy it now. A remote agent sends it as OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>");
+    return;
+  }
+
+  if (what === "token" && sub === "list") {
+    const tokens = auth.tokens();
+    if (!tokens.length) return void console.log("No tokens.");
+    const day = (ms: number | null) => (ms ? new Date(ms).toISOString().slice(0, 16).replace("T", " ") : "never");
+    for (const t of tokens) console.log(`${t.id}  ${t.prefix}…  created ${day(t.createdAt)}  last used ${day(t.lastUsedAt)}  ${t.label}`);
+    return;
+  }
+
+  if (what === "token" && sub === "revoke") {
+    if (!rest[0]) throw new Error("usage: ingest token revoke <id>");
+    if (!auth.revokeToken(rest[0])) throw new Error(`no token with the id ${rest[0]}`);
+    return void console.log(`Revoked ${rest[0]}.`);
+  }
+
+  if (what === "basic" && args.flags.clear === true) {
+    auth.clearBasic();
+    return void console.log("Basic auth cleared.");
+  }
+
+  if (what === "basic" && sub) {
+    // Bun has no prompt that hides what is typed: the password comes through a pipe, never as an argument.
+    if (process.stdin.isTTY) throw new Error(`the password is read from stdin: printf '%s' "$PASSWORD" | ${BIN_NAME} ingest basic ${sub}`);
+    const password = (await Bun.stdin.text()).replace(/\r?\n$/, "");
+    const set = await auth.setBasic(sub, password);
+    if ("error" in set) throw new Error(set.error);
+    return void console.log(`Basic auth set for ${set.user}.`);
+  }
+
+  throw new Error("usage: ingest token add <label> | ingest token list | ingest token revoke <id> | ingest basic <user> | ingest basic --clear");
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.flags.help || args.cmd === "help") return void console.log(HELP);
@@ -438,6 +518,9 @@ async function main(): Promise<void> {
       }
       throw new Error(`unknown config subcommand: ${sub}`);
     }
+
+    case "ingest":
+      return ingestCommand(args);
 
     default:
       console.error(`Unknown command: ${args.cmd}\n`);

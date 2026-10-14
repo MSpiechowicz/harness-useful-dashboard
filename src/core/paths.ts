@@ -26,7 +26,7 @@ export function appDataDir(): string {
 export function ensureAppDataDir(dir = appDataDir()): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (process.platform === "win32") return;
-  for (const path of [dir, ...["config.json", "usage.db", "usage.db-wal", "usage.db-shm", "usage.db-journal"].map((f) => join(dir, f))]) {
+  for (const path of [dir, ...["config.json", "ingest-auth.json", "usage.db", "usage.db-wal", "usage.db-shm", "usage.db-journal"].map((f) => join(dir, f))]) {
     try {
       if (existsSync(path)) chmodSync(path, path === dir ? 0o700 : 0o600);
     } catch {

@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { Bell, Check, Cloud, Copy, Download, ExternalLink, FileText, FileUp, Info, Loader, Plus, Play, Power, RefreshCw, Shrink, Tags, Trash2, TriangleAlert, Users } from "@lucide/svelte";
+  import { Bell, Check, Cloud, Copy, Download, ExternalLink, FileText, FileUp, Info, KeyRound, Loader, Plus, Play, Power, RefreshCw, Shrink, Tags, Trash2, TriangleAlert, Users } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
+  import ConfirmDialog from "../components/ConfirmDialog.svelte";
+  import Modal from "../components/Modal.svelte";
   import Dropdown from "../components/Dropdown.svelte";
   import FolderField from "../components/FolderField.svelte";
   import LangPicker from "../components/LangPicker.svelte";
@@ -8,12 +10,13 @@
   import NumberField from "../components/NumberField.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import PathList from "../components/PathList.svelte";
+  import SectionNav from "../components/SectionNav.svelte";
   import SettingRow from "../components/SettingRow.svelte";
   import TagRules from "../components/TagRules.svelte";
   import Switch from "../components/Switch.svelte";
   import ThemeToggle from "../components/ThemeToggle.svelte";
   import { getJson, send } from "../lib/api.svelte.ts";
-  import { decimal, relative } from "../lib/format.ts";
+  import { decimal, relative, dateTime } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
   import { isShell } from "../lib/shell.ts";
@@ -25,6 +28,31 @@
   type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
   type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs" | "zedDirs" | "clineDirs" | "rooDirs" | "kiloDirs" | "geminiDirs" | "copilotDirs";
   type LimitKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "copilot";
+  interface IngestConfig {
+    enabled: boolean;
+    bind: string;
+    port: number;
+    storeText: boolean;
+  }
+  type IngestSkipReason = "hosts" | "identities" | "time" | "other";
+  type IngestErrorCode = "in-use" | "address" | "port-conflict" | "other";
+  interface IngestToken {
+    id: string;
+    label: string;
+    prefix: string;
+    createdAt: number;
+    lastUsedAt: number | null;
+  }
+  interface Ingest {
+    config: IngestConfig;
+    status: { state: "off" | "listening" | "error"; address: string | null; error: IngestErrorCode | null; message: string | null; since: number };
+    /** Whether the listener is bound to this machine only. */
+    loopback: boolean;
+    endpoints: string[];
+    basic: { user: string } | null;
+    tokens: IngestToken[];
+    stats: { lastAt: number | null; lastHost: string | null; usage: number; rejected: number; skipped: number; lastSkipReason: IngestSkipReason | null; metricsOnly: boolean };
+  }
   interface Config {
     dbPath: string;
     journalMode: "auto" | "wal" | "delete";
@@ -40,6 +68,7 @@
     digest?: { enabled: boolean; day: number; hour: number; dir: string };
     labels?: { enabled: boolean; cli: "claude" | "codex"; model: string; dailyCap: number };
     metrics?: { enabled: boolean; token: string; projectLabels: boolean };
+    ingest?: IngestConfig;
   }
   interface Settings {
     config: Config;
@@ -213,6 +242,151 @@
     }
   }
 
+  // Remote agents: the switches save at once, the address with its button. The listener and its tokens are the server's,
+  // so what it reports (GET /api/ingest) is read again after every change. A token is shown in full once, as it is made.
+  const MIN_PASSWORD = 12;
+  const INGEST_ERROR: Record<IngestErrorCode, string> = {
+    "in-use": "settings.ingestError.inUse",
+    address: "settings.ingestError.address",
+    "port-conflict": "settings.ingestError.portConflict",
+    other: "settings.ingestError.other",
+  };
+  let ingest = $state<Ingest | null>(null);
+  let ingestBind = $state("");
+  let ingestPort = $state(0);
+  let basicUser = $state("");
+  let basicPassword = $state("");
+  let tokenLabel = $state("");
+  let newToken = $state<string | null>(null);
+  let newTokenLabel = $state("");
+  let copied = $state<string | null>(null);
+  // The token the revoke dialog asks about, and the dialog's own request.
+  let revoking = $state<IngestToken | null>(null);
+  let revokePending = $state(false);
+  let revokeError = $state<string | null>(null);
+  const passwordShort = $derived(basicPassword.length > 0 && basicPassword.length < MIN_PASSWORD);
+  const ingestStatus = $derived.by(() => {
+    const s = ingest?.status;
+    if (!s || s.state === "off") return { bad: false, text: t("settings.ingestStatus.off") };
+    if (s.state === "listening") return { bad: false, text: t("settings.ingestStatus.listening", { address: s.address ?? "" }) };
+    const reason = s.error ? t(INGEST_ERROR[s.error] as "settings.ingestError.other") : t("settings.ingestError.other");
+    return { bad: true, text: s.message ? `${reason} ${s.message}` : reason };
+  });
+  const ingestLast = $derived.by(() => {
+    const s = ingest?.stats;
+    if (!s) return "";
+    const last = s.lastAt ? t("settings.ingestLast", { when: relative(s.lastAt), host: s.lastHost ?? "–" }) : t("settings.ingestNone");
+    const parts = [last];
+    if (s.rejected > 0) parts.push(t("settings.ingestRejected", { n: s.rejected }));
+    if (s.skipped > 0) {
+      const reason = t(`settings.ingestSkipped.${s.lastSkipReason ?? "other"}` as "settings.ingestSkipped.other");
+      parts.push(t("settings.ingestSkipped", { n: s.skipped, reason }));
+    }
+    return parts.join(" · ");
+  });
+  // The address the snippets send to: the server's first guess at one that other machines can reach, else this machine's name.
+  const ingestEndpoint = $derived(ingest?.endpoints[0] ?? `http://${live.status?.identity.host ?? location.hostname}:${ingest?.config.port ?? ingestPort}`);
+  const tokenText = $derived(newToken ?? "TOKEN");
+  const hermesSnippet = $derived(
+    [
+      `OTEL_EXPORTER_OTLP_ENDPOINT=${ingestEndpoint}`,
+      `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer ${tokenText}`,
+      "OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+      "OTEL_RESOURCE_ATTRIBUTES=host.name=NAME",
+    ].join("\n"),
+  );
+  const claudeSnippet = $derived(
+    [
+      "CLAUDE_CODE_ENABLE_TELEMETRY=1",
+      "OTEL_LOGS_EXPORTER=otlp",
+      "OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+      `OTEL_EXPORTER_OTLP_ENDPOINT=${ingestEndpoint}`,
+      `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer ${tokenText}`,
+      "OTEL_RESOURCE_ATTRIBUTES=host.name=NAME",
+    ].join("\n"),
+  );
+
+  async function loadIngest() {
+    const r = await getJson<Ingest>("/api/ingest");
+    ingest = r;
+    ingestBind = r.config.bind;
+    ingestPort = r.config.port;
+    basicUser = r.basic?.user ?? "";
+    if (cfg) cfg.ingest = r.config;
+  }
+
+  /** Runs one change to the listener and reads its state again. A failure reads it too, so a switch falls back to the truth. */
+  async function ingestAction(run: () => Promise<unknown>) {
+    busy = true;
+    errorMsg = null;
+    try {
+      await run();
+      flash(t("settings.saved"));
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      await loadIngest().catch(() => {});
+      busy = false;
+    }
+  }
+
+  const saveIngest = (change: Partial<IngestConfig>) => ingestAction(() => send<Settings>("/api/settings", { ingest: change }));
+
+  const saveAddress = () => saveIngest({ bind: ingestBind.trim(), port: Math.round(Number(ingestPort)) });
+
+  const saveBasic = () =>
+    ingestAction(async () => {
+      await send("/api/ingest/basic", { user: basicUser.trim(), password: basicPassword }, "PUT");
+      basicPassword = "";
+    });
+
+  const clearBasic = () =>
+    ingestAction(async () => {
+      await send("/api/ingest/basic", undefined, "DELETE");
+      basicPassword = "";
+    });
+
+  const addToken = () =>
+    ingestAction(async () => {
+      const r = await send<{ token: string }>("/api/ingest/tokens", { label: tokenLabel.trim() });
+      newTokenLabel = tokenLabel.trim();
+      newToken = r.token;
+      tokenLabel = "";
+    });
+
+  async function revokeToken() {
+    if (!revoking || revokePending) return;
+    revokePending = true;
+    revokeError = null;
+    try {
+      await send("/api/ingest/tokens", { id: revoking.id }, "DELETE");
+      revoking = null;
+      flash(t("settings.saved"));
+      await loadIngest().catch(() => {});
+      // The token's row is gone, and with it the button that opened the dialog: focus goes to the card's title.
+      document.getElementById("settings-ingest")?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
+    } catch (e) {
+      revokeError = (e as Error).message;
+    } finally {
+      revokePending = false;
+    }
+  }
+
+  function askRevoke(tk: IngestToken) {
+    revokeError = null;
+    revoking = tk;
+  }
+
+  async function copyText(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = key;
+      setTimeout(() => copied === key && (copied = null), 2000);
+    } catch {
+      /* the text can still be selected by hand */
+    }
+  }
+
   // AI session labels: switch and program save at once, the model and the cap with Save. The status is the server's.
   type LabelCode = "not-installed" | "not-signed-in" | "timeout" | "bad-output" | "failed";
   interface LabelStatus {
@@ -347,6 +521,7 @@
       .then((f) => (projectOptions = f.project.map((o) => ({ value: o.value, label: o.label }))))
       .catch(() => {});
     loadDigest().catch(() => {});
+    if (cfg?.ingest) loadIngest().catch(() => {});
     getJson<LabelStatus>("/api/labels")
       .then((s) => (labelStatus = s))
       .catch(() => {});
@@ -538,369 +713,523 @@
     await checkUpdate(true);
     checked = true;
   }
+  // The sections the page shows (some come with the settings the server has), for the list beside them.
+  const sections = $derived(
+    !cfg
+      ? []
+      : [
+          { id: "settings-general", label: t("settings.general") },
+          { id: "settings-database", label: t("settings.database") },
+          { id: "settings-sources", label: t("settings.sources") },
+          { id: "settings-limits", label: t("settings.limits") },
+          ...(cfg.budgets ? [{ id: "settings-budgets", label: t("settings.budgets") }] : []),
+          ...(cfg.digest ? [{ id: "settings-digest", label: t("settings.digest") }] : []),
+          ...(cfg.metrics ? [{ id: "settings-metrics", label: t("settings.metrics") }] : []),
+          ...(cfg.ingest ? [{ id: "settings-ingest", label: t("settings.ingest") }] : []),
+          ...(cfg.labels ? [{ id: "settings-labels", label: t("settings.labels") }] : []),
+          { id: "settings-pricing", label: t("settings.pricing") },
+          { id: "settings-app", label: t("settings.app") },
+        ],
+  );
 </script>
 
-<div class="flex flex-col gap-5">
-  <PageHeader title={t("settings.title")} subtitle={t("settings.subtitle")}>
-    {#if saved}<span class="inline-flex items-center gap-1 text-xs text-good"><Check size={14} />{saved}</span>{/if}
-  </PageHeader>
-  {#if errorMsg}<div class="rounded-lg border border-line bg-surface px-4 py-3 text-sm text-bad">{errorMsg}</div>{/if}
+<!-- The cards stay at a reading width, so a control sits near its label. On wide screens the sections are listed beside them. -->
+<div class="flex items-start gap-8">
+  {#if sections.length}
+    <div class="sticky top-[4.5rem] hidden max-h-[calc(100vh-5.5rem)] w-48 shrink-0 overflow-y-auto xl:block">
+      <SectionNav items={sections} label={t("settings.sections")} />
+    </div>
+  {/if}
+  <div class="flex w-full max-w-[960px] min-w-0 flex-col gap-5">
+    <PageHeader title={t("settings.title")} subtitle={t("settings.subtitle")}>
+      {#if saved}<span class="inline-flex items-center gap-1 text-xs text-good"><Check size={14} />{saved}</span>{/if}
+    </PageHeader>
+    {#if errorMsg}<div class="rounded-lg border border-line bg-surface px-4 py-3 text-sm text-bad">{errorMsg}</div>{/if}
 
-  {#if cfg}
-    <Card title={t("settings.general")} subtitle={t("settings.generalHint")} divided>
-      <SettingRow label={t("settings.language")} hint={t("settings.languageHint")}><LangPicker wide /></SettingRow>
-      <SettingRow label={t("settings.theme")} hint={t("settings.themeHint")}><ThemeToggle wide /></SettingRow>
-      <SettingRow label={t("settings.intro")} hint={t("settings.introHint")}>
-        <Switch checked={store.intro} label={t("settings.intro")} onchange={(on) => store.setIntro(on)} />
-      </SettingRow>
-      <SettingRow label={t("settings.introSound")} hint={t("settings.introSoundHint")}>
-        <Switch checked={store.introSound} label={t("settings.introSound")} onchange={(on) => store.setIntroSound(on)} />
-      </SettingRow>
-      <SettingRow label={t("settings.introReplay")} hint={reducedMotion ? t("settings.introReplayMotion") : t("settings.introReplayHint")}>
-        <button class="btn" onclick={replaySplash} disabled={reducedMotion}><Play size={14} />{t("settings.introReplayButton")}</button>
-      </SettingRow>
-      <SettingRow label={t("settings.userName")} hint={t("settings.userNameHint")}>
-        <input class="input w-full" bind:value={cfg.userName} aria-label={t("settings.userName")} />
-      </SettingRow>
-      <SettingRow label={t("settings.scanInterval")} hint={t("settings.scanIntervalHint")}>
-        <NumberField bind:value={cfg.scanIntervalSec} unit={t("settings.unit.seconds")} label={t("settings.scanInterval")} />
-      </SettingRow>
-      <SettingRow label={t("settings.promptLimit")} hint={t("settings.promptLimitHint")}>
-        <NumberField bind:value={cfg.promptTextLimit} unit={t("settings.unit.characters")} label={t("settings.promptLimit")} />
-      </SettingRow>
-      {#snippet footer()}
-        <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
-      {/snippet}
-    </Card>
+    {#if cfg}
+      <Card id="settings-general" title={t("settings.general")} subtitle={t("settings.generalHint")} divided>
+        <SettingRow label={t("settings.language")} hint={t("settings.languageHint")}><LangPicker wide /></SettingRow>
+        <SettingRow label={t("settings.theme")} hint={t("settings.themeHint")}><ThemeToggle wide /></SettingRow>
+        <SettingRow label={t("settings.intro")} hint={t("settings.introHint")}>
+          <Switch checked={store.intro} label={t("settings.intro")} onchange={(on) => store.setIntro(on)} />
+        </SettingRow>
+        <SettingRow label={t("settings.introSound")} hint={t("settings.introSoundHint")}>
+          <Switch checked={store.introSound} label={t("settings.introSound")} onchange={(on) => store.setIntroSound(on)} />
+        </SettingRow>
+        <SettingRow label={t("settings.introReplay")} hint={reducedMotion ? t("settings.introReplayMotion") : t("settings.introReplayHint")}>
+          <button class="btn" onclick={replaySplash} disabled={reducedMotion}><Play size={14} />{t("settings.introReplayButton")}</button>
+        </SettingRow>
+        <SettingRow label={t("settings.userName")} hint={t("settings.userNameHint")}>
+          <input class="input w-full" bind:value={cfg.userName} aria-label={t("settings.userName")} />
+        </SettingRow>
+        <SettingRow label={t("settings.scanInterval")} hint={t("settings.scanIntervalHint")}>
+          <NumberField bind:value={cfg.scanIntervalSec} unit={t("settings.unit.seconds")} label={t("settings.scanInterval")} />
+        </SettingRow>
+        <SettingRow label={t("settings.promptLimit")} hint={t("settings.promptLimitHint")}>
+          <NumberField bind:value={cfg.promptTextLimit} unit={t("settings.unit.characters")} label={t("settings.promptLimit")} />
+        </SettingRow>
+        {#snippet footer()}
+          <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
+        {/snippet}
+      </Card>
 
-    <Card title={t("settings.database")} subtitle={t("settings.dbHint")} divided>
-      <SettingRow label={t("settings.dbInUse")} hint={currentDb}>
-        <span class="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-ink-2">
-          {currentDb === defaultDb ? t("settings.dbDefault") : t("settings.dbCustom")}
-        </span>
-      </SettingRow>
+      <Card id="settings-database" title={t("settings.database")} subtitle={t("settings.dbHint")} divided>
+        <SettingRow label={t("settings.dbInUse")} hint={currentDb}>
+          <span class="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-ink-2">
+            {currentDb === defaultDb ? t("settings.dbDefault") : t("settings.dbCustom")}
+          </span>
+        </SettingRow>
 
-      <div class="mb-4 rounded-lg bg-surface-2 px-4 py-3.5">
-        <div class="text-xs font-medium text-ink-2">{t("settings.share")}</div>
-        <!-- A timeline: the steps side by side joined by a line, or one under the other on a narrow screen. -->
-        <ol class="mt-4 grid sm:grid-cols-3">
-          {#each [1, 2, 3] as const as n (n)}
-            <li class="relative flex gap-3 pb-5 last:pb-0 sm:block sm:pb-0">
-              {#if n < 3}
-                <span
-                  class="absolute top-9 bottom-2 left-[11px] w-0.5 rounded-full bg-linear-to-b from-accent/70 to-accent/15 sm:top-[11px] sm:right-4 sm:bottom-auto sm:left-11 sm:h-0.5 sm:w-auto sm:bg-linear-to-r"
-                  aria-hidden="true"
-                ></span>
-              {/if}
-              <span class="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-fill text-[11px] font-semibold text-white shadow-sm ring-4 ring-accent-wash tabular">{n}</span>
-              <div class="min-w-0 sm:mt-3 sm:pr-8">
-                <div class="text-[13px] font-medium text-ink">{t(`settings.share.step${n}Title`)}</div>
-                <div class="mt-0.5 max-w-[700px] text-xs leading-relaxed text-muted">{t(`settings.share.step${n}`)}</div>
+        <div class="mb-4 rounded-lg bg-surface-2 px-4 py-3.5">
+          <div class="text-xs font-medium text-ink-2">{t("settings.share")}</div>
+          <!-- A timeline: the steps side by side joined by a line, or one under the other on a narrow screen. -->
+          <ol class="mt-4 grid sm:grid-cols-3">
+            {#each [1, 2, 3] as const as n (n)}
+              <li class="relative flex gap-3 pb-5 last:pb-0 sm:block sm:pb-0">
+                {#if n < 3}
+                  <span
+                    class="absolute top-9 bottom-2 left-[11px] w-0.5 rounded-full bg-linear-to-b from-accent/70 to-accent/15 sm:top-[11px] sm:right-4 sm:bottom-auto sm:left-11 sm:h-0.5 sm:w-auto sm:bg-linear-to-r"
+                    aria-hidden="true"
+                  ></span>
+                {/if}
+                <span class="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-fill text-[11px] font-semibold text-white shadow-sm ring-4 ring-accent-wash tabular">{n}</span>
+                <div class="min-w-0 sm:mt-3 sm:pr-8">
+                  <div class="text-[13px] font-medium text-ink">{t(`settings.share.step${n}Title`)}</div>
+                  <div class="mt-0.5 max-w-[700px] text-xs leading-relaxed text-muted">{t(`settings.share.step${n}`)}</div>
+                </div>
+              </li>
+            {/each}
+          </ol>
+        </div>
+
+        <SettingRow label={t("settings.dbFolder")} hint={t("settings.share.why")} wide>
+          <div class="flex w-full min-w-0 flex-col gap-2">
+            {#if syncFolders.length}
+              <div class="flex flex-wrap gap-2">
+                {#each syncFolders as f (f.path)}
+                  {@const value = joinPath(f.path, sharedFolder)}
+                  <button class="btn !h-7 !text-xs" class:pick-on={dbInput === value} title={f.path} onclick={() => (dbInput = value)}><Cloud size={13} />{f.name}</button>
+                {/each}
               </div>
-            </li>
-          {/each}
-        </ol>
-      </div>
+            {/if}
+            <FolderField class="font-mono text-xs placeholder:font-sans" bind:value={dbInput} placeholder={t("settings.dbFolderPlaceholder")} label={t("settings.dbFolder")} />
+            <span
+              class="flex min-h-4 items-start gap-1.5 text-[11px]"
+              class:text-good={status?.tone === "good"}
+              class:text-bad={status?.tone === "bad"}
+              class:text-muted={status?.tone === "muted"}
+            >
+              {#if status}
+                <status.icon size={12} class="mt-px shrink-0" />
+                <span class="min-w-0 break-all">{status.text}</span>
+              {/if}
+            </span>
+          </div>
+        </SettingRow>
+        <SettingRow label={t("settings.dbCopy")} hint={t("settings.dbCopyHint")}>
+          <Switch bind:checked={copyDb} label={t("settings.dbCopy")} disabled={target?.state !== "new"} />
+        </SettingRow>
+        <SettingRow label={t("settings.journal")} hint={t("settings.journalHint")}>
+          <Dropdown
+            full
+            label={t("settings.journal")}
+            bind:value={cfg.journalMode}
+            options={(["auto", "delete", "wal"] as const).map((v) => ({ value: v, label: t(`settings.journal.${v}`) }))}
+          />
+        </SettingRow>
+        <SettingRow label={t("settings.retention")} hint={t("settings.retentionHint")}>
+          <Dropdown full label={t("settings.retention")} bind:value={retention} options={retentionOptions} onchange={() => save()} />
+        </SettingRow>
+        <SettingRow label={t("settings.dbSize")} hint={compactMsg ?? `${t("settings.dbSizeHint")}${dbSize && !dbSize.incremental ? ` ${t("settings.dbSizeOnce")}` : ""}`}>
+          <!-- The file's size, and how much of it Compact can give back. Nothing to gain: the button rests, unless the file
+               still needs its one-time switch to giving freed space back by itself. -->
+          {#if dbSize}
+            <span class="flex flex-col items-end leading-tight">
+              <span class="text-sm font-medium text-ink tabular">{megabytes(dbSize.bytes)}</span>
+              <span class="text-[11px] text-muted">{reclaimable ? t("settings.dbSizeValue", { free: megabytes(dbSize.freeBytes) }) : t("settings.dbNothingFree")}</span>
+            </span>
+          {/if}
+          <button class="btn" onclick={compactDb} disabled={compacting || busy || (!!dbSize && !reclaimable && dbSize.incremental)}>
+            {#if compacting}<Loader size={14} class="animate-spin" />{t("settings.compacting")}{:else}<Shrink size={14} />{t("settings.compact")}{/if}
+          </button>
+        </SettingRow>
+        {#snippet footer()}
+          {#if currentDb !== defaultDb}
+            <button class="btn" onclick={() => (dbInput = "")} disabled={busy}>{t("settings.dbUseDefault")}</button>
+          {/if}
+          <button class="btn btn-primary" onclick={saveDb} disabled={busy || !canSaveDb}>{t("settings.save")}</button>
+        {/snippet}
+      </Card>
 
-      <SettingRow label={t("settings.dbFolder")} hint={t("settings.share.why")} wide>
-        <div class="flex w-full min-w-0 flex-col gap-2">
-          {#if syncFolders.length}
-            <div class="flex flex-wrap gap-2">
-              {#each syncFolders as f (f.path)}
-                {@const value = joinPath(f.path, sharedFolder)}
-                <button class="btn !h-7 !text-xs" class:pick-on={dbInput === value} title={f.path} onclick={() => (dbInput = value)}><Cloud size={13} />{f.name}</button>
+      <Card id="settings-sources" title={t("settings.sources")} subtitle={t("settings.sourcesHint")} divided>
+        {#each SOURCES as src (src.key)}
+          <SettingRow label={t(`settings.source.${src.key}`)} hint={t(`settings.source.${src.key}Hint`)} wide>
+            {#snippet lead()}<Switch bind:checked={cfg!.sources.enabled[src.key]} label={t(`settings.source.${src.key}`)} />{/snippet}
+            <PathList bind:paths={dirs[src.key]} disabled={!cfg!.sources.enabled[src.key]} />
+          </SettingRow>
+        {/each}
+        <!-- Cursor keeps its usage on cursor.com: one row with both ways in, syncing (the switch) and a CSV import. -->
+        <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} wide>
+          {#snippet lead()}<Switch bind:checked={cfg!.cursorSync} label={t("settings.cursorSync")} onchange={toggleCursorSync} />{/snippet}
+          <div class="flex w-full flex-col items-end gap-2">
+            <div class="flex flex-wrap justify-end gap-2">
+              <button class="btn" onclick={syncCursor} disabled={!cfg.cursorSync || cursorSyncing || busy}>
+                {#if cursorSyncing}<Loader size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}{t("settings.cursorSyncNow")}
+              </button>
+              <label class="btn cursor-pointer">
+                <FileUp size={14} />{t("settings.cursorImport")}
+                <input type="file" accept=".csv,text/csv" class="hidden" onchange={importCursor} />
+              </label>
+            </div>
+            {#if importMsg}<span class="text-right text-xs text-ink-2">{importMsg}</span>
+            {:else if cfg.cursorSync && cursorStatus}<span class="text-right text-xs" class:text-bad={cursorStatus.bad} class:text-ink-2={!cursorStatus.bad}>{cursorStatus.text}</span>{/if}
+          </div>
+        </SettingRow>
+        {#snippet footer()}
+          <button class="btn" onclick={() => rescan(false)} disabled={busy} aria-busy={scanning === "quick"} title={t("settings.rescanHint")}>
+            {#if scanning === "quick"}<Loader size={14} class="animate-spin motion-reduce:animate-none" />{:else}<RefreshCw size={14} />{/if}{t("settings.rescan")}{scanning === "quick" ? scanProgress : ""}
+          </button>
+          <button class="btn" onclick={() => rescan(true)} disabled={busy} aria-busy={scanning === "full"} title={t("settings.fullRescanHint")}>
+            {#if scanning === "full"}<Loader size={14} class="animate-spin motion-reduce:animate-none" />{/if}{t("settings.fullRescan")}<span class="tabular">{scanning === "full" ? scanProgress : ""}</span>
+          </button>
+          <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
+        {/snippet}
+      </Card>
+
+      <Card id="settings-limits" title={t("settings.limits")} subtitle={t("settings.limitsHint")} divided>
+        {#each LIMIT_SOURCES as key (key)}
+          <SettingRow label={t(`settings.limits.${key}`)} hint={t(`settings.limits.${key}Hint`)}>
+            <Switch bind:checked={cfg!.limits[key]} label={t(`settings.limits.${key}`)} onchange={() => save()} />
+          </SettingRow>
+        {/each}
+      </Card>
+
+      {#if cfg.budgets}
+        <Card id="settings-budgets" title={t("settings.budgets")} subtitle={t("settings.budgetsHint")} divided>
+          <SettingRow label={t("settings.budgetDaily")} hint={t("settings.budgetDailyHint")}>
+            <NumberField bind:value={budgetDaily} unit="USD" label={t("settings.budgetDaily")} />
+          </SettingRow>
+          <SettingRow label={t("settings.budgetMonthly")} hint={t("settings.budgetMonthlyHint")}>
+            <NumberField bind:value={budgetMonthly} unit="USD" label={t("settings.budgetMonthly")} />
+          </SettingRow>
+          <SettingRow label={t("settings.budgetProjects")} hint={t("settings.budgetProjectsHint")} wide={projectBudgets.length > 0}>
+            <div class="flex w-full flex-col items-end gap-2">
+              {#each projectBudgets as row, i (i)}
+                <div class="flex w-full items-center gap-2">
+                  <div class="min-w-0 flex-1">
+                    <Dropdown
+                      full
+                      label={t("settings.budgetProject")}
+                      bind:value={row.project}
+                      options={[...projectOptions, ...(row.project && !projectOptions.some((o) => o.value === row.project) ? [{ value: row.project, label: row.project }] : [])]}
+                    />
+                  </div>
+                  <div class="w-40 shrink-0"><NumberField bind:value={row.cap} unit="USD" label={t("settings.budgetMonthly")} /></div>
+                  <button class="btn btn-icon" aria-label={t("common.remove")} onclick={() => (projectBudgets = projectBudgets.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+                </div>
               {/each}
+              <button class="btn" onclick={() => (projectBudgets = [...projectBudgets, { project: "", cap: 0 }])}><Plus size={14} />{t("settings.budgetAddProject")}</button>
+            </div>
+          </SettingRow>
+          <SettingRow label={t("settings.budgetAlerts")} hint={t("settings.budgetAlertsHint")}>
+            <Switch bind:checked={cfg.budgets.notify} label={t("settings.budgetAlerts")} onchange={() => saveBudgets()} />
+          </SettingRow>
+          <SettingRow label={t("settings.limitAlerts")} hint={t("settings.limitAlertsHint")}>
+            <Switch bind:checked={cfg.budgets.limitAlerts} label={t("settings.limitAlerts")} onchange={() => saveBudgets()} />
+          </SettingRow>
+          <SettingRow label={t("settings.testNotification")} hint={testMsg ?? t("settings.testNotificationHint")}>
+            <button class="btn" onclick={testNotification}><Bell size={14} />{t("settings.testNotificationSend")}</button>
+          </SettingRow>
+          {#snippet footer()}
+            <button class="btn btn-primary" onclick={saveBudgets} disabled={busy}>{t("settings.save")}</button>
+          {/snippet}
+        </Card>
+      {/if}
+
+      {#if cfg.digest}
+        <Card id="settings-digest" title={t("settings.digest")} subtitle={t("settings.digestHint")} divided>
+          <SettingRow label={t("settings.digestEnable")} hint={t("settings.digestEnableHint")}>
+            <Switch bind:checked={cfg.digest.enabled} label={t("settings.digestEnable")} onchange={() => saveDigest()} />
+          </SettingRow>
+          <SettingRow label={t("settings.digestWhen")} hint={t("settings.digestWhenHint")}>
+            <div class="min-w-0 flex-1"><Dropdown full label={t("settings.digestDay")} bind:value={digestDay} options={digestDays} onchange={() => saveDigest()} /></div>
+            <div class="w-28 shrink-0"><Dropdown full label={t("settings.digestHour")} bind:value={digestHour} options={digestHours} onchange={() => saveDigest()} /></div>
+          </SettingRow>
+          <SettingRow label={t("settings.digestDir")} hint={t("settings.digestDirHint", { path: digestDefaultDir })} wide>
+            <FolderField class="font-mono text-xs placeholder:font-sans" bind:value={digestDir} placeholder={t("settings.digestDirDefault")} label={t("settings.digestDirLabel")} />
+          </SettingRow>
+          <SettingRow label={t("settings.digestNow")} hint={digestMsg ?? t("settings.digestNowHint")}>
+            <button class="btn" onclick={writeDigest}><FileText size={14} />{t("settings.digestNowButton")}</button>
+          </SettingRow>
+          <SettingRow label={t("settings.digestLast")} hint={digestLast ? digestLast.path : t("settings.digestNone")}>
+            {#if digestLast}
+              <button class="btn" onclick={() => (digestShown = !digestShown)} aria-expanded={digestShown}>{digestShown ? t("settings.digestHide") : t("settings.digestView")}</button>
+            {/if}
+          </SettingRow>
+          {#if digestShown && digestLast}
+            <div class="border-t border-line py-4"><MarkdownView source={digestLast.markdown} /></div>
+          {/if}
+          {#snippet footer()}
+            <button class="btn btn-primary" onclick={saveDigest} disabled={busy}>{t("settings.save")}</button>
+          {/snippet}
+        </Card>
+      {/if}
+
+      {#if cfg.metrics}
+        <Card id="settings-metrics" title={t("settings.metrics")} subtitle={t("settings.metricsHint")} divided>
+          <SettingRow label={t("settings.metricsEnable")} hint={t("settings.metricsEnableHint")}>
+            <Switch bind:checked={cfg.metrics.enabled} label={t("settings.metricsEnable")} onchange={() => saveMetrics({ enabled: cfg!.metrics!.enabled })} />
+          </SettingRow>
+          {#if cfg.metrics.enabled}
+            <SettingRow label={t("settings.metricsUrl")} hint={t("settings.metricsUrlHint")} wide>
+              <input class="input w-full font-mono text-xs" readonly value={metricsUrl} aria-label={t("settings.metricsUrl")} onfocus={(e) => e.currentTarget.select()} />
+            </SettingRow>
+            <SettingRow label={t("settings.metricsToken")} hint={t("settings.metricsTokenHint")} wide>
+              <!-- The server makes the token as metrics are turned on: until its answer arrives the field says so. -->
+              <input class="input min-w-0 flex-1 font-mono text-xs" readonly value={cfg.metrics.token} placeholder={t("common.loading")} aria-label={t("settings.metricsToken")} aria-busy={!cfg.metrics.token} onfocus={(e) => e.currentTarget.select()} />
+              <button class="btn shrink-0" onclick={copyToken}>
+                {#if tokenCopied}<Check size={14} />{t("settings.metricsCopied")}{:else}<Copy size={14} />{t("settings.metricsCopy")}{/if}
+              </button>
+              <button class="btn shrink-0" onclick={() => saveMetrics({ regenerateToken: true })} disabled={busy}><RefreshCw size={14} />{t("settings.metricsRegenerate")}</button>
+            </SettingRow>
+            <SettingRow label={t("settings.metricsProjects")} hint={t("settings.metricsProjectsHint")}>
+              <Switch bind:checked={cfg.metrics.projectLabels} label={t("settings.metricsProjects")} onchange={() => saveMetrics({ projectLabels: cfg!.metrics!.projectLabels })} />
+            </SettingRow>
+            <SettingRow label={t("settings.metricsExample")} hint={t("settings.metricsExampleHint")}>
+              <a class="btn" href={METRICS_DOCS} target="_blank" rel="noreferrer"><ExternalLink size={14} />{t("settings.metricsExampleButton")}</a>
+            </SettingRow>
+          {/if}
+        </Card>
+      {/if}
+
+      {#if cfg.ingest}
+        <Card id="settings-ingest" title={t("settings.ingest")} subtitle={t("settings.ingestHint")} divided>
+          <SettingRow label={t("settings.ingestEnable")} hint={t("settings.ingestEnableHint")}>
+            <Switch bind:checked={cfg.ingest.enabled} label={t("settings.ingestEnable")} onchange={() => saveIngest({ enabled: cfg!.ingest!.enabled })} />
+          </SettingRow>
+          <SettingRow label={t("settings.ingestAddress")} hint={t("settings.ingestAddressHint")} wide>
+            <input class="input min-w-0 flex-1 font-mono text-xs" bind:value={ingestBind} autocomplete="off" spellcheck="false" aria-label={t("settings.ingestBind")} />
+            <div class="w-36 shrink-0"><NumberField bind:value={ingestPort} unit={t("settings.ingestPort")} label={t("settings.ingestPort")} min={1} /></div>
+            <button class="btn shrink-0" onclick={saveAddress} disabled={busy || !ingestBind.trim()}>{t("settings.save")}</button>
+          </SettingRow>
+          <SettingRow label={t("settings.ingestStatus")} hint={cfg.ingest.enabled ? ingestLast : t("settings.ingestStatusHint")}>
+            {#if ingest}<span class="text-right text-xs" class:text-bad={ingestStatus.bad} class:text-ink-2={!ingestStatus.bad}>{ingestStatus.text}</span>{/if}
+          </SettingRow>
+          <div class="flex items-start gap-2 border-t border-line py-4 text-xs leading-relaxed text-ink-2">
+            <Info size={14} class="mt-0.5 shrink-0 text-muted" />{t("settings.ingestProxy")}
+          </div>
+          {#if cfg.ingest.enabled && ingest && !ingest.loopback}
+            <div class="flex items-start gap-2 border-t border-line py-4 text-xs leading-relaxed text-ink-2">
+              <TriangleAlert size={14} class="mt-0.5 shrink-0 text-warn" />{t("settings.ingestOpen")}
             </div>
           {/if}
-          <FolderField class="font-mono text-xs placeholder:font-sans" bind:value={dbInput} placeholder={t("settings.dbFolderPlaceholder")} label={t("settings.dbFolder")} />
-          <span
-            class="flex min-h-4 items-start gap-1.5 text-[11px]"
-            class:text-good={status?.tone === "good"}
-            class:text-bad={status?.tone === "bad"}
-            class:text-muted={status?.tone === "muted"}
-          >
-            {#if status}
-              <status.icon size={12} class="mt-px shrink-0" />
-              <span class="min-w-0 break-all">{status.text}</span>
-            {/if}
-          </span>
-        </div>
-      </SettingRow>
-      <SettingRow label={t("settings.dbCopy")} hint={t("settings.dbCopyHint")}>
-        <Switch bind:checked={copyDb} label={t("settings.dbCopy")} disabled={target?.state !== "new"} />
-      </SettingRow>
-      <SettingRow label={t("settings.journal")} hint={t("settings.journalHint")}>
-        <Dropdown
-          full
-          label={t("settings.journal")}
-          bind:value={cfg.journalMode}
-          options={(["auto", "delete", "wal"] as const).map((v) => ({ value: v, label: t(`settings.journal.${v}`) }))}
-        />
-      </SettingRow>
-      <SettingRow label={t("settings.retention")} hint={t("settings.retentionHint")}>
-        <Dropdown full label={t("settings.retention")} bind:value={retention} options={retentionOptions} onchange={() => save()} />
-      </SettingRow>
-      <SettingRow label={t("settings.dbSize")} hint={compactMsg ?? `${t("settings.dbSizeHint")}${dbSize && !dbSize.incremental ? ` ${t("settings.dbSizeOnce")}` : ""}`}>
-        <!-- The file's size, and how much of it Compact can give back. Nothing to gain: the button rests, unless the file
-             still needs its one-time switch to giving freed space back by itself. -->
-        {#if dbSize}
-          <span class="flex flex-col items-end leading-tight">
-            <span class="text-sm font-medium text-ink tabular">{megabytes(dbSize.bytes)}</span>
-            <span class="text-[11px] text-muted">{reclaimable ? t("settings.dbSizeValue", { free: megabytes(dbSize.freeBytes) }) : t("settings.dbNothingFree")}</span>
-          </span>
-        {/if}
-        <button class="btn" onclick={compactDb} disabled={compacting || busy || (!!dbSize && !reclaimable && dbSize.incremental)}>
-          {#if compacting}<Loader size={14} class="animate-spin" />{t("settings.compacting")}{:else}<Shrink size={14} />{t("settings.compact")}{/if}
-        </button>
-      </SettingRow>
-      {#snippet footer()}
-        {#if currentDb !== defaultDb}
-          <button class="btn" onclick={() => (dbInput = "")} disabled={busy}>{t("settings.dbUseDefault")}</button>
-        {/if}
-        <button class="btn btn-primary" onclick={saveDb} disabled={busy || !canSaveDb}>{t("settings.save")}</button>
-      {/snippet}
-    </Card>
-
-    <Card title={t("settings.sources")} subtitle={t("settings.sourcesHint")} divided>
-      {#each SOURCES as src (src.key)}
-        <SettingRow label={t(`settings.source.${src.key}`)} hint={t(`settings.source.${src.key}Hint`)} wide>
-          {#snippet lead()}<Switch bind:checked={cfg!.sources.enabled[src.key]} label={t(`settings.source.${src.key}`)} />{/snippet}
-          <PathList bind:paths={dirs[src.key]} disabled={!cfg!.sources.enabled[src.key]} />
-        </SettingRow>
-      {/each}
-      <!-- Cursor keeps its usage on cursor.com: one row with both ways in, syncing (the switch) and a CSV import. -->
-      <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} wide>
-        {#snippet lead()}<Switch bind:checked={cfg!.cursorSync} label={t("settings.cursorSync")} onchange={toggleCursorSync} />{/snippet}
-        <div class="flex w-full flex-col items-end gap-2">
-          <div class="flex flex-wrap justify-end gap-2">
-            <button class="btn" onclick={syncCursor} disabled={!cfg.cursorSync || cursorSyncing || busy}>
-              {#if cursorSyncing}<Loader size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}{t("settings.cursorSyncNow")}
-            </button>
-            <label class="btn cursor-pointer">
-              <FileUp size={14} />{t("settings.cursorImport")}
-              <input type="file" accept=".csv,text/csv" class="hidden" onchange={importCursor} />
-            </label>
-          </div>
-          {#if importMsg}<span class="text-right text-xs text-ink-2">{importMsg}</span>
-          {:else if cfg.cursorSync && cursorStatus}<span class="text-right text-xs" class:text-bad={cursorStatus.bad} class:text-ink-2={!cursorStatus.bad}>{cursorStatus.text}</span>{/if}
-        </div>
-      </SettingRow>
-      {#snippet footer()}
-        <button class="btn" onclick={() => rescan(false)} disabled={busy} aria-busy={scanning === "quick"} title={t("settings.rescanHint")}>
-          {#if scanning === "quick"}<Loader size={14} class="animate-spin motion-reduce:animate-none" />{:else}<RefreshCw size={14} />{/if}{t("settings.rescan")}{scanning === "quick" ? scanProgress : ""}
-        </button>
-        <button class="btn" onclick={() => rescan(true)} disabled={busy} aria-busy={scanning === "full"} title={t("settings.fullRescanHint")}>
-          {#if scanning === "full"}<Loader size={14} class="animate-spin motion-reduce:animate-none" />{/if}{t("settings.fullRescan")}<span class="tabular">{scanning === "full" ? scanProgress : ""}</span>
-        </button>
-        <button class="btn btn-primary" onclick={() => save()} disabled={busy}>{t("settings.save")}</button>
-      {/snippet}
-    </Card>
-
-    <Card title={t("settings.limits")} subtitle={t("settings.limitsHint")} divided>
-      {#each LIMIT_SOURCES as key (key)}
-        <SettingRow label={t(`settings.limits.${key}`)} hint={t(`settings.limits.${key}Hint`)}>
-          <Switch bind:checked={cfg!.limits[key]} label={t(`settings.limits.${key}`)} onchange={() => save()} />
-        </SettingRow>
-      {/each}
-    </Card>
-
-    {#if cfg.budgets}
-      <Card title={t("settings.budgets")} subtitle={t("settings.budgetsHint")} divided>
-        <SettingRow label={t("settings.budgetDaily")} hint={t("settings.budgetDailyHint")}>
-          <NumberField bind:value={budgetDaily} unit="USD" label={t("settings.budgetDaily")} />
-        </SettingRow>
-        <SettingRow label={t("settings.budgetMonthly")} hint={t("settings.budgetMonthlyHint")}>
-          <NumberField bind:value={budgetMonthly} unit="USD" label={t("settings.budgetMonthly")} />
-        </SettingRow>
-        <SettingRow label={t("settings.budgetProjects")} hint={t("settings.budgetProjectsHint")} wide={projectBudgets.length > 0}>
-          <div class="flex w-full flex-col items-end gap-2">
-            {#each projectBudgets as row, i (i)}
-              <div class="flex w-full items-center gap-2">
-                <div class="min-w-0 flex-1">
-                  <Dropdown
-                    full
-                    label={t("settings.budgetProject")}
-                    bind:value={row.project}
-                    options={[...projectOptions, ...(row.project && !projectOptions.some((o) => o.value === row.project) ? [{ value: row.project, label: row.project }] : [])]}
-                  />
-                </div>
-                <div class="w-40 shrink-0"><NumberField bind:value={row.cap} unit="USD" label={t("settings.budgetMonthly")} /></div>
-                <button class="btn btn-icon" aria-label={t("common.remove")} onclick={() => (projectBudgets = projectBudgets.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+          <SettingRow label={t("settings.ingestText")} hint={t("settings.ingestTextHint")}>
+            <Switch bind:checked={cfg.ingest.storeText} label={t("settings.ingestText")} onchange={() => saveIngest({ storeText: cfg!.ingest!.storeText })} />
+          </SettingRow>
+          <SettingRow label={t("settings.ingestBasic")} hint={ingest?.basic ? t("settings.ingestBasicSet", { user: ingest.basic.user }) : t("settings.ingestBasicHint")} wide>
+            <div class="flex w-full min-w-0 flex-col gap-2">
+              <div class="flex gap-2">
+                <input class="input min-w-0 flex-1" bind:value={basicUser} autocomplete="off" spellcheck="false" placeholder={t("settings.ingestUser")} aria-label={t("settings.ingestUser")} />
+                <!-- A saved password is never sent back: the dots only show that one is set. -->
+                <input class="input min-w-0 flex-1" type="password" bind:value={basicPassword} autocomplete="new-password" placeholder={ingest?.basic ? "••••••••" : t("settings.ingestPassword")} aria-label={t("settings.ingestPassword")} />
               </div>
-            {/each}
-            <button class="btn" onclick={() => (projectBudgets = [...projectBudgets, { project: "", cap: 0 }])}><Plus size={14} />{t("settings.budgetAddProject")}</button>
-          </div>
-        </SettingRow>
-        <SettingRow label={t("settings.budgetAlerts")} hint={t("settings.budgetAlertsHint")}>
-          <Switch bind:checked={cfg.budgets.notify} label={t("settings.budgetAlerts")} onchange={() => saveBudgets()} />
-        </SettingRow>
-        <SettingRow label={t("settings.limitAlerts")} hint={t("settings.limitAlertsHint")}>
-          <Switch bind:checked={cfg.budgets.limitAlerts} label={t("settings.limitAlerts")} onchange={() => saveBudgets()} />
-        </SettingRow>
-        <SettingRow label={t("settings.testNotification")} hint={testMsg ?? t("settings.testNotificationHint")}>
-          <button class="btn" onclick={testNotification}><Bell size={14} />{t("settings.testNotificationSend")}</button>
-        </SettingRow>
-        {#snippet footer()}
-          <button class="btn btn-primary" onclick={saveBudgets} disabled={busy}>{t("settings.save")}</button>
-        {/snippet}
-      </Card>
-    {/if}
-
-    {#if cfg.digest}
-      <Card title={t("settings.digest")} subtitle={t("settings.digestHint")} divided>
-        <SettingRow label={t("settings.digestEnable")} hint={t("settings.digestEnableHint")}>
-          <Switch bind:checked={cfg.digest.enabled} label={t("settings.digestEnable")} onchange={() => saveDigest()} />
-        </SettingRow>
-        <SettingRow label={t("settings.digestWhen")} hint={t("settings.digestWhenHint")}>
-          <div class="min-w-0 flex-1"><Dropdown full label={t("settings.digestDay")} bind:value={digestDay} options={digestDays} onchange={() => saveDigest()} /></div>
-          <div class="w-28 shrink-0"><Dropdown full label={t("settings.digestHour")} bind:value={digestHour} options={digestHours} onchange={() => saveDigest()} /></div>
-        </SettingRow>
-        <SettingRow label={t("settings.digestDir")} hint={t("settings.digestDirHint", { path: digestDefaultDir })} wide>
-          <FolderField class="font-mono text-xs placeholder:font-sans" bind:value={digestDir} placeholder={t("settings.digestDirDefault")} label={t("settings.digestDirLabel")} />
-        </SettingRow>
-        <SettingRow label={t("settings.digestNow")} hint={digestMsg ?? t("settings.digestNowHint")}>
-          <button class="btn" onclick={writeDigest}><FileText size={14} />{t("settings.digestNowButton")}</button>
-        </SettingRow>
-        <SettingRow label={t("settings.digestLast")} hint={digestLast ? digestLast.path : t("settings.digestNone")}>
-          {#if digestLast}
-            <button class="btn" onclick={() => (digestShown = !digestShown)} aria-expanded={digestShown}>{digestShown ? t("settings.digestHide") : t("settings.digestView")}</button>
-          {/if}
-        </SettingRow>
-        {#if digestShown && digestLast}
-          <div class="border-t border-line py-4"><MarkdownView source={digestLast.markdown} /></div>
-        {/if}
-        {#snippet footer()}
-          <button class="btn btn-primary" onclick={saveDigest} disabled={busy}>{t("settings.save")}</button>
-        {/snippet}
-      </Card>
-    {/if}
-
-    {#if cfg.metrics}
-      <Card title={t("settings.metrics")} subtitle={t("settings.metricsHint")} divided>
-        <SettingRow label={t("settings.metricsEnable")} hint={t("settings.metricsEnableHint")}>
-          <Switch bind:checked={cfg.metrics.enabled} label={t("settings.metricsEnable")} onchange={() => saveMetrics({ enabled: cfg!.metrics!.enabled })} />
-        </SettingRow>
-        {#if cfg.metrics.enabled}
-          <SettingRow label={t("settings.metricsUrl")} hint={t("settings.metricsUrlHint")} wide>
-            <input class="input w-full font-mono text-xs" readonly value={metricsUrl} aria-label={t("settings.metricsUrl")} onfocus={(e) => e.currentTarget.select()} />
+              <div class="flex items-center justify-end gap-2">
+                <span class="mr-auto min-h-4 text-[11px] text-bad">{passwordShort ? t("settings.ingestPasswordShort", { n: MIN_PASSWORD }) : ""}</span>
+                {#if ingest?.basic}<button class="btn" onclick={clearBasic} disabled={busy}>{t("settings.ingestClear")}</button>{/if}
+                <button class="btn" onclick={saveBasic} disabled={busy || !basicUser.trim() || basicPassword.length < MIN_PASSWORD}>{t("settings.save")}</button>
+              </div>
+            </div>
           </SettingRow>
-          <SettingRow label={t("settings.metricsToken")} hint={t("settings.metricsTokenHint")} wide>
-            <!-- The server makes the token as metrics are turned on: until its answer arrives the field says so. -->
-            <input class="input min-w-0 flex-1 font-mono text-xs" readonly value={cfg.metrics.token} placeholder={t("common.loading")} aria-label={t("settings.metricsToken")} aria-busy={!cfg.metrics.token} onfocus={(e) => e.currentTarget.select()} />
-            <button class="btn shrink-0" onclick={copyToken}>
-              {#if tokenCopied}<Check size={14} />{t("settings.metricsCopied")}{:else}<Copy size={14} />{t("settings.metricsCopy")}{/if}
-            </button>
-            <button class="btn shrink-0" onclick={() => saveMetrics({ regenerateToken: true })} disabled={busy}><RefreshCw size={14} />{t("settings.metricsRegenerate")}</button>
+          <SettingRow label={t("settings.ingestTokens")} hint={t("settings.ingestTokensHint")} wide>
+            <input class="input min-w-0 flex-1" bind:value={tokenLabel} maxlength="64" autocomplete="off" placeholder={t("settings.ingestTokenLabel")} aria-label={t("settings.ingestTokenLabel")} onkeydown={(e) => e.key === "Enter" && tokenLabel.trim() && !busy && addToken()} />
+            <button class="btn shrink-0" onclick={addToken} disabled={busy || !tokenLabel.trim()}><Plus size={14} />{t("settings.ingestTokenAdd")}</button>
           </SettingRow>
-          <SettingRow label={t("settings.metricsProjects")} hint={t("settings.metricsProjectsHint")}>
-            <Switch bind:checked={cfg.metrics.projectLabels} label={t("settings.metricsProjects")} onchange={() => saveMetrics({ projectLabels: cfg!.metrics!.projectLabels })} />
-          </SettingRow>
-          <SettingRow label={t("settings.metricsExample")} hint={t("settings.metricsExampleHint")}>
-            <a class="btn" href={METRICS_DOCS} target="_blank" rel="noreferrer"><ExternalLink size={14} />{t("settings.metricsExampleButton")}</a>
-          </SettingRow>
-        {/if}
-      </Card>
-    {/if}
-
-    {#if cfg.labels}
-      <Card title={t("settings.labels")} subtitle={t("settings.labelsHint")} divided>
-        <SettingRow label={t("settings.labelsEnable")} hint={t("settings.labelsEnableHint")}>
-          <Switch bind:checked={cfg.labels.enabled} label={t("settings.labelsEnable")} onchange={() => saveLabels()} />
-        </SettingRow>
-        {#if cfg.labels.enabled}
-          <SettingRow label={t("settings.labelsCli")} hint={t("settings.labelsCliHint")}>
-            <Dropdown full label={t("settings.labelsCli")} bind:value={cfg.labels.cli} options={labelClis} onchange={() => saveLabels()} />
-          </SettingRow>
-          <SettingRow label={t("settings.labelsModel")} hint={t("settings.labelsModelHint")}>
-            <input class="input w-full font-mono text-xs" bind:value={cfg.labels.model} maxlength="64" autocomplete="off" spellcheck="false" aria-label={t("settings.labelsModel")} />
-          </SettingRow>
-          <SettingRow label={t("settings.labelsCap")} hint={t("settings.labelsCapHint")}>
-            <NumberField bind:value={cfg.labels.dailyCap} unit={t("settings.unit.sessions")} label={t("settings.labelsCap")} min={1} />
-          </SettingRow>
-          <SettingRow label={t("settings.labelsNow")} hint={labelCliMissing ? t("settings.labelsNowMissing", { name: CLI_NAMES[cfg.labels.cli] }) : labelLine?.text}>
-            <button class="btn" onclick={labelNow} disabled={labelsRunning || busy || labelCliMissing || (labelStatus?.textLimit ?? 1) <= 0}>
-              {#if labelsRunning}<Loader size={14} class="animate-spin" />{t("settings.labelsNowRunning")}{:else}<Tags size={14} />{t("settings.labelsNowButton")}{/if}
-            </button>
-          </SettingRow>
-        {/if}
-        {#snippet footer()}
-          <button class="btn btn-primary" onclick={saveLabels} disabled={busy}>{t("settings.save")}</button>
-        {/snippet}
-      </Card>
-    {/if}
-
-    <TagRules />
-
-    <Card title={t("settings.pricing")} subtitle={t("settings.pricingHint")} divided>
-      <div class="card-flush -mx-5 overflow-x-auto">
-        <table class="data" use:resizableColumns={"settings-1"}>
-          <thead>
-            <tr>
-              <th>{t("settings.pattern")}</th><th class="num">{t("tok.input")}</th><th class="num">{t("tok.output")}</th>
-              <th class="num">{t("tok.cacheRead")}</th><th class="num">{t("tok.cacheWrite")} 5m</th><th class="num">{t("tok.cacheWrite")} 1h</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each userRules as r, i (i)}
-              <tr>
-                <td><input class="input w-48 font-mono" bind:value={r.pattern} placeholder="gpt-5.6*" /></td>
-                <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.input} /></td>
-                <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.output} /></td>
-                <td class="num"><input class="input w-20 text-right" type="number" step="0.001" bind:value={r.cacheRead} placeholder="auto" /></td>
-                <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite5m} placeholder="auto" /></td>
-                <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite1h} placeholder="auto" /></td>
-                <td><button class="btn btn-icon" aria-label={t("common.remove")} onclick={() => (userRules = userRules.filter((_, j) => j !== i))}><Trash2 size={14} /></button></td>
-              </tr>
-            {:else}
-              <tr><td colspan="7" class="!py-5 text-center text-xs text-muted">{t("settings.noRules")}</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-      {#if showBuiltin}
-        <div class="mb-4 max-h-80 overflow-auto rounded-lg border border-line">
-          <table class="data" use:resizableColumns={"settings-2"}>
-            <tbody>
-              {#each builtinRules as r (r.pattern)}
+          <div class="card-flush -mx-5 overflow-x-auto border-t border-line">
+            <table class="data" use:resizableColumns={"settings-ingest-2"}>
+              <thead>
                 <tr>
-                  <td class="font-mono text-xs">{r.pattern}</td>
-                  <td class="num">${r.input}</td>
-                  <td class="num">${r.output}</td>
-                  <td class="num text-muted">{r.cacheRead != null ? `$${r.cacheRead}` : "auto"}</td>
-                  <td><button class="text-xs text-accent-ink hover:underline" onclick={() => override(r)}>+ {t("settings.addRule")}</button></td>
+                  <th>{t("settings.ingestTokenLabel")}</th><th>{t("settings.ingestColToken")}</th><th>{t("settings.ingestColCreated")}</th><th>{t("settings.ingestColUsed")}</th><th data-fixed data-fit class="w-px text-right">{t("col.actions")}</th>
                 </tr>
+              </thead>
+              <tbody>
+                {#each ingest?.tokens ?? [] as tk (tk.id)}
+                  <tr>
+                    <td>{tk.label}</td>
+                    <td class="font-mono text-xs">{tk.prefix}…</td>
+                    <td>{dateTime(tk.createdAt)}</td>
+                    <td>{tk.lastUsedAt ? relative(tk.lastUsedAt) : t("settings.ingestNever")}</td>
+                    <td class="w-px text-right">
+                      <button class="btn btn-danger btn-icon" aria-label={t("settings.ingestTokenRevoke")} title={t("settings.ingestTokenRevoke")} onclick={() => askRevoke(tk)} disabled={busy}><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                {:else}
+                  <tr><td colspan="5" class="!py-5 text-center text-xs text-muted">{t("settings.ingestTokenNone")}</td></tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          {#if ingest?.stats.metricsOnly}
+            <div class="flex items-start gap-2 border-t border-line py-4 text-xs leading-relaxed text-ink-2">
+              <Info size={14} class="mt-0.5 shrink-0 text-muted" />{t("settings.ingestMetricsOnly")}
+            </div>
+          {/if}
+          {#each [{ key: "hermes", name: t("settings.source.hermes"), hint: t("settings.ingestHermesHint"), text: hermesSnippet }, { key: "claude", name: t("settings.source.claude"), hint: t("settings.ingestClaudeHint"), text: claudeSnippet }] as snip (snip.key)}
+            <SettingRow label={snip.name} hint={snip.hint} wide>
+              <pre class="min-w-0 flex-1 overflow-x-auto rounded-lg bg-surface-2 px-3 py-2 font-mono text-[11px] leading-relaxed text-ink-2">{snip.text}</pre>
+              <button class="btn shrink-0 self-start" onclick={() => copyText(snip.key, snip.text)}>
+                {#if copied === snip.key}<Check size={14} />{t("settings.metricsCopied")}{:else}<Copy size={14} />{t("settings.metricsCopy")}{/if}
+              </button>
+            </SettingRow>
+          {/each}
+        </Card>
+      {/if}
+
+      {#if cfg.labels}
+        <Card id="settings-labels" title={t("settings.labels")} subtitle={t("settings.labelsHint")} divided>
+          <SettingRow label={t("settings.labelsEnable")} hint={t("settings.labelsEnableHint")}>
+            <Switch bind:checked={cfg.labels.enabled} label={t("settings.labelsEnable")} onchange={() => saveLabels()} />
+          </SettingRow>
+          {#if cfg.labels.enabled}
+            <SettingRow label={t("settings.labelsCli")} hint={t("settings.labelsCliHint")}>
+              <Dropdown full label={t("settings.labelsCli")} bind:value={cfg.labels.cli} options={labelClis} onchange={() => saveLabels()} />
+            </SettingRow>
+            <SettingRow label={t("settings.labelsModel")} hint={t("settings.labelsModelHint")}>
+              <input class="input w-full font-mono text-xs" bind:value={cfg.labels.model} maxlength="64" autocomplete="off" spellcheck="false" aria-label={t("settings.labelsModel")} />
+            </SettingRow>
+            <SettingRow label={t("settings.labelsCap")} hint={t("settings.labelsCapHint")}>
+              <NumberField bind:value={cfg.labels.dailyCap} unit={t("settings.unit.sessions")} label={t("settings.labelsCap")} min={1} />
+            </SettingRow>
+            <SettingRow label={t("settings.labelsNow")} hint={labelCliMissing ? t("settings.labelsNowMissing", { name: CLI_NAMES[cfg.labels.cli] }) : labelLine?.text}>
+              <button class="btn" onclick={labelNow} disabled={labelsRunning || busy || labelCliMissing || (labelStatus?.textLimit ?? 1) <= 0}>
+                {#if labelsRunning}<Loader size={14} class="animate-spin" />{t("settings.labelsNowRunning")}{:else}<Tags size={14} />{t("settings.labelsNowButton")}{/if}
+              </button>
+            </SettingRow>
+          {/if}
+          {#snippet footer()}
+            <button class="btn btn-primary" onclick={saveLabels} disabled={busy}>{t("settings.save")}</button>
+          {/snippet}
+        </Card>
+      {/if}
+
+      <TagRules />
+
+      <Card id="settings-pricing" title={t("settings.pricing")} subtitle={t("settings.pricingHint")} divided>
+        <div class="card-flush -mx-5 overflow-x-auto">
+          <table class="data" use:resizableColumns={"settings-1"}>
+            <thead>
+              <tr>
+                <th>{t("settings.pattern")}</th><th class="num">{t("tok.input")}</th><th class="num">{t("tok.output")}</th>
+                <th class="num">{t("tok.cacheRead")}</th><th class="num">{t("tok.cacheWrite")} 5m</th><th class="num">{t("tok.cacheWrite")} 1h</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each userRules as r, i (i)}
+                <tr>
+                  <td><input class="input w-48 font-mono" bind:value={r.pattern} placeholder="gpt-5.6*" /></td>
+                  <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.input} /></td>
+                  <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.output} /></td>
+                  <td class="num"><input class="input w-20 text-right" type="number" step="0.001" bind:value={r.cacheRead} placeholder="auto" /></td>
+                  <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite5m} placeholder="auto" /></td>
+                  <td class="num"><input class="input w-20 text-right" type="number" step="0.01" bind:value={r.cacheWrite1h} placeholder="auto" /></td>
+                  <td><button class="btn btn-icon" aria-label={t("common.remove")} onclick={() => (userRules = userRules.filter((_, j) => j !== i))}><Trash2 size={14} /></button></td>
+                </tr>
+              {:else}
+                <tr><td colspan="7" class="!py-5 text-center text-xs text-muted">{t("settings.noRules")}</td></tr>
               {/each}
             </tbody>
           </table>
         </div>
-      {/if}
-      {#snippet footer()}
-        <button class="btn mr-auto" onclick={() => (showBuiltin = !showBuiltin)}>{t("settings.builtin")} ({builtinRules.length})</button>
-        <button class="btn" onclick={() => (userRules = [...userRules, { pattern: "", input: 0, output: 0 }])}><Plus size={14} />{t("settings.addRule")}</button>
-        <button class="btn btn-primary" onclick={savePricing} disabled={busy}>{t("settings.save")}</button>
-      {/snippet}
-    </Card>
-
-    <Card title={t("settings.app")} subtitle={t("settings.appHint")} divided>
-      <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={updateText || live.status?.platform}>
-        {#if update?.available && isShell() && (!updater.message || !updater.installing)}
-          <button class="btn btn-primary" onclick={installUpdate} disabled={updater.installing}>
-            {#if updater.installing}<Loader size={14} class="animate-spin" />{t("update.installing")}{:else}<Download size={14} />{t("update.install")}{/if}
-          </button>
-        {:else if update?.available && update.releaseUrl && !isShell()}
-          <a class="btn" href={update.releaseUrl} target="_blank" rel="noreferrer"><Download size={14} />{t("update.manual")}</a>
+        {#if showBuiltin}
+          <div class="mb-4 max-h-80 overflow-auto rounded-lg border border-line">
+            <table class="data" use:resizableColumns={"settings-2"}>
+              <tbody>
+                {#each builtinRules as r (r.pattern)}
+                  <tr>
+                    <td class="font-mono text-xs">{r.pattern}</td>
+                    <td class="num">${r.input}</td>
+                    <td class="num">${r.output}</td>
+                    <td class="num text-muted">{r.cacheRead != null ? `$${r.cacheRead}` : "auto"}</td>
+                    <td><button class="text-xs text-accent-ink hover:underline" onclick={() => override(r)}>+ {t("settings.addRule")}</button></td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
         {/if}
-        <button class="btn" onclick={checkNow} disabled={updater.installing}><RefreshCw size={14} />{t("settings.checkNow")}</button>
-      </SettingRow>
-      <SettingRow label={t("settings.checkUpdates")} hint={t("settings.checkUpdatesHint")}>
-        <Switch bind:checked={cfg.checkUpdates} label={t("settings.checkUpdates")} onchange={() => save()} />
-      </SettingRow>
-      <SettingRow label={t("settings.quit")} hint={stopped ? t("settings.stopped") : t("settings.quitHint")}>
-        <button class="btn" onclick={quit} disabled={stopped}><Power size={14} />{t("settings.quit")}</button>
-      </SettingRow>
-    </Card>
-  {/if}
+        {#snippet footer()}
+          <button class="btn mr-auto" onclick={() => (showBuiltin = !showBuiltin)}>{t("settings.builtin")} ({builtinRules.length})</button>
+          <button class="btn" onclick={() => (userRules = [...userRules, { pattern: "", input: 0, output: 0 }])}><Plus size={14} />{t("settings.addRule")}</button>
+          <button class="btn btn-primary" onclick={savePricing} disabled={busy}>{t("settings.save")}</button>
+        {/snippet}
+      </Card>
+
+      <Card id="settings-app" title={t("settings.app")} subtitle={t("settings.appHint")} divided>
+        <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={updateText || live.status?.platform}>
+          {#if update?.available && isShell() && (!updater.message || !updater.installing)}
+            <button class="btn btn-primary" onclick={installUpdate} disabled={updater.installing}>
+              {#if updater.installing}<Loader size={14} class="animate-spin" />{t("update.installing")}{:else}<Download size={14} />{t("update.install")}{/if}
+            </button>
+          {:else if update?.available && update.releaseUrl && !isShell()}
+            <a class="btn" href={update.releaseUrl} target="_blank" rel="noreferrer"><Download size={14} />{t("update.manual")}</a>
+          {/if}
+          <button class="btn" onclick={checkNow} disabled={updater.installing}><RefreshCw size={14} />{t("settings.checkNow")}</button>
+        </SettingRow>
+        <SettingRow label={t("settings.checkUpdates")} hint={t("settings.checkUpdatesHint")}>
+          <Switch bind:checked={cfg.checkUpdates} label={t("settings.checkUpdates")} onchange={() => save()} />
+        </SettingRow>
+        <SettingRow label={t("settings.quit")} hint={stopped ? t("settings.stopped") : t("settings.quitHint")}>
+          <button class="btn" onclick={quit} disabled={stopped}><Power size={14} />{t("settings.quit")}</button>
+        </SettingRow>
+      </Card>
+    {/if}
+  </div>
 </div>
+
+{#if newToken}
+  <Modal title={t("settings.ingestTokenCreatedTitle")} body={t("settings.ingestTokenNewHint")} onclose={() => (newToken = null)}>
+    {#snippet item()}
+      <div class="flex items-center gap-2">
+        <KeyRound size={15} class="shrink-0 text-muted" />
+        <span class="truncate text-sm font-medium text-ink">{newTokenLabel}</span>
+      </div>
+      <div class="mt-3 flex gap-2">
+        <input class="input min-w-0 flex-1 font-mono text-xs" readonly value={newToken} aria-label={t("settings.ingestTokenNew")} onfocus={(e) => e.currentTarget.select()} />
+        <button data-autofocus class="btn shrink-0" onclick={() => copyText("token", newToken!)}>
+          {#if copied === "token"}<Check size={14} />{t("settings.metricsCopied")}{:else}<Copy size={14} />{t("settings.metricsCopy")}{/if}
+        </button>
+      </div>
+    {/snippet}
+    {#snippet footer()}
+      <button class="btn btn-primary" onclick={() => (newToken = null)}>{t("settings.ingestTokenDone")}</button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if revoking}
+  <ConfirmDialog
+    title={t("settings.ingestTokenRevokeTitle")}
+    body={t("settings.ingestTokenRevokeConfirm")}
+    confirmLabel={t("settings.ingestTokenRevokeAction")}
+    cancelLabel={t("settings.ingestKeep")}
+    busy={revokePending}
+    error={revokeError}
+    onconfirm={revokeToken}
+    oncancel={() => (revoking = null)}
+  >
+    {#snippet item()}
+      {@const tk = revoking!}
+      <div class="flex items-start gap-3">
+        <KeyRound size={15} class="mt-0.5 shrink-0 text-muted" />
+        <div class="min-w-0">
+          <div class="truncate text-sm font-medium text-ink">{tk.label}</div>
+          <div class="mt-0.5 text-xs text-muted">
+            <span class="font-mono">{tk.prefix}…</span> · {t("settings.ingestColCreated")} {dateTime(tk.createdAt)} · {t("settings.ingestColUsed")} {tk.lastUsedAt ? relative(tk.lastUsedAt) : t("settings.ingestNever").toLowerCase()}
+          </div>
+        </div>
+      </div>
+    {/snippet}
+  </ConfirmDialog>
+{/if}
 
 <style>
   .pick-on {

@@ -8,6 +8,8 @@
 
   interface Props {
     title?: string;
+    /** Makes the card a place to scroll to (a section list): the card gets the id, below the sticky header, and its title can take focus. */
+    id?: string;
     subtitle?: string;
     /** More about the card than the subtitle should hold, in a tooltip on an icon after the title. One point per line. */
     info?: string;
@@ -25,7 +27,7 @@
     exportName?: string;
     exportRows?: () => readonly unknown[];
   }
-  let { title, subtitle, info, actions, children, table, class: cls = "", pad = true, divided = false, footer, exportName, exportRows }: Props = $props();
+  let { title, id, subtitle, info, actions, children, table, class: cls = "", pad = true, divided = false, footer, exportName, exportRows }: Props = $props();
   let showTable = $state(false);
   // A chart in the card is named after it (see Chart's label).
   setContext("card-title", () => title);
@@ -37,14 +39,15 @@
   );
 </script>
 
-<section class="card flex min-w-0 flex-col {cls}">
+<section {id} class="card flex min-w-0 flex-col {id ? 'scroll-mt-[4.5rem]' : ''} {cls}">
   {#if hasHeader}
     <header class="flex flex-wrap items-start justify-between gap-2 px-5 pt-4 {divided ? 'border-b border-line pb-4' : ''}">
       <!-- A long description wraps beside the buttons, rather than pushing them onto a line of their own. -->
       <div class="min-w-0 flex-1 basis-56">
         {#if title}
           <div class="flex items-center gap-1.5">
-            <h2 class="font-semibold text-ink {divided ? 'text-[15px]' : 'text-sm'}">{title}</h2>
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <h2 tabindex={id ? -1 : undefined} class="font-semibold text-ink {divided ? 'text-[15px]' : 'text-sm'}">{title}</h2>
             {#if info}
               <!-- The app's popover look rather than the browser's plain title tooltip; shown on hover and on keyboard focus. -->
               <button type="button" class="group relative flex shrink-0 cursor-help rounded-sm text-muted hover:text-ink focus-visible:text-ink" aria-label={info}>

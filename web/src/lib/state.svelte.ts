@@ -4,8 +4,8 @@ import { INTRO_KEY, INTRO_SOUND_KEY } from "./splash-policy.ts";
 export type RangePreset = "today" | "7d" | "30d" | "90d" | "month" | "all" | "custom";
 export type Metric = "tokens" | "cost";
 export type ThemePref = "system" | "light" | "dark";
-export type FilterKey = "provider" | "project" | "user" | "model" | "skill" | "agent" | "tag" | "kind";
-export const FILTER_KEYS: FilterKey[] = ["provider", "project", "user", "model", "skill", "agent", "tag", "kind"];
+export type FilterKey = "provider" | "project" | "user" | "host" | "model" | "skill" | "agent" | "tag" | "kind";
+export const FILTER_KEYS: FilterKey[] = ["provider", "project", "user", "host", "model", "skill", "agent", "tag", "kind"];
 
 export interface Filters {
   from?: number;
@@ -13,6 +13,7 @@ export interface Filters {
   provider?: string;
   project?: string;
   user?: string;
+  host?: string;
   model?: string;
   skill?: string;
   agent?: string;
@@ -82,6 +83,7 @@ class Store {
   provider = $state("");
   project = $state("");
   user = $state("");
+  host = $state("");
   model = $state("");
   skill = $state("");
   agent = $state("");

@@ -12,7 +12,7 @@ function recomputeRowByRow(db: Database, prices: PriceBook): number {
       []
     >(
       `SELECT id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, speed
-       FROM usage WHERE provider NOT IN ('cursor', 'cline', 'roo', 'kilo') OR cost_estimated = 1`,
+       FROM usage WHERE provider NOT IN ('cursor', 'cline', 'roo', 'kilo', 'hermes') OR cost_estimated = 1`,
     )
     .all();
   const upd = db.prepare("UPDATE usage SET cost_usd = ?, cost_estimated = ? WHERE id = ?");
@@ -33,7 +33,7 @@ const MODELS = [
   "claude-opus-5-5", "claude-sonnet-4-5-20250929", "claude-haiku-4.5", "github-copilot/claude-opus-5.5", "gpt-5", "gpt-5-mini",
   "gpt-4.1-nano", "o3", "gemini-2.5-pro", "deepseek-chat", "some-new-model", "<synthetic>", null, "my-custom",
 ];
-const PROVIDERS = ["claude", "codex", "omp", "cursor", "cline", "kilo"];
+const PROVIDERS = ["claude", "codex", "omp", "cursor", "cline", "kilo", "hermes", "otel"];
 
 function fixture(): Database {
   const db = memDb();

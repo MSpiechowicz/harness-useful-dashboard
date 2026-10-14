@@ -11,9 +11,11 @@ import { PriceBook } from "../src/core/pricing.ts";
 import { Queries, sessionTitle } from "../src/core/queries.ts";
 import { compact, dbSize, detailCutoff, trimDetail, trimDue } from "../src/core/retention.ts";
 import { rollupDue } from "../src/core/rollup.ts";
+import { decodeOtlp, writeOtlp } from "../src/core/otlp/write.ts";
 import { App } from "../src/server/app.ts";
 import { createHandler } from "../src/server/http.ts";
 import { memDb, tempDir } from "./helpers.ts";
+import { encodeTraces, hermesSpans } from "./otlpEncode.ts";
 
 const DAY = 86_400_000;
 const NOW = new Date(2026, 9, 1, 12).getTime(); // Oct 1 2026
@@ -106,6 +108,29 @@ describe("detail retention", () => {
     }
     // The session keeps its title from the first prompt.
     expect(col(db, `SELECT ${sessionTitle("s")} AS title FROM sessions s WHERE s.id = 'claude:old'`)).toEqual([{ title: `first ${LONG}`.slice(0, 160) }]);
+  });
+
+  test("the OTLP rows of 1000 remote hosts are trimmed in one pass under one note, and no other row is", async () => {
+    const { db, prices, q } = seed();
+    db.transaction(() => {
+      for (let h = 0; h < 1000; h++) session(new DbWriter(db, prices, { user: "remote", host: `remote-${h}` }), `otlp:tci:claude:s${h}`, OLD, 1);
+    })();
+    const before = totals(db, q);
+    const local = col(db, "SELECT * FROM prompts WHERE id NOT GLOB 'otlp:*' ORDER BY id");
+
+    const started = performance.now();
+    const r = await trimDetail(db, null, 3, { now: NOW, pause: async () => {} });
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(r).toMatchObject({ prompts: 2000, toolCalls: 1000, outcomes: 1000, sessions: 1000, responseMeta: 1000, done: true });
+    // A batch per table, not one per host.
+    expect(r.batches).toBe(5);
+    expect(col(db, "SELECT key FROM meta WHERE key GLOB 'detail_trim*'")).toEqual([{ key: "detail_trim_otlp" }]);
+    expect(trimDue(db, null, 3, NOW + 1000)).toBe(false);
+
+    expect(totals(db, q)).toBe(before);
+    expect(col(db, "SELECT COUNT(*) AS n FROM outcomes WHERE id GLOB 'otlp:*' AND detail IS NOT NULL")).toEqual([{ n: 0 }]);
+    expect(col(db, "SELECT * FROM prompts WHERE id NOT GLOB 'otlp:*' ORDER BY id")).toEqual(local);
+    expect(col(db, "SELECT COUNT(*) AS n FROM outcomes WHERE id NOT GLOB 'otlp:*' AND detail IS NOT NULL")).toEqual([{ n: 13 }]);
   });
 
   test("commit subjects of this host older than the cutoff go, the commits stay", async () => {
@@ -270,5 +295,66 @@ describe("compact route", () => {
     // Nothing of this host to trim: the trim only notes that it ran.
     await Bun.sleep(20);
     expect(trimDue(app.db, app.identity.host, 3)).toBe(false);
+  });
+
+  const CRED = { kind: "token" as const, label: "ci", key: "tci" };
+  const sendTraces = (host: string, cred = CRED) =>
+    writeOtlp(app.db, app.priceBook(), decodeOtlp("traces", encodeTraces(hermesSpans({ host })), "protobuf"), cred, {
+      storeText: false, promptTextLimit: 2000, detailBefore: 0, localHost: app.identity.host,
+    });
+  const outcome = (id: string, sessionId: string, ts: number, host: string, kind: string, detail: string | null) =>
+    app.db.query("INSERT INTO outcomes (id, provider, session_id, ts, host, kind, tool, detail) VALUES (?, 'hermes', ?, ?, ?, ?, 'Bash', ?)").run(id, sessionId, ts, host, kind, detail);
+
+  test("remote hosts that sent usage over OTLP have their OTLP rows trimmed and rolled up with this machine's setting", async () => {
+    const db = app.db;
+    const remote = "build-box";
+    sendTraces(remote);
+    const sid = "otlp:tci:hermes:old";
+    outcome("otlp:tci:hermes:remote-error", sid, Date.now() - 200 * DAY, remote, "tool_error", "No such file");
+    for (let i = 0; i < 3; i++) outcome(`otlp:tci:hermes:remote-ok-${i}`, sid, Date.now() - 30 * DAY + i, remote, "tool_ok", null);
+    // Another machine's host on the same database, which sent nothing over OTLP: left alone.
+    outcome("theirs-error", "claude:theirs", Date.now() - 200 * DAY, "their-box", "tool_error", "Their message");
+    // A note of a trim per remote host, as an earlier build kept them.
+    db.query("INSERT INTO meta (key, value) VALUES ('detail_trim_otlp:build-box', '{}'), ('outcome_rollup_otlp:build-box', '{}')").run();
+
+    app.trimIfDue();
+    app.rollupIfDue();
+    await app.compactDb();
+    // This host's rows and the remote ones: one note each.
+    const { host } = app.identity;
+    expect(col(db, "SELECT key FROM meta WHERE key GLOB 'detail_trim*' OR key GLOB 'outcome_rollup*' ORDER BY key")).toEqual(
+      [`detail_trim:${host}`, "detail_trim_otlp", `outcome_rollup:${host}`, "outcome_rollup_otlp"].sort().map((key) => ({ key })),
+    );
+    expect(col(db, "SELECT detail FROM outcomes WHERE id = 'otlp:tci:hermes:remote-error'")).toEqual([{ detail: null }]);
+    expect(col(db, `SELECT n FROM outcome_days WHERE host = 'build-box' AND session_id = '${sid}'`)).toEqual([{ n: 3 }]);
+    expect(col(db, "SELECT detail FROM outcomes WHERE id = 'theirs-error'")).toEqual([{ detail: "Their message" }]);
+    expect(trimDue(db, null, 3)).toBe(false);
+    expect(rollupDue(db, null)).toBe(false);
+  });
+
+  test("a sender naming another machine on the database never gets that machine's own rows trimmed or rolled up", async () => {
+    const db = app.db;
+    const old = Date.now() - 200 * DAY;
+    const theirs = new DbWriter(db, app.priceBook(), { user: "bob", host: "spoofed-box" });
+    db.query("INSERT INTO meta (key, value) VALUES ('last_scan:spoofed-box', '1')").run();
+    theirs.session({ id: "claude:spoofed-own", provider: "claude", nativeId: "spoofed-own", project: null, startedAt: old, endedAt: old, brief: "Their brief" });
+    outcome("claude:spoofed-own:t1", "claude:spoofed-own", old, "spoofed-box", "tool_error", "Their private detail");
+    for (let i = 0; i < 3; i++) outcome(`claude:spoofed-own:ok-${i}`, "claude:spoofed-own", Date.now() - 30 * DAY + i, "spoofed-box", "tool_ok", null);
+    // An OTLP row stamped with its very name (sent before that machine wrote any of its own) is this machine's to trim.
+    theirs.session({ id: "otlp:tci:hermes:early", provider: "hermes", nativeId: "early", project: null, startedAt: old });
+    outcome("otlp:tci:hermes:early-error", "otlp:tci:hermes:early", old, "spoofed-box", "tool_error", "Remote detail");
+
+    expect(sendTraces("spoofed-box", { ...CRED, key: "tspoofer" }).hosts).toEqual(["spoofed-box (remote)"]);
+    expect(col(db, "SELECT DISTINCT host FROM usage WHERE id LIKE 'otlp:%' AND host LIKE 'spoofed-box%'")).toEqual([{ host: "spoofed-box (remote)" }]);
+
+    // The rows taken over OTLP were trimmed and rolled up today already (the test before): as a day later, they are due.
+    db.query("DELETE FROM meta WHERE key IN ('detail_trim_otlp', 'outcome_rollup_otlp')").run();
+    app.trimIfDue();
+    app.rollupIfDue();
+    await app.compactDb();
+    expect(col(db, "SELECT detail FROM outcomes WHERE id = 'claude:spoofed-own:t1'")).toEqual([{ detail: "Their private detail" }]);
+    expect(col(db, "SELECT brief FROM sessions WHERE id = 'claude:spoofed-own'")).toEqual([{ brief: "Their brief" }]);
+    expect(col(db, "SELECT COUNT(*) AS n FROM outcomes WHERE id LIKE 'claude:spoofed-own:ok-%'")).toEqual([{ n: 3 }]);
+    expect(col(db, "SELECT detail FROM outcomes WHERE id = 'otlp:tci:hermes:early-error'")).toEqual([{ detail: null }]);
   });
 });

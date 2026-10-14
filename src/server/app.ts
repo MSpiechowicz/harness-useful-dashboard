@@ -18,6 +18,7 @@ import { notify } from "./notify.ts";
 import { type CursorSyncState, syncCursor, syncState } from "../core/cursorSync.ts";
 import { type LabelerDeps, type LabelRun, labelerDir, labelSessions, labelState } from "../core/labeler.ts";
 import { tagLabelerSessions } from "../core/labels.ts";
+import { hasRemoteRows } from "../core/otlp/write.ts";
 
 /** How often plan limits are read in the background, for the history on the plans view. */
 const LIMIT_POLL_MS = 5 * 60_000;
@@ -57,6 +58,7 @@ export class App {
   readOnly: ReadOnlyReason | null = null;
   private prices!: PriceBook;
   private listeners = new Set<(e: AppEvent) => void>();
+  private configListeners = new Set<(cfg: AppConfig) => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private limitTimer: ReturnType<typeof setInterval> | null = null;
   private cursorTimer: ReturnType<typeof setInterval> | null = null;
@@ -218,6 +220,12 @@ export class App {
   subscribe(fn: (e: AppEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** Called with the config after each settings change is saved (the OTLP listener follows its settings so). */
+  onConfigChange(fn: (cfg: AppConfig) => void): () => void {
+    this.configListeners.add(fn);
+    return () => this.configListeners.delete(fn);
   }
 
   emit(e: AppEvent): void {
@@ -495,7 +503,7 @@ export class App {
   }
 
   updateConfig(patch: SettingsPatch): AppConfig {
-    const { sources, limits, budgets, digest, labels, metrics, ...rest } = patch;
+    const { sources, limits, budgets, digest, labels, metrics, ingest, ...rest } = patch;
     const was = this.cfg.digest;
     this.cfg = {
       ...this.cfg,
@@ -506,6 +514,7 @@ export class App {
       digest: { ...this.cfg.digest, ...digest },
       labels: { ...this.cfg.labels, ...labels },
       metrics: applyMetrics(this.cfg.metrics, metrics),
+      ingest: { ...this.cfg.ingest, ...ingest },
     };
     // Turned on, or moved to another time, in the middle of a week: that week's slot has passed already, so the first
     // digest is the next one.
@@ -515,25 +524,48 @@ export class App {
     saveConfig(this.cfg);
     this.startBackgroundScan();
     if (patch.detailRetentionMonths !== undefined) this.trimIfDue();
+    for (const fn of this.configListeners) {
+      try {
+        fn(this.cfg);
+      } catch (err) {
+        console.error("[config]", err);
+      }
+    }
     return this.cfg;
   }
 
   /**
+   * The rows this machine's jobs look after: all of this host's, and (null) every row remote hosts sent over OTLP, in
+   * one pass whatever host it names. Another machine sharing the database looks after its own the same way.
+   */
+  private ownRows(db: Database): (string | null)[] {
+    const { host } = this.identity;
+    return hasRemoteRows(db) ? [host, null] : [host];
+  }
+
+  /**
    * Trims old detail when retention is on and the last trim is a day old or ran with another setting (retention.ts).
-   * Checked after every scan: it reads one meta row, and writes only when a trim is due. Runs in the background, in
-   * batches the server answers requests between. It stops when the database is switched or closed under it.
+   * Checked after every scan: it reads a meta row for this host and one for the rows taken over OTLP, and writes only
+   * when a trim is due. Runs in the background, in batches the server answers requests between, this host's rows and
+   * then the remote ones, with this machine's setting. It stops when the database is switched or closed under it.
    */
   trimIfDue(): void {
     if (this.trimming || !this.writable()) return;
     const db = this.db;
-    const { host } = this.identity;
     const months = retentionMonths(this.cfg.detailRetentionMonths);
-    if (!trimDue(db, host, months)) return;
-    this.trimming = trimDetail(db, host, months, { stop: () => this.jobStopped(db) })
-      .then((r) => {
+    const due = this.ownRows(db).filter((host) => trimDue(db, host, months, Date.now()));
+    if (!due.length) return;
+
+    const stop = () => this.jobStopped(db);
+    const run = async () => {
+      for (const host of due) {
+        if (stop()) return;
+        const r = await trimDetail(db, host, months, { stop });
         const rows = r.prompts + r.toolCalls + r.outcomes + r.sessions + r.responseMeta + r.gitEvents;
-        if (rows || r.freedPages) console.log(`[retention] trimmed ${rows} rows in ${r.batches} batches, freed ${r.freedPages} pages`);
-      })
+        if (rows || r.freedPages) console.log(`[retention] ${host ?? "remote hosts"}: trimmed ${rows} rows in ${r.batches} batches, freed ${r.freedPages} pages`);
+      }
+    };
+    this.trimming = run()
       .catch((err) => console.error("[retention]", err))
       .finally(() => {
         this.trimming = null;
@@ -541,21 +573,27 @@ export class App {
   }
 
   /**
-   * Rolls this host's successful tool calls older than a week into daily counts once a day (rollup.ts). Checked after
-   * every scan, after the trim: it waits for a trim in progress, then runs in the background a day per transaction.
-   * It stops when the database is switched or closed under it.
+   * Rolls the successful tool calls older than a week of this host and its remote ones into daily counts once a day
+   * (rollup.ts). Checked after every scan, after the trim: it waits for a trim in progress, then runs in the background
+   * a day per transaction, this host's rows and then the remote ones. It stops when the database is switched or closed
+   * under it.
    */
   rollupIfDue(): void {
     if (this.rolling || !this.writable()) return;
     const db = this.db;
-    const { host } = this.identity;
-    if (!rollupDue(db, host)) return;
+    const due = this.ownRows(db).filter((host) => rollupDue(db, host, Date.now()));
+    if (!due.length) return;
+
     const stop = () => this.jobStopped(db);
-    this.rolling = (this.trimming ?? Promise.resolve())
-      .then(() => (stop() ? null : rollupOutcomes(db, host, { stop })))
-      .then((r) => {
-        if (r?.deleted || r?.freedPages) console.log(`[rollup] counted ${r.counted} tool results of ${r.days} days in ${r.groups} rows, freed ${r.freedPages} pages`);
-      })
+    const run = async () => {
+      await this.trimming;
+      for (const host of due) {
+        if (stop()) return;
+        const r = await rollupOutcomes(db, host, { stop });
+        if (r.deleted || r.freedPages) console.log(`[rollup] ${host ?? "remote hosts"}: counted ${r.counted} tool results of ${r.days} days in ${r.groups} rows, freed ${r.freedPages} pages`);
+      }
+    };
+    this.rolling = run()
       .catch((err) => console.error("[rollup]", err))
       .finally(() => {
         this.rolling = null;

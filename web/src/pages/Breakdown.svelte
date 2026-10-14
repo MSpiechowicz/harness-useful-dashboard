@@ -27,10 +27,10 @@
   import { splitNetwork } from "../lib/splitNetwork.ts";
   import { store, type FilterKey } from "../lib/state.svelte.ts";
 
-  let { dim }: { dim: "project" | "model" | "provider" | "user" | "skill" | "agent" } = $props();
+  let { dim }: { dim: "project" | "model" | "provider" | "user" | "host" | "skill" | "agent" } = $props();
 
   const titles: Record<string, MessageKey> = {
-    project: "nav.projects", model: "nav.models", provider: "nav.providers", user: "nav.users", skill: "skills.skills", agent: "skills.agents",
+    project: "nav.projects", model: "nav.models", provider: "nav.providers", user: "nav.users", host: "nav.hosts", skill: "skills.skills", agent: "skills.agents",
   };
 
   const data = useFetch<Breakdown>(() => apiUrl("/api/breakdown", { dim, limit: 500, sort: store.metric }));

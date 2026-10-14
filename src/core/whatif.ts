@@ -33,7 +33,7 @@ interface Group extends TokenCounts {
 const SYNTHETIC = "<synthetic>";
 
 /** Costs the provider reported: recomputeCosts (writer.ts) leaves exactly these rows as they are. */
-const REPORTED = "(u.provider IN ('cursor', 'cline', 'roo', 'kilo') AND u.cost_estimated = 0)";
+const REPORTED = "(u.provider IN ('cursor', 'cline', 'roo', 'kilo', 'hermes') AND u.cost_estimated = 0)";
 
 function groups(db: Database, f: Filters): Group[] {
   return memo(db, `whatif:${JSON.stringify(f)}`, () => {

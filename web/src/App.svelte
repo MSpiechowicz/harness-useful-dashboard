@@ -3,7 +3,7 @@
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
-    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Search, Settings as SettingsIcon, Sparkles, Tag, TrendingUp, Users, Wrench, X, Layers,
+    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Search, Server, Settings as SettingsIcon, Sparkles, Tag, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
@@ -69,6 +69,7 @@
       { page: "drift", label: "nav.drift", icon: ChartSpline },
       { page: "providers", label: "nav.providers", icon: Boxes },
       { page: "users", label: "nav.users", icon: Users },
+      { page: "hosts", label: "nav.hosts", icon: Server },
       { page: "skills", label: "nav.skills", icon: Sparkles },
       { page: "agents", label: "nav.agents", icon: Bot },
       { page: "tags", label: "nav.tags", icon: Tag },
@@ -116,7 +117,7 @@
   });
 
   // The page the route shows, and what it is given.
-  const BREAKDOWNS: Record<string, string> = { projects: "project", models: "model", providers: "provider", users: "user", skills: "skill", agents: "agent" };
+  const BREAKDOWNS: Record<string, string> = { projects: "project", models: "model", providers: "provider", users: "user", hosts: "host", skills: "skill", agents: "agent" };
   /** Pages that need what the route gives them: they have no address of their own. */
   const NEEDS_ROUTE = new Set<string>(["breakdown", "branchDetail", "sessionDetail", "promptDetail"]);
   const view = $derived.by((): { name: PageName; props?: Record<string, string> } => {
