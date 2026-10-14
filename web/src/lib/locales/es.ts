@@ -1130,6 +1130,7 @@ export const es: Record<MessageKey, string> = {
   "update.install": "Instalar y reiniciar",
   "update.installing": "Instalando…",
   "update.manual": "Descargar",
+  "update.later": "Más tarde",
   "update.restarting": "Reiniciando con la nueva versión…",
   "update.failed": "Error al actualizar: {error}",
   "update.downloading": "Descargando…",

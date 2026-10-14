@@ -1130,6 +1130,7 @@ export const pl: Record<MessageKey, string> = {
   "update.install": "Zainstaluj i uruchom ponownie",
   "update.installing": "Instalowanie…",
   "update.manual": "Pobierz",
+  "update.later": "Później",
   "update.restarting": "Ponowne uruchamianie z nową wersją…",
   "update.failed": "Aktualizacja nie powiodła się: {error}",
   "update.downloading": "Pobieranie…",

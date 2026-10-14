@@ -1128,6 +1128,7 @@ export const en = {
   "update.install": "Install & restart",
   "update.installing": "Installing…",
   "update.manual": "Download",
+  "update.later": "Later",
   "update.restarting": "Restarting with the new version…",
   "update.failed": "Update failed: {error}",
   "update.downloading": "Downloading…",

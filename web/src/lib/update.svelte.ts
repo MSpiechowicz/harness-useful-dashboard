@@ -19,6 +19,9 @@ export const updater = $state<{ status: UpdateStatus | null; installing: boolean
   progress: null,
 });
 
+/** The version whose banner was sent away with "Later". The next release brings the banner back. */
+export const snooze = $state<{ version: string | null }>({ version: null });
+
 let watching = false;
 
 /** Checks now and then every 5 minutes, once per page. A hidden tab checks once it is shown again. */
