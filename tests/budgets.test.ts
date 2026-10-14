@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { budgetAlerts, budgetStatus, DEFAULT_BUDGETS, limitAlerts, takeNew } from "../src/core/budgets.ts";
 import { parseSettings } from "../src/core/config.ts";
 import type { LimitReport } from "../src/core/limits.ts";
@@ -33,6 +33,23 @@ describe("budget status", () => {
     expect(items[0]!.fraction).toBeCloseTo(0.9);
     // 118 over 14.5 days, carried to 31 days.
     expect(items[1]!.projected).toBeCloseTo((118 / 14.5) * 31, 6);
+  });
+
+  describe("in a time zone where the month changes clocks", () => {
+    let previous: string | undefined;
+    beforeAll(() => {
+      previous = process.env.TZ;
+      process.env.TZ = "Europe/Warsaw"; // clocks go back on Oct 25, 2026: October is 31 days and an hour
+    });
+    afterAll(() => {
+      if (previous === undefined) delete process.env.TZ;
+      else process.env.TZ = previous;
+    });
+
+    test("the month's pace counts calendar days, not hours", () => {
+      const items = budgetStatus(db(), { ...DEFAULT_BUDGETS, monthly: 200 }, "ada", new Date(2026, 9, 15, 12, 0));
+      expect(items[0]!.projected).toBeCloseTo((118 / 14.5) * 31, 6);
+    });
   });
 
   test("usage remote agents sent never counts, also when it names this user", () => {

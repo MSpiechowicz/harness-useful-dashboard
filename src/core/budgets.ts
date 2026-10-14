@@ -50,9 +50,12 @@ export function budgetStatus(db: Database, cfg: BudgetConfig, user: string, now 
   const month = day.slice(0, 7);
   const spent = (from: number) =>
     db.query<{ c: number }, [number, number, string]>(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM usage WHERE ts >= ? AND ts < ? AND user = ? AND ${LOCAL}`).get(from, monthEnd, user)!.c;
-  // The month's pace: what it spent per elapsed day so far, carried to the month's last day.
-  const elapsed = Math.max(1, (now.getTime() - monthStart) / 86_400_000);
-  const pace = (s: number) => (s / elapsed) * ((monthEnd - monthStart) / 86_400_000);
+  // The month's pace: what it spent per elapsed day so far, carried to the month's last day. Counted in calendar days,
+  // so a month with a daylight saving change isn't an hour longer or shorter.
+  const nextDayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const elapsed = Math.max(1, now.getDate() - 1 + (now.getTime() - dayStart) / (nextDayStart - dayStart));
+  const monthDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const pace = (s: number) => (s / elapsed) * monthDays;
 
   const items: BudgetItem[] = [];
   if (cfg.daily && cfg.daily > 0) {
