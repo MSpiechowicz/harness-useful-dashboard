@@ -1,3 +1,10 @@
+## [2.1.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.1.0...v2.1.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* A budget's monthly pace counts calendar days, so a month that changes clocks isn't an hour off ([9dcaee4](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9dcaee483dc6e790dcf615ee1d3a988a34a7c3a0))
+
 # [2.1.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.0.6...v2.1.0) (2026-10-14)
 
 
