@@ -1,3 +1,10 @@
+## [2.3.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.3.0...v2.3.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* The sidebar logo's leg blinks while Live receives data, like the Live icon's trace ([5768ad8](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/5768ad8bcd7934fd56023e118a07762e5cad7768))
+
 # [2.3.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.2.0...v2.3.0) (2026-10-15)
 
 
