@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick, type Component } from "svelte";
+  import "./lib/brand/harness-logo.js";
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
@@ -267,7 +268,15 @@
     inert={!menuOpen && !wide}
   >
     <div class="flex h-14 items-center gap-2.5 px-4 {collapsed ? 'lg:justify-center lg:px-0' : ''}">
-      <img src="/logo.svg" alt="" class="h-6 w-7 shrink-0 object-contain" />
+      <!-- While new usage comes in, the mark plays its fall animation on a loop, as the app does when the chat works. The
+           animation's box is wider than the mark: it is sized to keep the mark at the static logo's size and centered on it. -->
+      <span class="relative h-6 w-7 shrink-0">
+        {#if receiving}
+          <harness-logo version="short" pose="tipped" autoplay loop class="pointer-events-none absolute -top-[2.7px] -left-[1.3px] w-[39px]"></harness-logo>
+        {:else}
+          <img src="/logo.svg" alt="" class="h-6 w-7 object-contain" />
+        {/if}
+      </span>
       <!-- The wordmark as the logo animation draws it: "harness" muted and regular, the product name in ink and semibold. -->
       <div class="truncate text-[15px] tracking-tight" class:lg:hidden={collapsed}>
         <span class="font-normal text-muted">harness</span> <span class="font-semibold">dashboard</span>
