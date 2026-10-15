@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.2.0...v2.3.0) (2026-10-15)
+
+
+### Features
+
+* The sidebar logo plays its fall animation while Live receives data ([7cec637](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/7cec637fa5da7a6885e51bf5177a283e5ecfd654))
+
 # [2.2.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.1.1...v2.2.0) (2026-10-14)
 
 
