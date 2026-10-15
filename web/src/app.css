@@ -768,6 +768,21 @@ table.data th.num {
   }
 }
 
+/* The sidebar logo while new usage is coming in: its fallen leg blinks like the cursor in the logo animation. */
+.logo-working .logo-leg {
+  animation: logo-blink 1.1s steps(1, end) infinite;
+}
+@keyframes logo-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-working .logo-leg {
+    animation: none;
+  }
+}
+
 /* Plan limits: the time left in the window, a tick on the bar with a ring in the card colour so it reads on any fill,
    and a soft glow in its own colour. A thin outline in the tick's shape grows out of it and fades, mostly sideways so it
    stays clear of the text above. Only transform and opacity move. */

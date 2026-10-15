@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick, type Component } from "svelte";
-  import "./lib/brand/harness-logo.js";
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
@@ -268,15 +267,16 @@
     inert={!menuOpen && !wide}
   >
     <div class="flex h-14 items-center gap-2.5 px-4 {collapsed ? 'lg:justify-center lg:px-0' : ''}">
-      <!-- While new usage comes in, the mark plays its fall animation on a loop, as the app does when the chat works. The
-           animation's box is wider than the mark: it is sized to keep the mark at the static logo's size and centered on it. -->
-      <span class="relative h-6 w-7 shrink-0">
-        {#if receiving}
-          <harness-logo version="short" pose="tipped" autoplay loop class="pointer-events-none absolute -top-[2.7px] -left-[1.3px] w-[39px]"></harness-logo>
-        {:else}
-          <img src="/logo.svg" alt="" class="h-6 w-7 object-contain" />
-        {/if}
-      </span>
+      <!-- The mark inline, so its fallen leg can blink like the logo animation's cursor while new usage comes in. -->
+      <svg class="h-6 w-7 shrink-0" class:logo-working={receiving} viewBox="16.112 16.724 88.888 79.276" aria-hidden="true">
+        <defs>
+          <linearGradient id="app-logo-mark" gradientUnits="userSpaceOnUse" x1="0" y1="94" x2="0" y2="20"><stop offset="0" stop-color="#F59E0B" /><stop offset="1" stop-color="#F472B6" /></linearGradient>
+        </defs>
+        <g fill="url(#app-logo-mark)">
+          <path d="M18 20 H33 V50 H58 V20 H73 V64 H33 V94 H18 Z" transform="rotate(7.000 33 94)" />
+          <path class="logo-leg" d="M58 64 H73 V94 H58 Z" transform="rotate(90 73 94)" />
+        </g>
+      </svg>
       <!-- The wordmark as the logo animation draws it: "harness" muted and regular, the product name in ink and semibold. -->
       <div class="truncate text-[15px] tracking-tight" class:lg:hidden={collapsed}>
         <span class="font-normal text-muted">harness</span> <span class="font-semibold">dashboard</span>
