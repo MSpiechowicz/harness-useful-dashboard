@@ -89,7 +89,7 @@ export interface Alert {
   body: string;
 }
 
-export type AlertLang = "en" | "de" | "es" | "fr" | "pl";
+export type AlertLang = "en" | "de" | "es" | "fr" | "pl" | "pt";
 
 /** The desktop alerts, and what the server tells the app shell when it can't start (see cli.ts). */
 const MESSAGES: Record<AlertLang, Record<string, string>> = {
@@ -167,6 +167,21 @@ const MESSAGES: Record<AlertLang, Record<string, string>> = {
     portInUse: "Port {port} jest używany przez inny program, być może starszy Harness Dashboard. Zamknij go lub wybierz inny port poleceniem harness-dashboard config set port <n>.",
     portSilent: "Program na porcie {port} nie odpowiedział. Spróbuj ponownie za chwilę lub wybierz inny port poleceniem harness-dashboard config set port <n>.",
     startFailed: "Dashboard nie mógł się uruchomić: {error}",
+  },
+  pt: {
+    title: "Harness Dashboard",
+    daily: "{pct} do orçamento de hoje usado: {spent} de {cap}.",
+    dailyOver: "O orçamento de hoje se esgotou: {spent} de {cap}.",
+    monthly: "{pct} do orçamento do mês usado: {spent} de {cap}.",
+    monthlyOver: "O orçamento do mês se esgotou: {spent} de {cap}.",
+    project: "{project} usou {pct} do orçamento mensal: {spent} de {cap}.",
+    projectOver: "{project} esgotou o orçamento mensal: {spent} de {cap}.",
+    limit: "{plan}: {pct} do limite de {window} usado.",
+    limitReset: "{plan}: {pct} do limite de {window} usado. Renova em {left}.",
+    test: "As notificações funcionam. O dashboard vai avisar você aqui.",
+    portInUse: "A porta {port} está sendo usada por outro programa, talvez um Harness Dashboard mais antigo. Feche-o ou escolha outra porta com harness-dashboard config set port <n>.",
+    portSilent: "O programa na porta {port} não respondeu. Tente de novo em instantes ou escolha outra porta com harness-dashboard config set port <n>.",
+    startFailed: "O dashboard não pôde ser iniciado: {error}",
   },
 };
 

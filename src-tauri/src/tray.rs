@@ -29,7 +29,7 @@ struct Labels {
     quit: &'static str,
 }
 
-/// The menu texts in `lang` (`en`, `de`, `es`, `fr`, `pl`); English for anything else.
+/// The menu texts in `lang` (`en`, `de`, `es`, `fr`, `pl`, `pt`); English for anything else.
 fn labels(lang: &str) -> Labels {
     match lang {
         "de" => Labels {
@@ -51,6 +51,11 @@ fn labels(lang: &str) -> Labels {
             show: "Pokaż Harness Dashboard",
             hide: "Ukryj okno",
             quit: "Zamknij Harness Dashboard",
+        },
+        "pt" => Labels {
+            show: "Mostrar Harness Dashboard",
+            hide: "Ocultar janela",
+            quit: "Sair do Harness Dashboard",
         },
         _ => Labels {
             show: "Show Harness Dashboard",
@@ -156,7 +161,7 @@ mod tests {
     fn every_ui_language_has_its_own_menu_and_others_get_english() {
         let english = labels("en");
 
-        for lang in ["de", "es", "fr", "pl"] {
+        for lang in ["de", "es", "fr", "pl", "pt"] {
             assert_ne!(labels(lang), english, "{lang}");
         }
 

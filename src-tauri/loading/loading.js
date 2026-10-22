@@ -7,6 +7,7 @@
     es: "No se pudo iniciar el panel",
     fr: "Le tableau de bord n'a pas pu démarrer",
     pl: "Nie udało się uruchomić dashboardu",
+    pt: "Não foi possível iniciar o dashboard",
   };
 
   window.showStartupError = function (lang, text) {

@@ -78,7 +78,7 @@ describe("frequent compactions tip", () => {
   });
 
   test("the digest names it in every language", () => {
-    for (const lang of ["en", "de", "es", "fr", "pl"] as const) {
+    for (const lang of ["en", "de", "es", "fr", "pl", "pt"] as const) {
       expect(digestName(lang, "tip:frequent-compactions")).toContain("{count}");
     }
     expect(digestName("pl", "tip:frequent-compactions")).not.toBe(digestName("en", "tip:frequent-compactions"));

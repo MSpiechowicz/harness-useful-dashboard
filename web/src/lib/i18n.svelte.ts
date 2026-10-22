@@ -1,6 +1,6 @@
 import { en, type MessageKey } from "./locales/en.ts";
 
-export type Lang = "en" | "de" | "es" | "fr" | "pl";
+export type Lang = "en" | "de" | "es" | "fr" | "pl" | "pt";
 /** Each language named in itself, as a language picker lists them. */
 export const LANGS: { code: Lang; label: string }[] = [
   { code: "en", label: "English" },
@@ -8,6 +8,7 @@ export const LANGS: { code: Lang; label: string }[] = [
   { code: "es", label: "Español" },
   { code: "fr", label: "Français" },
   { code: "pl", label: "Polski" },
+  { code: "pt", label: "Português (Brasil)" },
 ];
 
 type Dict = Record<MessageKey, string>;
@@ -17,8 +18,9 @@ const LOADERS: Record<Exclude<Lang, "en">, () => Promise<Dict>> = {
   es: () => import("./locales/es.ts").then((m) => m.es),
   fr: () => import("./locales/fr.ts").then((m) => m.fr),
   pl: () => import("./locales/pl.ts").then((m) => m.pl),
+  pt: () => import("./locales/pt.ts").then((m) => m.pt),
 };
-const LOCALES: Record<Lang, string> = { en: "en-US", de: "de-DE", es: "es-ES", fr: "fr-FR", pl: "pl-PL" };
+const LOCALES: Record<Lang, string> = { en: "en-US", de: "de-DE", es: "es-ES", fr: "fr-FR", pl: "pl-PL", pt: "pt-BR" };
 
 function initialLang(): Lang {
   // English is the default. Another language only when explicitly chosen.

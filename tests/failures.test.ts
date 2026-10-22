@@ -11,6 +11,7 @@ describe("failure classes", () => {
   const cases: [string, string | null, string, string][] = [
     ["tool_error", "Bash", "Exit code 1\nls: cannot access 'x': No such file or directory", "not_found"],
     ["tool_error", "Bash", "Exit code 2\nls: nie ma dostępu do 'x': Nie ma takiego pliku ani katalogu", "not_found"],
+    ["tool_error", "Bash", "Exit code 2\nls: não foi possível acessar 'x': Arquivo ou diretório inexistente", "not_found"],
     ["tool_error", "Read", "File does not exist. Note: your current working directory is /work.", "not_found"],
     ["tool_error", "read", "Path '/home/u/.omp/agent/extensions' not found", "not_found"],
     ["tool_error", "Edit", "<tool_use_error>String to replace not found in file.\nString: foo</tool_use_error>", "edit_mismatch"],
@@ -19,6 +20,7 @@ describe("failure classes", () => {
     ["tool_error", "Write", "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>", "stale_read"],
     ["tool_error", "Edit", "<tool_use_error>File has been modified since read, either by the user or by a linter.</tool_use_error>", "stale_read"],
     ["tool_error", "Bash", "Exit code 1\nbash: ./deploy.sh: Permission denied", "permission"],
+    ["tool_error", "Bash", "Exit code 1\nbash: ./deploy.sh: Permissão negada", "permission"],
     ["tool_error", "Bash", "Permission for this action was denied by the Claude Code auto mode classifier.", "permission"],
     ["tool_error", "Bash", "<tool_use_error>Blocked: sleep 30 followed by: tail</tool_use_error>", "permission"],
     ["tool_error", "Bash", "Command timed out after 2m 0.0s", "timeout"],

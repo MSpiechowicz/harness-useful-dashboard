@@ -136,7 +136,7 @@ async function portFree(port: number): Promise<boolean> {
  * src-tauri/src/sidecar.rs). Written straight to the file descriptor, so the shell has it at once. In shell mode these
  * are the only lines on stdout: everything else goes to stderr.
  *
- *   HARNESS_DASHBOARD_LANG <en|de|es|fr|pl>   first, the language for the shell's own error text
+ *   HARNESS_DASHBOARD_LANG <en|de|es|fr|pl|pt> first, the language for the shell's own error text
  *   HARNESS_DASHBOARD_READY <sign-in link>     this process serves the dashboard and keeps running
  *   HARNESS_DASHBOARD_ERROR <text>             the dashboard can't start, this process exits non-zero
  */

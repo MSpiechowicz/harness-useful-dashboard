@@ -364,6 +364,12 @@ describe("nothingToCommit", () => {
       "nie dodano nic do złożenia, ale są nieśledzone pliki (użyj „git add”, aby śledzić)",
       "brak zmian dodanych do zapisu (użyj „git add” i/lub „git commit -a”)",
     ]],
+    ["pt", [
+      "nada para fazer commit, árvore de trabalho limpa",
+      "nada para fazer commit (crie/copie arquivos e use \"git add\" para rastrear)",
+      "nada adicionado ao commit, mas arquivos não rastreados presentes",
+      "nenhuma alteração adicionada ao commit (use \"git add\" e/ou \"git commit -a\")",
+    ]],
   ])("git's %s messages", (_language, messages) => {
     for (const message of messages) expect(nothingToCommit(`On branch main\n${message}\n`)).toBe(true);
   });

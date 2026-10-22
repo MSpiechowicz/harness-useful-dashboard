@@ -38,11 +38,11 @@ const EDIT_RE =
   /string to replace not found|matches of the string to replace|\bold_string\b|could not find (?:the )?(?:text|string|match|old)|no match(?:es)? found for (?:the )?(?:old|search)|anchors to lines|verify the content matches|patch (?:does not|did not|failed to) apply|failed to apply (?:the )?patch|hunk #?\d* ?failed|context mismatch|failed to find expected lines/i;
 const STALE_RE = /has not been read yet|modified since (?:it was )?read|read it first|has (?:been )?changed since (?:it was )?read/i;
 // Also the messages of a few locales' coreutils: "ls: cannot access 'x': No such file or directory" in Polish, German,
-// Spanish and French.
+// Spanish, French and Brazilian Portuguese.
 const NOT_FOUND_RE =
-  /no such file|\bENOENT\b|\bnot found\b|does not exist|doesn't exist|(?:cannot|can't|couldn't|could not|unable to) (?:find|locate)|no such (?:tool|command|directory)|has no resource|no mcp server has resource|nie ma takiego pliku|nicht gefunden|no existe|introuvable|aucun fichier/i;
+  /no such file|\bENOENT\b|\bnot found\b|does not exist|doesn't exist|(?:cannot|can't|couldn't|could not|unable to) (?:find|locate)|no such (?:tool|command|directory)|has no resource|no mcp server has resource|nie ma takiego pliku|nicht gefunden|no existe|introuvable|aucun fichier|arquivo ou diretório inexistente/i;
 const PERMISSION_RE =
-  /permission denied|\bEACCES\b|\bEPERM\b|operation not permitted|access (?:is )?denied|\bwas denied\b|denied by|\b40[13] (?:forbidden|unauthori[sz]ed)\b|\bstatus code 40[13]\b|^(?:<tool_use_error>)?Blocked\b|keine berechtigung|permiso denegado|permission non accordée|brak uprawnień/im;
+  /permission denied|\bEACCES\b|\bEPERM\b|operation not permitted|access (?:is )?denied|\bwas denied\b|denied by|\b40[13] (?:forbidden|unauthori[sz]ed)\b|\bstatus code 40[13]\b|^(?:<tool_use_error>)?Blocked\b|keine berechtigung|permiso denegado|permission non accordée|brak uprawnień|permissão negada/im;
 const EXIT_RE = /^Exit code [1-9]\d*|exited with (?:code|status) [1-9]\d*|exit (?:code|status):? [1-9]\d*|^exit [1-9]\d*$|returned non-zero exit/im;
 /** Input the harness turned down before the tool ran: also for an edit tool, it is no mismatch with the file. */
 const SCHEMA_RE = /InputValidationError|missing required|does not match schema/i;

@@ -478,7 +478,7 @@ export function parseSettings(body: unknown, current?: AppConfig): { patch: Sett
     patch.ingest = ingest;
   }
   if (has("language")) {
-    if (!["en", "de", "es", "fr", "pl"].includes(body.language as string)) return invalid("language");
+    if (!["en", "de", "es", "fr", "pl", "pt"].includes(body.language as string)) return invalid("language");
     patch.language = body.language as AlertLang;
   }
   if (has("planPrices")) {

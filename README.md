@@ -44,7 +44,7 @@ Made with demo data. [Download the full-quality video](https://raw.githubusercon
 - **Export**: every table and chart's data as CSV or JSON, following the current filters
 - **Claude Code status line**: this session's cost, today's cost and the 5-hour limit, right in Claude Code
 - **MCP server**: agents in Claude Code, Codex, Cursor, Zed or OpenCode can read your usage, budgets and plan limits themselves
-- **English, German, Spanish, French and Polish UI** (English by default), light and Graphite (dark) themes, responsive layout
+- **English, German, Spanish, French, Polish and Brazilian Portuguese UI** (English by default), light and Graphite (dark) themes, responsive layout
 - **Shared database**: point several machines at one SQLite file on iCloud Drive, Dropbox, OneDrive or a network share
 
 Everything runs locally. Your usage is never uploaded anywhere.
@@ -1013,7 +1013,7 @@ src/
     update.ts            GitHub release check (the app does the installing)
 src-tauri/               Tauri shell: window, tray, sidecar, updater, launch sound
 web/src/
-  pages/ components/ lib/   Svelte UI, ECharts builders, i18n (lib/locales/en.ts, de.ts)
+  pages/ components/ lib/   Svelte UI, ECharts builders, i18n (lib/locales/en.ts, de.ts, ...)
 ```
 
 **Adding a language:** copy `web/src/lib/locales/en.ts` to a new file, translate the values, and register the file in

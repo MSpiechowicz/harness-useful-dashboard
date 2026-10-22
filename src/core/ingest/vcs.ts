@@ -558,8 +558,9 @@ export function commitsIn(output: unknown): { branch: string | null; sha: string
 
 /**
  * How git starts the line that says a commit had nothing in it, in lower case: in English and in git's German,
- * Spanish, French and Polish (the languages of the UI), as their catalogs translate "nothing to commit", "nothing
- * added to commit but untracked files present" and "no changes added to commit" (some differ with a hint after them).
+ * Spanish, French, Polish and Brazilian Portuguese (the languages of the UI), as their catalogs translate "nothing to
+ * commit", "nothing added to commit but untracked files present" and "no changes added to commit" (some differ with a
+ * hint after them).
  */
 const NOTHING_TO_COMMIT = [
   "nothing to commit",
@@ -580,6 +581,9 @@ const NOTHING_TO_COMMIT = [
   "nic do złożenia",
   "nie dodano nic do złożenia",
   "brak zmian dodanych do zapisu",
+  "nada para fazer commit",
+  "nada adicionado ao commit",
+  "nenhuma alteração adicionada ao commit",
 ];
 
 /** A one-line log entry: an abbreviated (7 to 12) or full sha, and the subject, maybe after its refs. */

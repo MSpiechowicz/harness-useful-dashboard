@@ -47,7 +47,7 @@ pub const STOP_GRACE: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(50);
 
 /// The UI languages the server may report.
-const LANGUAGES: &[&str] = &["en", "de", "es", "fr", "pl"];
+const LANGUAGES: &[&str] = &["en", "de", "es", "fr", "pl", "pt"];
 
 /// Longest stderr line kept in the log.
 const MAX_LOGGED_LINE: usize = 1000;
