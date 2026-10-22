@@ -1,3 +1,10 @@
+# [2.4.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.3.1...v2.4.0) (2026-10-22)
+
+
+### Features
+
+* The dashboard speaks Brazilian Portuguese, in the UI, alerts, digest and desktop app ([15ccafc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/15ccafcfa9a7847c7cfb3e8d3e7741e1f7109815))
+
 ## [2.3.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.3.0...v2.3.1) (2026-10-15)
 
 
