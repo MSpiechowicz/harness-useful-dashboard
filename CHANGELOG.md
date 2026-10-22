@@ -1,3 +1,10 @@
+## [2.4.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.4.0...v2.4.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* update built-in model prices ([88d3bc8](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/88d3bc870a0b078e95a70f99782ebdf07e580e4c))
+
 # [2.4.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.3.1...v2.4.0) (2026-10-22)
 
 
