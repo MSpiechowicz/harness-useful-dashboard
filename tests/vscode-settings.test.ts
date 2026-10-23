@@ -42,10 +42,12 @@ describe("flavors and endpoint", () => {
   test("only the four editors that run Copilot Chat, with per-OS and Flatpak folders", () => {
     const linux = findFlavors({ home: "/h", platform: "linux" });
     expect(linux.map((f) => f.id)).toEqual(["Code", "Code - Insiders", "Code - OSS", "VSCodium"]);
-    expect(linux[2]).toEqual({ id: "Code - OSS", userDir: "/h/.config/Code - OSS/User", settingsPath: "/h/.config/Code - OSS/User/settings.json", installed: false });
-    expect(findFlavors({ home: "/h", platform: "linux", xdgConfig: "/x" })[0]!.userDir).toBe("/x/Code/User");
-    expect(findFlavors({ home: "/h", platform: "darwin" })[0]!.userDir).toBe("/h/Library/Application Support/Code/User");
-    expect(findFlavors({ home: "/h", platform: "win32", appData: "/a" })[3]!.userDir).toBe("/a/VSCodium/User");
+    // Paths are joined with this machine's separator, whichever OS the folders are for.
+    const oss = join("/h", ".config", "Code - OSS", "User");
+    expect(linux[2]).toEqual({ id: "Code - OSS", userDir: oss, settingsPath: join(oss, "settings.json"), installed: false });
+    expect(findFlavors({ home: "/h", platform: "linux", xdgConfig: "/x" })[0]!.userDir).toBe(join("/x", "Code", "User"));
+    expect(findFlavors({ home: "/h", platform: "darwin" })[0]!.userDir).toBe(join("/h", "Library", "Application Support", "Code", "User"));
+    expect(findFlavors({ home: "/h", platform: "win32", appData: "/a" })[3]!.userDir).toBe(join("/a", "VSCodium", "User"));
   });
 
   test("a Flatpak's User folder is used when only it exists", () => {

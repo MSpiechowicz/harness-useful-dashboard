@@ -372,7 +372,9 @@ function withoutConnection(text: string, options: FormattingOptions): string {
 
 /** Creates a file nobody else made first, readable by its owner only, and writes `data` into it. */
 function createPrivate(path: string, data: string | Buffer): void {
-  // "wx" fails on anything already there, a symlink included, instead of following it.
+  // "wx" fails on anything already there, a symlink included, instead of following it. On Windows it follows a
+  // symlink that points nowhere and creates its target, so a name with anything at it is refused first.
+  if (lstatSync(path, { throwIfNoEntry: false })) throw Object.assign(new Error(`${path} exists`), { code: "EEXIST" });
   const fd = openSync(path, "wx", 0o600);
   try {
     fchmodSync(fd, 0o600);

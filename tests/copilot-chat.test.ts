@@ -130,7 +130,7 @@ describe("Copilot Chat project of a window", () => {
   });
 
   test("files are found per folder, with the project of the window and none for the empty window", () => {
-    const found = findCopilotChatFiles(USER).map((f) => [f.path.split("/").pop()!.replace(".jsonl", ""), f.project]);
+    const found = findCopilotChatFiles(USER).map((f) => [basename(f.path, ".jsonl"), f.project]);
     expect(found.sort()).toEqual(
       [
         [MAIN, "/home/dev/projects/demo"],
