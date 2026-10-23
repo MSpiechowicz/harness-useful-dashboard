@@ -12,10 +12,11 @@
     title?: string;
     "aria-label"?: string;
     "aria-current"?: "page";
+    "aria-keyshortcuts"?: string;
     onclick?: () => void;
     children: Snippet;
   }
-  let { to, class: cls = "", title, "aria-label": ariaLabel, "aria-current": ariaCurrent, onclick, children }: Props = $props();
+  let { to, class: cls = "", title, "aria-label": ariaLabel, "aria-current": ariaCurrent, "aria-keyshortcuts": ariaKeyshortcuts, onclick, children }: Props = $props();
 
   function go() {
     onclick?.();
@@ -30,6 +31,7 @@
   {title}
   aria-label={ariaLabel}
   aria-current={ariaCurrent}
+  aria-keyshortcuts={ariaKeyshortcuts}
   onclick={go}
   onkeydown={(e) => {
     if (e.key === "Enter") go();

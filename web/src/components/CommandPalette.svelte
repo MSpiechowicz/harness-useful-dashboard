@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack, type Component } from "svelte";
+  import { onMount, type Component } from "svelte";
   import {
     ArrowDownUp, CalendarRange, Coins, CornerDownLeft, Cpu, Eraser, FolderKanban, GitBranch, Keyboard, Languages, Layers, MessageSquareText, Monitor, Moon, RefreshCw, Search,
     Settings as SettingsIcon, Sun, Tag,
@@ -7,7 +7,7 @@
   import { getJson, qs, send, type FilterOptions } from "../lib/api.svelte.ts";
   import { entityLabel } from "../lib/format.ts";
   import { i18n, LANGS, t, type MessageKey } from "../lib/i18n.svelte.ts";
-  import { highlight, modKey, pushRecent, rank, snippet } from "../lib/palette-search.ts";
+  import { highlight, pushRecent, rank, snippet } from "../lib/palette-search.ts";
   import { navigate, store, type FilterKey, type Metric, type RangePreset, type ThemePref } from "../lib/state.svelte.ts";
 
   /**
@@ -23,13 +23,13 @@
   interface Props {
     /** The pages of the menu, in its order, with its icons. */
     pages: PageEntry[];
-    /** Opens on the list of shortcuts instead of the results. */
-    help?: boolean;
     /** Whether the current view shows the filters: choosing a project or model elsewhere goes to the overview. */
     filtersShown: boolean;
     onclose: () => void;
+    /** Opens the list of keyboard shortcuts (the palette closes first). */
+    onshortcuts: () => void;
   }
-  let { pages, help = false, filtersShown, onclose }: Props = $props();
+  let { pages, filtersShown, onclose, onshortcuts }: Props = $props();
 
   type Group = "recent" | "pages" | "actions" | "sessions" | "prompts" | "branches" | "projects" | "models" | "tags";
   const GROUP_LABEL: Record<Group, MessageKey> = {
@@ -57,11 +57,8 @@
   /** At most this many results of each kind of data. */
   const PER_GROUP = 5;
   const RECENT_KEY = "hd.paletteRecent";
-  const mod = modKey(navigator.platform || navigator.userAgent);
 
   let query = $state("");
-  // Where it starts: after that, the palette switches between the two itself.
-  let showHelp = $state(untrack(() => help));
   let active = $state(0);
   let input = $state<HTMLInputElement>();
   let dialog = $state<HTMLDivElement>();
@@ -134,7 +131,7 @@
       const title = t(s);
       items.push({ id: `settings:${s}`, group: "actions", label: `${t("nav.settings")}: ${title}`, icon: SettingsIcon, run: () => openSettings(title) });
     }
-    items.push({ id: "help", group: "actions", label: t("palette.shortcuts"), icon: Keyboard, run: () => {} });
+    items.push({ id: "help", group: "actions", label: t("palette.shortcuts"), icon: Keyboard, run: onshortcuts });
     return items;
   });
 
@@ -256,24 +253,18 @@
   });
   const optionId = (i: number) => `palette-option-${i}`;
   $effect(() => {
-    if (showHelp || !results.length) return;
+    if (!results.length) return;
     document.getElementById(optionId(active))?.scrollIntoView({ block: "nearest" });
   });
 
   function choose(item: Item | undefined) {
     if (!item) return;
-    if (item.id === "help") {
-      showHelp = true;
-      query = "";
-      return;
-    }
     if (item.group !== "sessions" && item.group !== "prompts" && item.group !== "branches") remember(item.id);
     onclose();
     item.run();
   }
 
   function onInputKey(e: KeyboardEvent) {
-    if (showHelp && e.key !== "Escape" && e.key !== "Tab") return;
     const last = results.length - 1;
     if (e.key === "ArrowDown") active = active >= last ? 0 : active + 1;
     else if (e.key === "ArrowUp") active = active <= 0 ? last : active - 1;
@@ -292,8 +283,7 @@
       e.preventDefault();
       // Not also the drawer behind it: one Escape closes one thing.
       e.stopPropagation();
-      if (showHelp && !help) showHelp = false;
-      else onclose();
+      onclose();
     } else if (e.key === "Tab") {
       // Focus stays in the dialog: Tab cycles through what can take it.
       const all = [...(dialog?.querySelectorAll<HTMLElement>("input, button:not([disabled])") ?? [])];
@@ -305,11 +295,6 @@
     }
   }
 
-  // Typing in the shortcuts list goes back to the results.
-  $effect(() => {
-    if (query && showHelp) showHelp = false;
-  });
-
   onMount(() => {
     input?.focus();
     // The page behind doesn't scroll while the palette is open.
@@ -320,17 +305,8 @@
     };
   });
 
-  const SHORTCUTS: { keys: string[]; label: MessageKey }[] = [
-    { keys: [mod, "K"], label: "palette.key.palette" },
-    { keys: ["/"], label: "palette.key.search" },
-    { keys: ["?"], label: "palette.key.help" },
-    { keys: ["↑", "↓"], label: "palette.key.move" },
-    { keys: ["Enter"], label: "palette.key.choose" },
-    { keys: ["Esc"], label: "palette.key.close" },
-  ];
-
   const listId = "palette-list";
-  const expanded = $derived(!showHelp && results.length > 0);
+  const expanded = $derived(results.length > 0);
 </script>
 
 <!-- The backdrop is for the pointer: keyboard users close with Escape. -->
@@ -371,21 +347,8 @@
       {#if searching}<span class="shrink-0 text-xs text-muted" aria-live="polite">{t("palette.searching")}</span>{/if}
     </div>
 
-    {#if showHelp}
-      <div class="overflow-y-auto px-2 py-2">
-        <div class="palette-group">{t("palette.shortcuts")}</div>
-        <dl class="px-2.5">
-          {#each SHORTCUTS as s (s.label)}
-            <div class="flex items-center justify-between gap-4 py-1.5 text-[13px]">
-              <dt class="text-ink-2">{t(s.label)}</dt>
-              <dd class="flex shrink-0 gap-1">{#each s.keys as k (k)}<kbd class="kbd">{k}</kbd>{/each}</dd>
-            </div>
-          {/each}
-        </dl>
-      </div>
-    {/if}
-    <!-- Always in the page, so the input's aria-controls points at something. Hidden behind the shortcuts list. -->
-    <div id={listId} class="overflow-y-auto px-2 py-2" class:hidden={showHelp} role="listbox" aria-label={t("palette.label")}>
+    <!-- Always in the page, so the input's aria-controls points at something. -->
+    <div id={listId} class="overflow-y-auto px-2 py-2" role="listbox" aria-label={t("palette.label")}>
       {#each groups as g, gi (g.group + gi)}
         <div role="group" aria-labelledby="palette-group-{gi}" class={gi ? "mt-1 border-t border-line pt-1" : ""}>
           <div id="palette-group-{gi}" class="palette-group" role="presentation">{t(GROUP_LABEL[g.group])}</div>
@@ -420,7 +383,14 @@
       <span class="flex items-center gap-1"><kbd class="kbd"><ArrowDownUp size={10} /></kbd>{t("palette.foot.move")}</span>
       <span class="flex items-center gap-1"><kbd class="kbd"><CornerDownLeft size={10} /></kbd>{t("palette.foot.open")}</span>
       <span class="flex items-center gap-1"><kbd class="kbd">Esc</kbd>{t("palette.key.close")}</span>
-      <button type="button" class="ml-auto flex items-center gap-1 rounded hover:text-ink" aria-pressed={showHelp} onclick={() => (showHelp = !showHelp)}>
+      <button
+        type="button"
+        class="ml-auto flex items-center gap-1 rounded hover:text-ink"
+        onclick={() => {
+          onclose();
+          onshortcuts();
+        }}
+      >
         <kbd class="kbd">?</kbd>{t("palette.shortcuts")}
       </button>
     </div>

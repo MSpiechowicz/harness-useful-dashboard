@@ -1,6 +1,6 @@
 /**
- * Matching and ranking for the command palette (Ctrl+K), and which key opens what. Pure functions, no DOM: the
- * palette component renders what these decide.
+ * Matching and ranking for the command palette (Ctrl+K). Pure functions, no DOM: the palette component renders what
+ * these decide.
  *
  * Not to be confused with palette.ts, the data colors.
  */
@@ -157,7 +157,7 @@ export function highlight(text: string, query: string): { text: string; hit: boo
   return parts;
 }
 
-/** Where a key press is going: typing there must not open anything (except Ctrl+K). */
+/** Where a key press is going: typing there must not trigger a shortcut (except the ones with Ctrl or ⌘). */
 export interface KeyTarget {
   tagName?: string;
   type?: string;
@@ -176,20 +176,6 @@ export function isEditable(el: KeyTarget | null | undefined): boolean {
   return tag === "INPUT" && !NO_TEXT.has((el.type ?? "text").toLowerCase());
 }
 
-export type Shortcut = "palette" | "search" | "help";
-
-/**
- * What a key press asks for: the palette (Ctrl+K or Cmd+K, anywhere), the table search (/) or the list of shortcuts
- * (?), these two only when not typing. Null for every other key.
- */
-export function shortcutOf(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }, typing: boolean): Shortcut | null {
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") return "palette";
-  if (typing || e.ctrlKey || e.metaKey || e.altKey) return null;
-  if (e.key === "/") return "search";
-  if (e.key === "?") return "help";
-  return null;
-}
-
 /**
  * A long text (a prompt) cut so the first match shows: from a little before it, with "…" where it was cut. One line,
  * whitespace collapsed.
@@ -201,9 +187,4 @@ export function snippet(text: string, query: string, before = 24): string {
   // Start at a word, not in the middle of one.
   const cut = line.lastIndexOf(" ", start - before) + 1 || start - before;
   return `…${line.slice(cut)}`;
-}
-
-/** The modifier key the shortcut hints name: ⌘ on Apple systems, Ctrl elsewhere. */
-export function modKey(platform: string): string {
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? "⌘" : "Ctrl";
 }

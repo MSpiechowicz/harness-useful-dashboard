@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fold, highlight, isEditable, matchRanges, modKey, pushRecent, rank, score, shortcutOf, snippet } from "../web/src/lib/palette-search.ts";
+import { fold, highlight, isEditable, matchRanges, pushRecent, rank, score, snippet } from "../web/src/lib/palette-search.ts";
 
 describe("fold", () => {
   test("lowercase, without accents", () => {
@@ -116,21 +116,7 @@ describe("highlight", () => {
   });
 });
 
-describe("shortcuts", () => {
-  const key = (k: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) => ({ key: k, ctrlKey: false, metaKey: false, altKey: false, ...mods });
-  test("Ctrl+K and Cmd+K open the palette, also while typing", () => {
-    expect(shortcutOf(key("k", { ctrlKey: true }), false)).toBe("palette");
-    expect(shortcutOf(key("K", { metaKey: true }), true)).toBe("palette");
-    expect(shortcutOf(key("k", { ctrlKey: true, altKey: true }), false)).toBeNull();
-    expect(shortcutOf(key("k"), false)).toBeNull();
-  });
-  test("/ and ? only when not typing", () => {
-    expect(shortcutOf(key("/"), false)).toBe("search");
-    expect(shortcutOf(key("?"), false)).toBe("help");
-    expect(shortcutOf(key("/"), true)).toBeNull();
-    expect(shortcutOf(key("?"), true)).toBeNull();
-    expect(shortcutOf(key("/", { ctrlKey: true }), false)).toBeNull();
-  });
+describe("typing", () => {
   test("what counts as typing", () => {
     expect(isEditable({ tagName: "INPUT", type: "search" })).toBe(true);
     expect(isEditable({ tagName: "input" })).toBe(true);
@@ -154,15 +140,6 @@ describe("snippet", () => {
     expect(s).toContain("retention setting");
     expect(s.length).toBeLessThan(text.length);
     expect(s.slice(1, 2)).not.toBe(" ");
-  });
-});
-
-describe("modKey", () => {
-  test("Apple systems get ⌘", () => {
-    expect(modKey("MacIntel")).toBe("⌘");
-    expect(modKey("iPhone")).toBe("⌘");
-    expect(modKey("Linux x86_64")).toBe("Ctrl");
-    expect(modKey("Win32")).toBe("Ctrl");
   });
 });
 

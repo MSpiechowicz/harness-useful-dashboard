@@ -3,7 +3,7 @@
   import Link from "./components/Link.svelte";
   import {
     Activity, Bot, ChartSpline, Boxes, Cpu, Database, FileCode, FolderKanban, Gauge, GitBranch, Lightbulb, Menu, MessageSquareText, OctagonAlert, Timer, Wallet,
-    Info, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Search, Server, Settings as SettingsIcon, Sparkles, Tag, TrendingUp, Users, Wrench, X, Layers,
+    Info, Keyboard, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, Search, Server, Settings as SettingsIcon, Sparkles, Tag, TrendingUp, Users, Wrench, X, Layers,
   } from "@lucide/svelte";
   import FilterBar from "./components/FilterBar.svelte";
   import LangPicker from "./components/LangPicker.svelte";
@@ -14,8 +14,9 @@
   import { i18n, t, type MessageKey } from "./lib/i18n.svelte.ts";
   import { send } from "./lib/api.svelte.ts";
   import { live } from "./lib/live.svelte.ts";
-  import { isEditable, modKey, shortcutOf } from "./lib/palette-search.ts";
-  import { filtersApply, store } from "./lib/state.svelte.ts";
+  import { isEditable } from "./lib/palette-search.ts";
+  import { ariaShortcut, formatShortcut, isMacPlatform, pageCombos, shortcutOf, shortcutText } from "./lib/shortcuts.ts";
+  import { filtersApply, navigate, store } from "./lib/state.svelte.ts";
 
   // Each page is its own file, loaded when first shown, so the first view doesn't wait for all the others.
   type PageComponent = Component<any>;
@@ -213,14 +214,15 @@
   // The command palette (Ctrl+K or Cmd+K): its own file, loaded the first time it opens.
   let Palette = $state.raw<Component<any>>();
   let paletteOpen = $state(false);
-  let paletteHelp = $state(false);
   /** Where focus was when the palette opened: it goes back there when it closes. */
   let paletteOpener: HTMLElement | null = null;
-  const mod = modKey(navigator.platform || navigator.userAgent);
+  const mac = isMacPlatform(navigator.platform || navigator.userAgent);
   const navPages = groups.flatMap((g) => g.items);
-  async function openPalette(help = false) {
+  const navPageNames = navPages.map((p) => p.page);
+  // The key of each page that has one (the first nine and Settings), as the menu and the shortcuts list show it.
+  const pageKeys = pageCombos(navPageNames);
+  async function openPalette() {
     paletteOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    paletteHelp = help;
     if (!Palette) Palette = (await import("./components/CommandPalette.svelte")).default;
     paletteOpen = true;
   }
@@ -231,6 +233,24 @@
     else paletteOpener?.focus();
     paletteOpener = null;
   }
+
+  // The list of keyboard shortcuts (? or Ctrl+/): its own file too, loaded the first time it opens.
+  let Shortcuts = $state.raw<Component<any>>();
+  let shortcutsOpen = $state(false);
+  /** Where focus was when the list opened. */
+  let shortcutsOpener: HTMLElement | null = null;
+  async function openShortcuts() {
+    shortcutsOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!Shortcuts) Shortcuts = (await import("./components/ShortcutsDialog.svelte")).default;
+    shortcutsOpen = true;
+  }
+  function closeShortcuts() {
+    shortcutsOpen = false;
+    // The dialog gives focus back to what opened it. Opened from the drawer, which closed: to the button that opens it.
+    const opener = shortcutsOpener;
+    shortcutsOpener = null;
+    if (opener?.closest("[inert]")) tick().then(() => openButton?.focus());
+  }
   /** `/` goes to the search box of the page's table, when it has one. */
   function focusTableSearch(): boolean {
     const box = [...(main?.querySelectorAll<HTMLInputElement>("input[type=search]") ?? [])].find((el) => el.offsetParent !== null);
@@ -240,18 +260,46 @@
     return true;
   }
   function onKey(e: KeyboardEvent) {
-    // Shortcuts never take keys that are typed into a field, except Ctrl+K, which has no text to type.
-    const shortcut = e.defaultPrevented ? null : shortcutOf(e, isEditable(e.target as HTMLElement | null));
-    if (shortcut === "palette") {
-      e.preventDefault();
+    // Shortcuts never take keys that are typed into a field, except the ones with Ctrl or Cmd, which have no text to type.
+    const action = e.defaultPrevented ? null : shortcutOf(e, isEditable(e.target as HTMLElement | null), navPageNames, mac);
+    if (!action) {
+      // One Escape closes one thing: an open dialog first, the drawer after.
+      if (e.key === "Escape" && menuOpen && !wide && !document.querySelector("dialog[open]")) closeMenu();
+      return;
+    }
+
+    // An open overlay owns the keyboard: only its own key acts. Any other dialog takes all of them.
+    if (paletteOpen) {
+      if (action !== "palette") return;
+    } else if (shortcutsOpen) {
+      if (action !== "shortcuts") return;
+    } else if (document.querySelector("dialog[open]")) {
+      return;
+    }
+
+    if (action === "search") {
+      if (focusTableSearch()) e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+
+    if (action === "palette") {
       if (paletteOpen) closePalette();
       else void openPalette();
-    } else if (shortcut === "help" && !paletteOpen) {
-      e.preventDefault();
-      void openPalette(true);
-    } else if (shortcut === "search" && !paletteOpen) {
-      if (focusTableSearch()) e.preventDefault();
-    } else if (e.key === "Escape" && menuOpen && !wide) closeMenu();
+    } else if (action === "shortcuts") {
+      if (shortcutsOpen) closeShortcuts();
+      else void openShortcuts();
+    } else if (action === "sidebar") {
+      if (wide) store.setNavCollapsed(!collapsed);
+      else if (menuOpen) closeMenu();
+      else openMenu();
+    } else if (action === "back") history.back();
+    else if (action === "forward") history.forward();
+    else {
+      // "go:" and the page.
+      if (!wide) menuOpen = false;
+      navigate(action.slice(3));
+    }
   }
 </script>
 
@@ -289,9 +337,9 @@
         type="button"
         class="btn !h-7 w-full !gap-2.5 !px-3 font-normal text-muted {collapsed ? 'lg:justify-center lg:!px-0' : ''}"
         aria-haspopup="dialog"
-        aria-keyshortcuts="Control+K Meta+K"
+        aria-keyshortcuts={ariaShortcut("mod+k", mac)}
         aria-label={collapsed ? t("palette.open") : undefined}
-        title={`${t("palette.key.palette")} (${mod}+K)`}
+        title={`${t("palette.key.palette")} (${shortcutText("mod+k", mac)})`}
         onclick={() => {
           if (!wide) menuOpen = false;
           void openPalette();
@@ -299,7 +347,7 @@
       >
         <Search size={16} class="shrink-0" /><span class="truncate" class:lg:hidden={collapsed}>{t("palette.open")}</span>
         <span class="ml-auto flex shrink-0 gap-0.5" class:lg:hidden={collapsed} aria-hidden="true">
-          {#each [mod, "K"] as k (k)}<kbd class="inline-flex h-[1.125rem] min-w-5 items-center justify-center rounded border border-line-strong bg-surface-2 px-1 font-sans text-[10px] leading-none text-ink-2 shadow-[var(--control-shadow)]">{k}</kbd>{/each}
+          {#each formatShortcut("mod+k", mac) as k (k)}<kbd class="inline-flex h-[1.125rem] min-w-5 items-center justify-center rounded border border-line-strong bg-surface-2 px-1 font-sans text-[10px] leading-none text-ink-2 shadow-[var(--control-shadow)]">{k}</kbd>{/each}
         </span>
       </button>
     </div>
@@ -317,18 +365,35 @@
             class="flex h-7 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors {collapsed ? 'lg:justify-center lg:px-0' : ''} {isActive(item.page) ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'}"
             aria-current={isActive(item.page) ? "page" : undefined}
             aria-label={collapsed ? t(item.label) : undefined}
-            title={collapsed ? t(item.label) : undefined}
+            aria-keyshortcuts={pageKeys.has(item.page) ? ariaShortcut(pageKeys.get(item.page)!, mac) : undefined}
+            title={pageKeys.has(item.page) ? `${t(item.label)} (${shortcutText(pageKeys.get(item.page)!, mac)})` : collapsed ? t(item.label) : undefined}
           >
             <item.icon size={16} class="shrink-0 {item.page === 'live' && receiving ? 'live-trace' : ''}" /><span class="truncate" class:lg:hidden={collapsed}>{t(item.label)}</span>
           </Link>
         {/each}
       {/each}
+      <!-- The list of keyboard shortcuts, on every width. -->
+      <button
+        type="button"
+        class="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-sm text-ink-2 transition-colors hover:bg-hover hover:text-ink {collapsed ? 'lg:justify-center lg:px-0' : ''}"
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Shift+?"
+        aria-label={collapsed ? t("palette.shortcuts") : undefined}
+        title={`${t("palette.shortcuts")} (?)`}
+        onclick={() => {
+          if (!wide) menuOpen = false;
+          void openShortcuts();
+        }}
+      >
+        <Keyboard size={16} class="shrink-0" /><span class="truncate" class:lg:hidden={collapsed}>{t("palette.shortcuts")}</span>
+      </button>
       <!-- The last menu item, under Settings: collapse to icons, or expand again. Wide screens only: small ones use the drawer. -->
       <button
         type="button"
         class="hidden h-7 w-full items-center gap-2.5 rounded-lg px-3 text-sm text-ink-2 transition-colors hover:bg-hover hover:text-ink lg:flex {collapsed ? 'lg:justify-center lg:px-0' : ''}"
         aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
-        title={collapsed ? t("nav.expand") : t("nav.collapse")}
+        aria-keyshortcuts={ariaShortcut("mod+b", mac)}
+        title={`${collapsed ? t("nav.expand") : t("nav.collapse")} (${shortcutText("mod+b", mac)})`}
         aria-expanded={!collapsed}
         onclick={() => store.setNavCollapsed(!collapsed)}
       >
@@ -399,5 +464,8 @@
 </div>
 
 {#if paletteOpen && Palette}
-  <Palette pages={navPages} help={paletteHelp} filtersShown={showFilters} onclose={closePalette} />
+  <Palette pages={navPages} filtersShown={showFilters} onclose={closePalette} onshortcuts={() => void openShortcuts()} />
+{/if}
+{#if shortcutsOpen && Shortcuts}
+  <Shortcuts pages={navPages} onclose={closeShortcuts} />
 {/if}
