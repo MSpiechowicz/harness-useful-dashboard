@@ -1,3 +1,15 @@
+# [2.5.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.4.1...v2.5.0) (2026-10-23)
+
+
+### Bug Fixes
+
+* Connect VS Code never follows a broken link at a backup name on Windows, and the Copilot Chat tests pass there ([f6c88bc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/f6c88bc5c6e7a82bf5720763c4109b93fc8c78c3))
+
+
+### Features
+
+* GitHub Copilot Chat in VS Code is tracked, from its chat files out of the box and exactly once VS Code is connected ([6081a48](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/6081a48fdb955e7ecf1864c948f9ad62f28d660e)), closes [#3](https://github.com/MSpiechowicz/harness-useful-dashboard/issues/3)
+
 ## [2.4.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.4.0...v2.4.1) (2026-10-22)
 
 
