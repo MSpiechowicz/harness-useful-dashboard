@@ -1,3 +1,10 @@
+# [2.6.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.5.0...v2.6.0) (2026-10-23)
+
+
+### Features
+
+* a Keyboard shortcuts view in the menu, and Ctrl+1…9, Ctrl+, and Ctrl+B move around the dashboard like Harness Desktop ([a0f97cc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a0f97cce9db4a249fd522c229ddfde18af33c246))
+
 # [2.5.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.4.1...v2.5.0) (2026-10-23)
 
 
