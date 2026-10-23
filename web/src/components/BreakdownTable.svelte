@@ -3,6 +3,7 @@
 </script>
 
 <script lang="ts">
+  import PartialBadge from "./PartialBadge.svelte";
   import SortTh from "./SortTh.svelte";
   import ValueBar from "./ValueBar.svelte";
   import type { BreakdownRow, WhatIf } from "../lib/api.svelte.ts";
@@ -126,6 +127,7 @@
               <span class="truncate" class:italic={none} class:text-ink-2={none}>{entityLabel(dim, r.key, r.label)}</span>
             {/if}
             {#if r.estimated}<span class="rounded bg-surface-2 px-1.5 text-[10px] text-muted" title={t("common.estimatedHint")}>{t("common.estimated")}</span>{/if}
+            {#if r.partial}<PartialBadge />{/if}
           </div>
         </td>
         <td class="num font-medium">{usd(r.cost)}</td>

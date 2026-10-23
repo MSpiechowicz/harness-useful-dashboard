@@ -101,9 +101,9 @@ describe("HTTP API", () => {
     process.env.CLAUDE_CONFIG_DIR = join(root, "claude");
     process.env.CODEX_HOME = join(root, "codex");
     process.env.PI_CODING_AGENT_DIR = join(root, "omp");
-    // pi and OpenCode have no environment override this test can use: point their folders into the temp root.
+    // pi, OpenCode and Copilot Chat have no environment override this test can use: point their folders into the temp root.
     mkdirSync(join(root, "home"), { recursive: true });
-    writeFileSync(join(root, "home", "config.json"), JSON.stringify({ sources: { piDirs: [join(root, "pi")], opencodeDirs: [join(root, "opencode")] } }));
+    writeFileSync(join(root, "home", "config.json"), JSON.stringify({ sources: { piDirs: [join(root, "pi")], opencodeDirs: [join(root, "opencode")], copilotChatDirs: [join(root, "vscode-user")] } }));
     writeJsonl(join(root, "claude", "projects", "-work-alpha", `${CLAUDE_SESSION}.jsonl`), [
       claudeUser("hello", { uuid: "u1", ts: "2026-09-01T10:00:00.000Z" }),
       claudeAssistant({ id: "m1", ts: "2026-09-01T10:00:01.000Z" }),

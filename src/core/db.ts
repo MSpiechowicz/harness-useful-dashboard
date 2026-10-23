@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import type { JournalMode } from "./config.ts";
 import { CURSOR_REKEY } from "./ingest/cursor.ts";
 
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 const MIGRATIONS: Record<number, string> = {
   1: /* sql */ `
@@ -391,6 +391,13 @@ const MIGRATIONS: Record<number, string> = {
     UPDATE outcomes SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
     UPDATE outcome_days SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
     UPDATE compactions SET model = substr(model, 1, length(model) - 9) WHERE model GLOB '*[-@][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+  `,
+  // Copilot Chat in VS Code. `partial`: the row's input is only the last model call of a request (what the chat session
+  // file keeps), so the cost is approximate until the telemetry row of that request replaces it. `credits`: GitHub
+  // Copilot credits the call used, as the telemetry reports them. A schema 19 app opens this database read-only.
+  20: /* sql */ `
+    ALTER TABLE usage ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE usage ADD COLUMN credits REAL NOT NULL DEFAULT 0;
   `,
 };
 

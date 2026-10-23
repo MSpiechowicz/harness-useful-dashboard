@@ -4,6 +4,7 @@ import { DbWriter, recomputeCosts } from "../src/core/ingest/writer.ts";
 import type { CompactionRecord, GitEventRecord, OutcomeRecord, UsageRecord } from "../src/core/ingest/types.ts";
 import { PriceBook } from "../src/core/pricing.ts";
 import { localDayStart, rollupCutoff } from "../src/core/rollup.ts";
+import { backgroundSessionId, fileUsageId, isFileUsageId, otelUsageId, sessionId, toolId } from "../src/core/ingest/copilotChatIds.ts";
 import { ID, memDb } from "./helpers.ts";
 
 const NOW = Date.parse("2026-10-08T12:00:00Z");
@@ -230,6 +231,90 @@ describe("Copilot session totals", () => {
     w.supersedeRollups(SID);
     expect(totals(db).tokens).toBe(17_000);
     expect(totals(db).premium).toBe(3);
+  });
+});
+
+describe("Copilot Chat rows", () => {
+  const SID = sessionId("s1");
+  const row = (id: string, patch: Partial<UsageRecord> = {}): UsageRecord => ({
+    id,
+    provider: "copilot-chat",
+    sessionId: SID,
+    promptId: null,
+    ts: NOW,
+    project: null,
+    model: "gpt-5",
+    skill: null,
+    agent: "main",
+    isSubagent: false,
+    input: 1000,
+    output: 100,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cacheWrite1h: 0,
+    reasoning: 0,
+    billing: "github-copilot",
+    ...patch,
+  });
+  const stored = (db: Database, id: string) =>
+    db.query<{ partial: number; credits: number }, [string]>("SELECT partial, credits FROM usage WHERE id = ?").get(id);
+
+  test("a row stores whether it is partial and its credits, and complete with no credits when it says neither", () => {
+    const db = memDb();
+    const w = new DbWriter(db, new PriceBook(), ID);
+    w.usage(row("file", { partial: true }));
+    w.usage(row("otel", { credits: 0.821348550 }));
+    w.usage(row("plain"));
+    w.usage(row("bad", { credits: Number.NaN }));
+
+    expect(stored(db, "file")).toEqual({ partial: 1, credits: 0 });
+    expect(stored(db, "otel")).toEqual({ partial: 0, credits: 0.82134855 });
+    expect(stored(db, "plain")).toEqual({ partial: 0, credits: 0 });
+    expect(stored(db, "bad")).toEqual({ partial: 0, credits: 0 });
+  });
+
+  test("writing the same row again changes nothing, and a complete reading is never made partial again", () => {
+    const db = memDb();
+    const w = new DbWriter(db, new PriceBook(), ID);
+    w.usage(row("a", { credits: 2 }));
+    w.usage(row("a", { credits: 2 }));
+    w.usage(row("a", { partial: true }));
+    w.usage(row("b", { partial: true }));
+    w.usage(row("b", { partial: true }));
+    w.usage(row("b"));
+
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM usage").get()!.n).toBe(2);
+    expect(stored(db, "a")).toEqual({ partial: 0, credits: 2 });
+    expect(stored(db, "b")).toEqual({ partial: 0, credits: 0 });
+  });
+
+  test("covered: a complete row of the session in [from, to) and no other", () => {
+    const db = memDb();
+    const w = new DbWriter(db, new PriceBook(), ID);
+    w.usage(row("complete", { ts: 1000 }));
+    w.usage(row("partial", { ts: 5000, partial: true }));
+    w.usage(row("other", { ts: 3000, sessionId: sessionId("s2") }));
+
+    expect(w.covered(SID, 1000, 2000)).toBe(true); // from is included
+    expect(w.covered(SID, 0, 1000)).toBe(false); // to is not
+    expect(w.covered(SID, 0, 1001)).toBe(true);
+    expect(w.covered(SID, 1001, Number.POSITIVE_INFINITY)).toBe(false); // the later row is partial
+    expect(w.covered(SID, 2500, 3500)).toBe(false); // the other session's row
+    expect(w.covered(sessionId("none"), 0, Number.POSITIVE_INFINITY)).toBe(false);
+  });
+
+  test("ids say which source wrote them", () => {
+    expect(fileUsageId("s1", "r1")).toBe("copilot-chat:s1:f:r1");
+    expect(otelUsageId("s1", "resp")).toBe("copilot-chat:s1:o:resp");
+    expect(toolId("s1", "call", "t:s")).toBe("copilot-chat:s1:t:call");
+    expect(toolId("s1", "", "t:s")).toBe("copilot-chat:s1:t:s:t:s");
+    expect(toolId("s1", null, "t:s")).toBe("copilot-chat:s1:t:s:t:s");
+    expect(backgroundSessionId("2026-10-23")).toBe("copilot-chat:background:2026-10-23");
+
+    expect(isFileUsageId(fileUsageId("s1", "r1"))).toBe(true);
+    expect(isFileUsageId(`otlp:abc:${fileUsageId("s1", "r1")}`)).toBe(true);
+    expect(isFileUsageId(otelUsageId("s1", "x:f:y"))).toBe(false);
+    expect(isFileUsageId("copilot:s1:u:1")).toBe(false);
   });
 });
 

@@ -7,10 +7,11 @@ import { gzipSync } from "node:zlib";
 import { type AppConfig, defaultConfig } from "../src/core/config.ts";
 import { openDb } from "../src/core/db.ts";
 import { MAX_HOSTS } from "../src/core/otlp/map.ts";
+import * as otlpWrite from "../src/core/otlp/write.ts";
 import { MAX_RECORDS } from "../src/core/otlp/write.ts";
 import { App, type AppEvent } from "../src/server/app.ts";
 import { createHandler } from "../src/server/http.ts";
-import { addressKey, bindError, type IngestApp, type IngestDeps, IngestServer, type IngestStatus, MAX_BODY } from "../src/server/ingest.ts";
+import { addressKey, bindError, type IngestApp, type IngestDeps, IngestServer, type IngestStatus, isLoopbackPeer, MAX_BODY } from "../src/server/ingest.ts";
 import { AUTH_FILE, IngestAuth } from "../src/server/ingestAuth.ts";
 import { claudeLogs, encodeTraces, hermesSpans, logsJson, T0 } from "./otlpEncode.ts";
 import { tempDir } from "./helpers.ts";
@@ -136,7 +137,7 @@ describe("OTLP listener requests", () => {
     expect(res.headers.get("content-type")).toBe("application/x-protobuf");
     expect((await res.arrayBuffer()).byteLength).toBe(0);
     expect(usageOf("build-box")).toBe(2);
-    expect(server.stats()).toEqual({ lastAt: now, lastHost: "build-box", usage: 2, rejected: 0, metricsOnly: false, skipped: 0, lastSkipReason: null });
+    expect(server.stats()).toEqual({ lastAt: now, lastHost: "build-box", usage: 2, rejected: 0, metricsOnly: false, skipped: 0, lastSkipReason: null, lastVscodeAt: null });
   });
 
   test("an OTLP/JSON log export is answered with {}", async () => {
@@ -554,6 +555,97 @@ describe("OTLP listener requests", () => {
   });
 });
 
+describe("VS Code tokens", () => {
+  /** A vscode token and a plain one on the same auth file, and a listener using it. */
+  function vscodeListener() {
+    const own = new IngestAuth(join(tempDir(), "home"), () => now);
+    const vscode = own.addToken("VS Code (Code)", { purpose: "vscode", flavor: "Code" });
+    const plain = own.addToken("ci");
+    if ("error" in vscode || "error" in plain) throw new Error("token");
+    return { server: listener({}, { auth: own }), vscode: vscode.token, plain: plain.token };
+  }
+
+  /** What writeOtlp is asked to do with the `local` option for a request, with the real write going on. */
+  async function localOf(server: IngestServer, tok: string, ip: string): Promise<unknown> {
+    const spy = spyOn(otlpWrite, "writeOtlp");
+    try {
+      const res = await post(server, "/v1/traces", traces(), { authorization: `Bearer ${tok}` }, ip);
+      expect(res.status).toBe(200);
+      expect(spy).toHaveBeenCalledTimes(1);
+      return spy.mock.calls[0]![4].local;
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  test("a vscode token over loopback is written as this machine's own, a plain token as remote", async () => {
+    const { server, vscode, plain } = vscodeListener();
+    const me = { host: app.identity.host, user: app.identity.user };
+
+    expect(await localOf(server, vscode, "127.0.0.1")).toEqual(me);
+    expect(await localOf(server, vscode, "::1")).toEqual(me);
+    expect(await localOf(server, vscode, "::ffff:127.0.0.1")).toEqual(me);
+    expect(await localOf(server, plain, "127.0.0.1")).toBeNull();
+    expect(await localOf(server, plain, "10.0.0.5")).toBeNull();
+  });
+
+  test("a vscode token from another address is refused like a wrong token and writes nothing", async () => {
+    const { server, vscode } = vscodeListener();
+    const spy = spyOn(otlpWrite, "writeOtlp");
+    try {
+      for (const ip of ["10.0.0.5", "unknown", "2001:db8::1"]) {
+        const res = await post(server, "/v1/traces", traces(), { authorization: `Bearer ${vscode}` }, ip);
+        expect(res.status).toBe(401);
+      }
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(server.stats()).toMatchObject({ lastVscodeAt: null, lastAt: null, usage: 0, rejected: 3 });
+
+    // The refusals count against the address: past the limit it is told to wait, a valid token over loopback still passes.
+    for (let i = 0; i < 10; i++) await post(server, "/v1/traces", traces(), { authorization: `Bearer ${vscode}` }, "10.0.0.6");
+    expect((await post(server, "/v1/traces", traces(), { authorization: `Bearer ${vscode}` }, "10.0.0.6")).status).toBe(429);
+    expect((await post(server, "/v1/traces", traces(), { authorization: `Bearer ${vscode}` }, "127.0.0.1")).status).toBe(200);
+    expect(server.stats().lastVscodeAt).toBe(now);
+  });
+
+  test("the time of the last accepted request from a vscode token is kept, a plain token leaves it alone", async () => {
+    const { server, vscode, plain } = vscodeListener();
+    expect(server.stats().lastVscodeAt).toBeNull();
+
+    await post(server, "/v1/traces", traces(), { authorization: `Bearer ${plain}` }, "127.0.0.1");
+    expect(server.stats().lastVscodeAt).toBeNull();
+
+    now += 5000;
+    await post(server, "/v1/traces", traces(), { authorization: `Bearer ${vscode}` }, "127.0.0.1");
+    expect(server.stats().lastVscodeAt).toBe(now);
+
+    // A refused request doesn't count.
+    now += 5000;
+    const before = server.stats().lastVscodeAt;
+    expect((await post(server, "/v1/traces", traces(), { authorization: `Bearer ${vscode}`, "content-type": "text/plain" }, "127.0.0.1")).status).toBe(415);
+    expect(server.stats().lastVscodeAt).toBe(before);
+  });
+
+  test.each([
+    ["127.0.0.1", true],
+    ["127.255.0.9", true],
+    ["::1", true],
+    ["0:0:0:0:0:0:0:1", true],
+    ["::ffff:127.0.0.1", true],
+    ["::ffff:7f00:1", true],
+    ["128.0.0.1", false],
+    ["::ffff:10.0.0.1", false],
+    ["::2", false],
+    ["fe80::1", false],
+    ["127.0.0.256", false],
+    ["unknown", false],
+  ])("%s as a peer address is loopback: %p", (ip, expected) => {
+    expect(isLoopbackPeer(ip)).toBe(expected);
+  });
+});
+
 describe("OTLP listener server", () => {
   const ingestCfg = (over: Partial<AppConfig["ingest"]>): AppConfig => ({ ...defaultConfig(), ingest: { ...defaultConfig().ingest, enabled: true, ...over } });
 
@@ -685,7 +777,7 @@ describe("OTLP listener settings API", () => {
       loopback: true,
       endpoints: ["http://127.0.0.1:4319"],
       basic: { user: "hermes" },
-      stats: { lastAt: null, lastHost: null, usage: 0, rejected: 0, metricsOnly: false, skipped: 0, lastSkipReason: null },
+      stats: { lastAt: null, lastHost: null, usage: 0, rejected: 0, metricsOnly: false, skipped: 0, lastSkipReason: null, lastVscodeAt: null },
     });
     expect(body.tokens[0]).toMatchObject({ label: "ci", prefix: token.slice(0, 11), createdAt: expect.any(Number) });
     expect(Object.keys(body.tokens[0]).sort()).toEqual(["createdAt", "id", "label", "lastUsedAt", "prefix"]);

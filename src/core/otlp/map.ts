@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { backgroundSessionId, COPILOT_CHAT, otelUsageIdIn, sessionId as chatSessionId, spanKey as chatSpanKey, toolIdIn } from "../ingest/copilotChatIds.ts";
 import {
   type OutcomeKind,
   type OutcomeRecord,
@@ -18,6 +19,11 @@ import type { AttrValue, Attrs, OtlpBatch, OtlpLog, OtlpSpan } from "./model.ts"
  *   child session. Its `llm.<model>` spans total a turn's calls again, so they are never usage.
  * - Claude Code: its `api_request`, `tool_result` and `user_prompt` log events. Its spans (a beta) repeat the same calls
  *   and are skipped, and so are the logs of this machine, whose transcripts are read already.
+ * - GitHub Copilot Chat in VS Code (service or scope "copilot-chat"): each `chat` span is one model call (with the
+ *   credits it used), `execute_tool` a tool call and its outcome, `invoke_agent` only tells when its session ran. Its
+ *   logs are skipped, spans cover them. From a vscode credential over loopback (`MapContext.local`) the rows are this
+ *   machine's: its host and user, ids without the credential's prefix, so they meet the rows read from the chat session
+ *   files. Otherwise they are a remote machine's like any other.
  * - Any other GenAI span (gen_ai.* semantic conventions) of a chat or completion with token counts.
  * Text (prompts, briefs, paths) is kept only when the user lets it be, cut to the prompt text limit; message content
  * is never read. Every id is prefixed with `otlp:` and the credential it came with (`otlp:<credential>:`), so it never
@@ -42,12 +48,16 @@ export interface MapContext {
   knownHosts?: ReadonlySet<string>;
   /** Now, epoch ms: records more than a day past it are left out. */
   now?: number;
+  /** This machine's host and user, when the sender is VS Code on this machine: its Copilot Chat records are this machine's own. */
+  local?: { host: string; user: string } | null;
 }
 
 /** The records of one remote machine and user, written by one DbWriter. */
 export interface MappedGroup {
   host: string;
   user: string;
+  /** Records of Copilot Chat on this machine (`MapContext.local`): written under un-namespaced ids. */
+  local: boolean;
   sessions: SessionAccumulator;
   sessionIds: Set<string>;
   prompts: PromptRecord[];
@@ -147,6 +157,13 @@ const name = (v: AttrValue | undefined): string | null => {
 
 /** An id as stored: one longer than MAX_ID is hashed. */
 const idOf = (v: string): string => (v.length > MAX_ID ? `sha256:${sha(v)}` : v);
+
+/** An id as sent, not trimmed or cut: Copilot Chat's ids are made safe (copilotChatIds.ts) from the same text in both of its sources. */
+const rawId = (v: AttrValue | undefined): string | null => {
+  if (typeof v === "string") return v || null;
+  if (typeof v === "number") return String(v);
+  return null;
+};
 
 /** An attribute that is an id (a session, request or tool call), as stored. */
 const ident = (v: AttrValue | undefined): string | null => {
@@ -344,6 +361,21 @@ function toolOutcome(v: AttrValue | undefined): OutcomeKind | null {
   return null;
 }
 
+/** Whether a resource or scope is GitHub Copilot Chat's. */
+function isCopilotChat(resource: Attrs, scope: string | null): boolean {
+  return str(resource["service.name"]) === COPILOT_CHAT || scope === COPILOT_CHAT;
+}
+
+/** Copilot Chat's own name for the main agent of a chat: its helpers (title, progress messages) have names of their own. */
+const COPILOT_MAIN_AGENT = "panel/editAgent";
+
+/** The local date of a moment here, as "YYYY-MM-DD": the day of Copilot Chat's helper calls that have no conversation. */
+function localDay(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** A resource's group, and whether it was named like this machine. */
 type Hit = { group: MappedGroup; local: boolean };
 
@@ -387,12 +419,22 @@ export function mapBatch(batch: OtlpBatch, ctx: MapContext): Mapped {
     if (!group && !hostTaken(id.host)) return refuse(resource, "hosts");
 
     if (!group) {
-      group = { host: id.host, user: id.user, sessions: new SessionAccumulator(), sessionIds: new Set(), prompts: [], usage: [], tools: [], outcomes: [], meta: [] };
+      group = { host: id.host, user: id.user, local: false, sessions: new SessionAccumulator(), sessionIds: new Set(), prompts: [], usage: [], tools: [], outcomes: [], meta: [] };
       groups.set(key, group);
     }
     const hit = { group, local: id.local };
     byResource.set(resource, hit);
     return hit;
+  };
+
+  /** The group of this machine's own Copilot Chat records (`ctx.local`), made on first use. It is no remote host: no limit counts it. */
+  let localGroup: MappedGroup | null = null;
+  const localGroupOf = (local: { host: string; user: string }): MappedGroup => {
+    if (!localGroup) {
+      localGroup = { host: local.host, user: local.user, local: true, sessions: new SessionAccumulator(), sessionIds: new Set(), prompts: [], usage: [], tools: [], outcomes: [], meta: [] };
+      groups.set("\u0001local", localGroup);
+    }
+    return localGroup;
   };
 
   /** Whether each time a record has is a real one: none before 2015, none more than a day ahead. */
@@ -414,9 +456,153 @@ export function mapBatch(batch: OtlpBatch, ctx: MapContext): Mapped {
   // Hermes model calls in this batch, by trace and span: the tool calls under them belong to them.
   const apiSpans = new Set(batch.spans.filter((s) => s.name.startsWith("api.") && isHermes(s)).map((s) => spanKey(s.traceId, s.spanId)));
 
+  /**
+   * One Copilot Chat span. A chat span is a model call, an execute_tool span a tool call, an invoke_agent span (a turn's
+   * totals, which repeat its chat spans) only tells when its session ran. Content (messages, instructions, tool
+   * definitions, arguments, results, reasoning, span events, the status message) is never read.
+   */
+  const copilotChatSpan = (s: OtlpSpan) => {
+    const local = ctx.local ?? null;
+    let g: MappedGroup;
+    if (local) {
+      g = localGroupOf(local);
+    } else {
+      const hit = groupOf(s.resource);
+      if (typeof hit === "string") {
+        skip(hit);
+        return;
+      }
+      g = hit.group;
+    }
+
+    if (!sane(s.startMs, s.endMs)) {
+      skip("time");
+      return;
+    }
+
+    const prefix = local ? "" : ns;
+    const project = name(s.resource["harness.project"]);
+    const a = s.attrs;
+    const operation = str(a["gen_ai.operation.name"]);
+    const end = s.endMs ?? s.startMs;
+    // The ids as sent (bounded): the chat session file's ids are made safe from the same text (copilotChatIds.ts).
+    const conversation = rawId(a["gen_ai.conversation.id"]);
+
+    // Helper calls (titles, progress messages) have no conversation: they share one session for each day.
+    const day = end == null ? null : localDay(end);
+    const native = conversation ?? (day == null ? null : `background:${day}`);
+    if (native == null) {
+      skip("time");
+      return;
+    }
+
+    // The same session id as the chat session file's, so the two sources meet.
+    const bare = conversation ? chatSessionId(conversation) : backgroundSessionId(day!);
+    const session: SessionRecord = {
+      id: `${prefix}${bare}`,
+      provider: COPILOT_CHAT,
+      nativeId: idOf(native),
+      project,
+      clientVersion: name(s.resource["service.version"]),
+    };
+
+    if (operation === "execute_tool") {
+      const start = s.startMs ?? s.endMs;
+      if (start == null) {
+        skip("time");
+        return;
+      }
+
+      touch(g, session, s.startMs, s.endMs);
+      const id = `${prefix}${toolIdIn(bare, rawId(a["gen_ai.tool.call.id"]), chatSpanKey(s.traceId, s.spanId))}`;
+      g.tools.push({
+        id,
+        usageId: null,
+        sessionId: session.id,
+        promptId: null,
+        provider: COPILOT_CHAT,
+        ts: start,
+        project,
+        tool: name(a["gen_ai.tool.name"]) ?? name(s.name.replace(/^execute_tool\s+/, "")) ?? "unknown",
+        filePath: null,
+        skill: null,
+        agent: "main",
+      });
+
+      // The status code: 2 is an error, 1 is ok, 0 says nothing.
+      const kind: OutcomeKind | null = s.status.code === 2 ? "tool_error" : s.status.code === 1 ? "tool_ok" : null;
+      if (kind) g.outcomes.push({ id, provider: COPILOT_CHAT, sessionId: session.id, ts: start, project, model: null, agent: "main", kind });
+      return;
+    }
+
+    if (operation !== "chat") {
+      // invoke_agent and the rest: only a conversation's own spans tell when it ran.
+      if (conversation) touch(g, session, s.startMs, s.endMs);
+      return;
+    }
+
+    // The input count includes the cache reads, which are counted apart.
+    const cacheRead = tokens(a["gen_ai.usage.cache_read.input_tokens"]);
+    const t = {
+      input: Math.max(0, tokens(a["gen_ai.usage.input_tokens"]) - cacheRead),
+      output: tokens(a["gen_ai.usage.output_tokens"]),
+      cacheRead,
+      cacheWrite: 0,
+      cacheWrite1h: 0,
+      reasoning: tokens(first(a, "gen_ai.usage.reasoning.output_tokens", "gen_ai.usage.reasoning_tokens")),
+    };
+    if (!hasTokens(t)) {
+      if (conversation) touch(g, session, s.startMs, s.endMs);
+      return;
+    }
+    if (end == null) {
+      skip("time");
+      return;
+    }
+
+    touch(g, session, s.startMs, s.endMs);
+    // Not the response id: the rounds of one request all carry the id of the request.
+    const id = `${prefix}${otelUsageIdIn(bare, chatSpanKey(s.traceId, s.spanId))}`;
+    const provider = name(a["gen_ai.provider.name"]);
+    const nanoCredits = num(a["copilot_chat.copilot_usage_nano_aiu"]);
+    const agent = name(a["gen_ai.agent.name"]);
+    g.usage.push({
+      id,
+      provider: COPILOT_CHAT,
+      sessionId: session.id,
+      promptId: null,
+      ts: end,
+      project,
+      model: name(a["gen_ai.response.model"]) ?? name(a["gen_ai.request.model"]),
+      skill: null,
+      agent: agent == null || agent === COPILOT_MAIN_AGENT ? "main" : agent,
+      isSubagent: false,
+      ...t,
+      costUsd: null,
+      billing: provider === "github" ? "github-copilot" : provider,
+      credits: (nanoCredits != null ? cost(nanoCredits / 1e9) : null) ?? 0,
+      partial: false,
+    });
+
+    const ttft = num(a["copilot_chat.time_to_first_token"]);
+    const reasons = a["gen_ai.response.finish_reasons"];
+    g.meta.push({
+      usageId: id,
+      startTs: s.startMs,
+      endTs: s.endMs,
+      ttftMs: ttft != null && ttft >= 0 && ttft <= FUTURE_MS ? ttft : null,
+      stopReason: name(Array.isArray(reasons) ? reasons[0] : reasons),
+    });
+  };
+
   for (const s of batch.spans) {
     if (str(s.resource["service.name"]) === "claude-code") {
       skip("other");
+      continue;
+    }
+
+    if (isCopilotChat(s.resource, s.scope)) {
+      copilotChatSpan(s);
       continue;
     }
 
@@ -572,6 +758,9 @@ export function mapBatch(batch: OtlpBatch, ctx: MapContext): Mapped {
   // ---- Claude Code logs ----
 
   for (const l of batch.logs) {
+    // Copilot Chat's logs are not read, their body is content: its spans carry the same calls.
+    if (isCopilotChat(l.resource, l.scope)) continue;
+
     const event = claudeEvent(l);
     if (!event) continue;
 

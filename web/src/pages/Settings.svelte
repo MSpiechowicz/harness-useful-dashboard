@@ -25,8 +25,8 @@
   import { checkUpdate, installText, installUpdate, updater } from "../lib/update.svelte.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
-  type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot";
-  type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs" | "zedDirs" | "clineDirs" | "rooDirs" | "kiloDirs" | "geminiDirs" | "copilotDirs";
+  type SourceKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot" | "copilot-chat";
+  type DirsKey = "claudeDirs" | "codexDirs" | "ompDirs" | "piDirs" | "opencodeDirs" | "zedDirs" | "clineDirs" | "rooDirs" | "kiloDirs" | "geminiDirs" | "copilotDirs" | "copilotChatDirs";
   type LimitKey = "claude" | "codex" | "omp" | "pi" | "opencode" | "copilot";
   interface IngestConfig {
     enabled: boolean;
@@ -42,6 +42,8 @@
     prefix: string;
     createdAt: number;
     lastUsedAt: number | null;
+    /** "vscode" for the tokens Connect VS Code makes. Newer servers only. */
+    purpose?: string;
   }
   interface Ingest {
     config: IngestConfig;
@@ -51,7 +53,16 @@
     endpoints: string[];
     basic: { user: string } | null;
     tokens: IngestToken[];
-    stats: { lastAt: number | null; lastHost: string | null; usage: number; rejected: number; skipped: number; lastSkipReason: IngestSkipReason | null; metricsOnly: boolean };
+    stats: { lastAt: number | null; lastHost: string | null; usage: number; rejected: number; skipped: number; lastSkipReason: IngestSkipReason | null; metricsOnly: boolean; lastVscodeAt?: number | null };
+  }
+  type VscodeState = "not-installed" | "off" | "connected" | "stale" | "other-endpoint" | "unparsable";
+  interface Vscode {
+    /** `symlinked`: settings.json is a link to another folder. Newer servers only. */
+    flavors: { id: string; installed: boolean; state: VscodeState; symlinked?: boolean }[];
+    /** `loopback`: the collector listens on this machine only. Newer servers only. */
+    collector: { enabled: boolean; state: "off" | "listening" | "error"; port: number; loopback?: boolean };
+    lastVscodeAt: number | null;
+    envOverride: boolean;
   }
   interface Config {
     dbPath: string;
@@ -100,6 +111,7 @@
     { key: "kilo", dirs: "kiloDirs" },
     { key: "gemini", dirs: "geminiDirs" },
     { key: "copilot", dirs: "copilotDirs" },
+    { key: "copilot-chat", dirs: "copilotChatDirs" },
   ];
   /** Where plan limits can be read from (see Live). */
   const LIMIT_SOURCES: LimitKey[] = ["claude", "codex", "copilot", "opencode", "pi", "omp"];
@@ -122,7 +134,7 @@
   let dbInput = $state("");
   let target = $state<{ file: string; state: DbState } | null>(null);
   let copyDb = $state(true);
-  let dirs = $state<Record<SourceKey, string[]>>({ claude: [""], codex: [""], omp: [""], pi: [""], opencode: [""], zed: [""], cline: [""], roo: [""], kilo: [""], gemini: [""], copilot: [""] });
+  let dirs = $state<Record<SourceKey, string[]>>({ claude: [""], codex: [""], omp: [""], pi: [""], opencode: [""], zed: [""], cline: [""], roo: [""], kilo: [""], gemini: [""], copilot: [""], "copilot-chat": [""] });
   let saved = $state<string | null>(null);
   let errorMsg = $state<string | null>(null);
   let busy = $state(false);
@@ -313,6 +325,8 @@
     ingestPort = r.config.port;
     basicUser = r.basic?.user ?? "";
     if (cfg) cfg.ingest = r.config;
+    // The collector's switch is part of Connect VS Code's state.
+    loadVscode().catch(() => {});
   }
 
   /** Runs one change to the listener and reads its state again. A failure reads it too, so a switch falls back to the truth. */
@@ -375,6 +389,104 @@
   function askRevoke(tk: IngestToken) {
     revokeError = null;
     revoking = tk;
+  }
+
+  // Connect VS Code: the server edits the editor's settings file and makes the token, so the page only asks and reads
+  // the state again. The manual token list leaves these tokens out: they are made and revoked here.
+  const VSCODE_NAMES: Record<string, string> = { Code: "VS Code", "Code - Insiders": "VS Code Insiders", "Code - OSS": "Code - OSS", VSCodium: "VSCodium" };
+  const VSCODE_ERRORS = ["other-endpoint", "unparsable", "duplicate-keys", "not-local-bind", "not-installed", "write-failed", "symlinked"];
+  let vscode = $state<Vscode | null>(null);
+  let vscodeFlavor = $state("");
+  let vscodeBusy = $state(false);
+  let vscodeError = $state<string | null>(null);
+  let vscodeReload = $state(false);
+  // The question the dialog asks, and the answers given so far to the ones before it.
+  let vscodeAsk = $state<"collector" | "overwrite" | "symlink" | null>(null);
+  let vscodeEnable = false;
+  let vscodeOverwrite = false;
+  let vscodeSymlink = false;
+  const vscodeInstalled = $derived((vscode?.flavors ?? []).filter((f) => f.installed));
+  const vscodeOptions = $derived(vscodeInstalled.map((f) => ({ value: f.id, label: VSCODE_NAMES[f.id] ?? f.id })));
+  const vscodeInfo = $derived(vscodeInstalled.find((f) => f.id === vscodeFlavor));
+  const vscodeState = $derived(vscodeInfo?.state ?? null);
+  const vscodeLast = $derived.by(() => {
+    if (vscode?.lastVscodeAt) return t("settings.vscodeLast", { when: relative(vscode.lastVscodeAt) });
+    return vscodeState === "connected" ? t("settings.ingestNone") : "";
+  });
+  const manualTokens = $derived((ingest?.tokens ?? []).filter((tk) => tk.purpose !== "vscode"));
+
+  function applyVscode(r: Vscode) {
+    vscode = r;
+    // The editor shown stays, else the first one that is connected, else the first one found.
+    const found = r.flavors.filter((f) => f.installed);
+    if (!found.some((f) => f.id === vscodeFlavor)) vscodeFlavor = (found.find((f) => f.state === "connected") ?? found[0])?.id ?? "";
+  }
+
+  async function loadVscode() {
+    applyVscode(await getJson<Vscode>("/api/ingest/vscode"));
+  }
+
+  function askConnect() {
+    vscodeError = null;
+    vscodeReload = false;
+    vscodeEnable = false;
+    vscodeOverwrite = false;
+    vscodeSymlink = false;
+    connectStep();
+  }
+
+  /** Asks what is still open (the collector off, another endpoint in the way, a linked settings file), then connects. */
+  function connectStep() {
+    if (!vscode?.collector.enabled && !vscodeEnable) {
+      vscodeAsk = "collector";
+      return;
+    }
+    if (vscodeState === "other-endpoint" && !vscodeOverwrite) {
+      vscodeAsk = "overwrite";
+      return;
+    }
+    if (vscodeInfo?.symlinked && !vscodeSymlink) {
+      vscodeAsk = "symlink";
+      return;
+    }
+    vscodeAsk = null;
+    runVscode("POST", { flavor: vscodeFlavor, overwrite: vscodeOverwrite || undefined, enableCollector: vscodeEnable || undefined, confirmSymlink: vscodeSymlink || undefined });
+  }
+
+  function answerVscode() {
+    if (vscodeAsk === "collector") vscodeEnable = true;
+    else if (vscodeAsk === "overwrite") vscodeOverwrite = true;
+    else vscodeSymlink = true;
+    connectStep();
+  }
+
+  function disconnectVscode() {
+    vscodeError = null;
+    vscodeReload = false;
+    runVscode("DELETE", { flavor: vscodeFlavor });
+  }
+
+  async function runVscode(method: "POST" | "DELETE", body: Record<string, unknown>) {
+    vscodeBusy = true;
+    try {
+      applyVscode(await send<Vscode>("/api/ingest/vscode", body, method));
+      vscodeReload = method === "POST";
+      flash(t("settings.saved"));
+      // Connecting may have turned the collector on.
+      await loadIngest().catch(() => {});
+    } catch (e) {
+      const code = (e as Error).message;
+      // The server found a link the page did not know of: ask, and send the same request again.
+      if (method === "POST" && code === "symlinked" && !vscodeSymlink) {
+        vscodeAsk = "symlink";
+        await loadVscode().catch(() => {});
+        return;
+      }
+      vscodeError = t(`settings.vscodeError.${VSCODE_ERRORS.includes(code) ? code : "other"}` as "settings.vscodeError.other");
+      await loadVscode().catch(() => {});
+    } finally {
+      vscodeBusy = false;
+    }
   }
 
   async function copyText(key: string, text: string) {
@@ -867,6 +979,40 @@
             {#snippet lead()}<Switch bind:checked={cfg!.sources.enabled[src.key]} label={t(`settings.source.${src.key}`)} />{/snippet}
             <PathList bind:paths={dirs[src.key]} disabled={!cfg!.sources.enabled[src.key]} />
           </SettingRow>
+          {#if src.key === "copilot-chat" && cfg.ingest && vscode}
+            <!-- Exact token counts come from VS Code itself: its settings are pointed at the collector on this machine. -->
+            <SettingRow label={t("settings.vscode")} hint={t("settings.vscodeHint")} wide>
+              <!-- As wide as a source's switch, so the name lines up with the sources above. -->
+              {#snippet lead()}<span class="block w-7" aria-hidden="true"></span>{/snippet}
+              <div class="flex w-full min-w-0 flex-col gap-2">
+                <div class="flex items-center justify-end gap-2">
+                  {#if vscodeInstalled.length}
+                    <div class="min-w-0 flex-1"><Dropdown full label={t("settings.vscodeEditor")} bind:value={vscodeFlavor} options={vscodeOptions} /></div>
+                  {:else}
+                    <span class="mr-auto text-xs text-ink-2">{t("settings.vscodeNone")}</span>
+                  {/if}
+                  {#if vscodeState === "connected" || vscodeState === "stale"}
+                    <button class="btn shrink-0" onclick={disconnectVscode} disabled={vscodeBusy}>{t("settings.vscodeDisconnect")}</button>
+                  {/if}
+                  {#if vscodeState !== "connected"}
+                    <button class="btn shrink-0" onclick={askConnect} disabled={vscodeBusy || !vscodeState || vscodeState === "unparsable"}>{t("settings.vscodeConnect")}</button>
+                  {/if}
+                </div>
+                {#if vscodeError}
+                  <span class="text-right text-xs text-bad">{vscodeError}</span>
+                {:else if vscodeReload}
+                  <span class="text-right text-xs text-ink-2">{t("settings.vscodeReload")}</span>
+                {:else if vscodeState}
+                  <span class="text-right text-xs text-ink-2">{[t(`settings.vscodeState.${vscodeState}` as "settings.vscodeState.off"), vscodeLast].filter(Boolean).join(" · ")}</span>
+                {/if}
+              </div>
+            </SettingRow>
+            {#if vscode.envOverride}
+              <div class="flex items-start gap-2 border-t border-line py-4 text-xs leading-relaxed text-ink-2">
+                <TriangleAlert size={14} class="mt-0.5 shrink-0 text-warn" />{t("settings.vscodeEnv")}
+              </div>
+            {/if}
+          {/if}
         {/each}
         <!-- Cursor keeps its usage on cursor.com: one row with both ways in, syncing (the switch) and a CSV import. -->
         <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} wide>
@@ -1052,7 +1198,7 @@
                 </tr>
               </thead>
               <tbody>
-                {#each ingest?.tokens ?? [] as tk (tk.id)}
+                {#each manualTokens as tk (tk.id)}
                   <tr>
                     <td>{tk.label}</td>
                     <td class="font-mono text-xs">{tk.prefix}…</td>
@@ -1184,6 +1330,31 @@
     {/if}
   </div>
 </div>
+
+{#if vscodeAsk === "collector"}
+  <Modal title={t("settings.vscodeCollectorTitle")} body={vscode?.collector.loopback === false ? t("settings.vscodeCollectorNetworkBody") : t("settings.vscodeCollectorBody")} onclose={() => (vscodeAsk = null)}>
+    {#snippet footer()}
+      <button type="button" class="btn !border-transparent !bg-transparent hover:!bg-hover" onclick={() => (vscodeAsk = null)}>{t("common.cancel")}</button>
+      <button type="button" data-autofocus class="btn btn-primary" onclick={answerVscode}>{t("settings.vscodeCollectorAction")}</button>
+    {/snippet}
+  </Modal>
+{:else if vscodeAsk === "overwrite"}
+  <ConfirmDialog
+    title={t("settings.vscodeOverwriteTitle")}
+    body={t("settings.vscodeOverwriteBody")}
+    confirmLabel={t("settings.vscodeOverwriteAction")}
+    onconfirm={answerVscode}
+    oncancel={() => (vscodeAsk = null)}
+  />
+{:else if vscodeAsk === "symlink"}
+  <ConfirmDialog
+    title={t("settings.vscodeSymlinkTitle")}
+    body={t("settings.vscodeSymlinkBody")}
+    confirmLabel={t("settings.vscodeSymlinkAction")}
+    onconfirm={answerVscode}
+    oncancel={() => (vscodeAsk = null)}
+  />
+{/if}
 
 {#if newToken}
   <Modal title={t("settings.ingestTokenCreatedTitle")} body={t("settings.ingestTokenNewHint")} onclose={() => (newToken = null)}>

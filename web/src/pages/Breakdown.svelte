@@ -100,6 +100,7 @@
     { value: "calls", label: t("col.calls") },
     // Like its column, only once some call was billed as Copilot premium requests.
     ...(billing.data?.some((r) => r.premiumRequests > 0) ? [{ value: "premiumRequests" as const, label: t("col.premiumRequests") }] : []),
+    ...(billing.data?.some((r) => (r.credits ?? 0) > 0) ? [{ value: "credits" as const, label: t("col.credits") }] : []),
     { value: "label", label: t("col.name"), asc: true },
   ]);
   let billingSort = $state<BillingSortKey>("cost");

@@ -22,6 +22,59 @@ describe("ingest tokens", () => {
     expect(await auth.authenticate(`bearer   ${made.token}`)).toEqual({ kind: "token", label: "build box", key: `t${made.item.id}` });
   });
 
+  test("a token's purpose and flavor are kept in the file, listed, and carried by its credential", async () => {
+    const dir = tempDir();
+    const auth = new IngestAuth(dir);
+    const made = auth.addToken("VS Code (Code - Insiders)", { purpose: "vscode", flavor: "Code - Insiders" });
+    const plain = auth.addToken("ci");
+    if ("error" in made || "error" in plain) throw new Error("token");
+
+    expect(made.item).toMatchObject({ purpose: "vscode", flavor: "Code - Insiders" });
+    expect(Object.keys(plain.item).sort()).toEqual(["createdAt", "id", "label", "lastUsedAt", "prefix"]);
+
+    // A new instance reads the same file.
+    const again = new IngestAuth(dir);
+    expect(again.vscodeTokens().map((t) => t.id)).toEqual([made.item.id]);
+    expect(await again.authenticate(bearer(made.token))).toEqual({ kind: "token", label: "VS Code (Code - Insiders)", key: `t${made.item.id}`, purpose: "vscode", flavor: "Code - Insiders" });
+    expect(await again.authenticate(bearer(plain.token))).toEqual({ kind: "token", label: "ci", key: `t${plain.item.id}` });
+    expect(JSON.stringify(again.tokens())).not.toMatch(/hash|[0-9a-f]{64}/);
+  });
+
+  test("a vscode token is found by its plaintext without counting as a use, and revoked by id", async () => {
+    const auth = new IngestAuth(tempDir());
+    const made = auth.addToken("VS Code (Code)", { purpose: "vscode", flavor: "Code" });
+    if ("error" in made) throw new Error(made.error);
+
+    expect(auth.findToken(made.token)).toMatchObject({ id: made.item.id, purpose: "vscode", flavor: "Code" });
+    expect(auth.findToken(`hd_ing_${"0".repeat(64)}`)).toBeNull();
+    expect(auth.findToken("nonsense")).toBeNull();
+    expect(auth.tokens()[0]!.lastUsedAt).toBeNull();
+
+    expect(auth.revokeToken(made.item.id)).toBe(true);
+    expect(auth.findToken(made.token)).toBeNull();
+    expect(auth.vscodeTokens()).toEqual([]);
+    expect(await auth.authenticate(bearer(made.token))).toBeNull();
+  });
+
+  test("an invalid purpose or flavor makes no token", () => {
+    const auth = new IngestAuth(tempDir());
+    expect(auth.addToken("x", { purpose: "other" as "vscode" })).toEqual({ error: "invalid value for purpose" });
+    expect(auth.addToken("x", { purpose: "vscode", flavor: "  " })).toEqual({ error: "invalid value for flavor" });
+    expect(auth.tokens()).toEqual([]);
+  });
+
+  test("a file written before purposes existed still loads, and its tokens have none", async () => {
+    const dir = tempDir();
+    const token = `hd_ing_${"ab".repeat(32)}`;
+    const hash = new Bun.CryptoHasher("sha256").update(token).digest("hex");
+    writeFileSync(join(dir, AUTH_FILE), JSON.stringify({ tokens: [{ id: "0123456789abcdef", label: "old", hash, prefix: token.slice(0, 11), createdAt: 1, lastUsedAt: null }], basic: null }));
+
+    const auth = new IngestAuth(dir);
+    expect(auth.tokens()).toEqual([{ id: "0123456789abcdef", label: "old", prefix: token.slice(0, 11), createdAt: 1, lastUsedAt: null }]);
+    expect(await auth.authenticate(bearer(token))).toEqual({ kind: "token", label: "old", key: "t0123456789abcdef" });
+    expect(auth.vscodeTokens()).toEqual([]);
+  });
+
   test("the file keeps only hashes and is private to this account", () => {
     const dir = tempDir();
     const auth = new IngestAuth(dir);

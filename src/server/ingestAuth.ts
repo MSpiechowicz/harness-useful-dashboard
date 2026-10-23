@@ -24,7 +24,8 @@ const MAX_NAME = 100;
 /** The longest name taken before NFKC, which can make one character eighteen: a longer one is too long anyway. */
 const RAW_NAME = 1024;
 
-const TOKEN_PATTERN = /^hd_ing_[0-9a-f]{64}$/;
+/** What a token looks like: "hd_ing_" and 64 hex digits. */
+export const INGEST_TOKEN_PATTERN = /^hd_ing_[0-9a-f]{64}$/;
 /** What a token's prefix shows of it: "hd_ing_" and the first 4 hex digits, enough to tell tokens apart. */
 const PREFIX_CHARS = 11;
 /** Control characters and line or paragraph separators: a name with one is refused. */
@@ -45,6 +46,9 @@ const MAX_VERIFIED = 100;
 /** A token's last use is kept in memory and written to the file at most this often. */
 const PERSIST_MS = 60 * 60_000;
 
+/** What a token is for besides sending remote usage: "vscode" is the one Connect VS Code puts into VS Code's settings. */
+export type TokenPurpose = "vscode";
+
 /** A token as Settings and the CLI list it: never the token or its hash. */
 export interface IngestToken {
   id: string;
@@ -52,6 +56,9 @@ export interface IngestToken {
   prefix: string;
   createdAt: number;
   lastUsedAt: number | null;
+  purpose?: TokenPurpose;
+  /** The VS Code flavor ("Code", "Code - Insiders") a vscode token was made for. */
+  flavor?: string;
 }
 
 interface StoredToken extends IngestToken {
@@ -73,6 +80,9 @@ export interface IngestCredential {
   kind: "token" | "basic";
   label: string;
   key: string;
+  /** Set when the token has a purpose (see TokenPurpose). */
+  purpose?: TokenPurpose;
+  flavor?: string;
 }
 
 /** The file is there but can't be read: nobody is let in, and no change is written over it. */
@@ -127,7 +137,7 @@ export function signInKind(header: string | null): "token" | "basic" | null {
   if (!header) return null;
 
   const bearer = BEARER.exec(header)?.[1];
-  if (bearer) return TOKEN_PATTERN.test(bearer) ? "token" : null;
+  if (bearer) return INGEST_TOKEN_PATTERN.test(bearer) ? "token" : null;
   return BASIC.test(header) ? "basic" : null;
 }
 
@@ -177,7 +187,12 @@ function parseFile(text: string): AuthFile {
     if (!label || typeof t.createdAt !== "number") continue;
 
     const lastUsedAt = typeof t.lastUsedAt === "number" ? t.lastUsedAt : null;
-    tokens.push({ id: t.id, label, hash: t.hash, prefix: typeof t.prefix === "string" ? t.prefix.slice(0, PREFIX_CHARS) : "", createdAt: t.createdAt, lastUsedAt });
+    const stored: StoredToken = { id: t.id, label, hash: t.hash, prefix: typeof t.prefix === "string" ? t.prefix.slice(0, PREFIX_CHARS) : "", createdAt: t.createdAt, lastUsedAt };
+    if (t.purpose === "vscode") stored.purpose = "vscode";
+
+    const flavor = cleanName(t.flavor);
+    if (flavor) stored.flavor = flavor;
+    tokens.push(stored);
   }
 
   const b = raw.basic as Record<string, unknown> | null | undefined;
@@ -216,7 +231,32 @@ export class IngestAuth {
 
   /** The tokens, newest last, with their last use. */
   tokens(): IngestToken[] {
-    return this.current().tokens.map((t) => ({ id: t.id, label: t.label, prefix: t.prefix, createdAt: t.createdAt, lastUsedAt: this.lastUse(t) }));
+    return this.current().tokens.map((t) => this.listed(t));
+  }
+
+  /** The tokens made for VS Code (purpose "vscode"), newest last. */
+  vscodeTokens(): IngestToken[] {
+    return this.tokens().filter((t) => t.purpose === "vscode");
+  }
+
+  /**
+   * The token a plaintext token is, or null when none is: lets Connect VS Code tell whether the token in a settings
+   * file is still one this server knows. Doesn't count as a use of the token.
+   */
+  findToken(token: string): IngestToken | null {
+    if (!INGEST_TOKEN_PATTERN.test(token)) return null;
+
+    const hash = sha256(token);
+    let found: StoredToken | null = null;
+    for (const t of this.current().tokens) if (sameHex(t.hash, hash)) found = t;
+    return found ? this.listed(found) : null;
+  }
+
+  private listed(t: StoredToken): IngestToken {
+    const item: IngestToken = { id: t.id, label: t.label, prefix: t.prefix, createdAt: t.createdAt, lastUsedAt: this.lastUse(t) };
+    if (t.purpose) item.purpose = t.purpose;
+    if (t.flavor) item.flavor = t.flavor;
+    return item;
   }
 
   basic(): { user: string } | null {
@@ -231,12 +271,18 @@ export class IngestAuth {
   }
 
   /** Makes a token. It is returned this once: only its hash is kept. */
-  addToken(label: unknown): { token: string; item: IngestToken } | { error: string } {
+  addToken(label: unknown, opts?: { purpose?: TokenPurpose; flavor?: string }): { token: string; item: IngestToken } | { error: string } {
     const name = cleanName(label);
     if (!name) return { error: "invalid value for label" };
+    if (opts?.purpose !== undefined && opts.purpose !== "vscode") return { error: "invalid value for purpose" };
+
+    const flavor = opts?.flavor === undefined ? null : cleanName(opts.flavor);
+    if (opts?.flavor !== undefined && !flavor) return { error: "invalid value for flavor" };
 
     const token = `hd_ing_${randomBytes(32).toString("hex")}`;
     const stored: StoredToken = { id: randomBytes(8).toString("hex"), label: name, hash: sha256(token), prefix: token.slice(0, PREFIX_CHARS), createdAt: this.now(), lastUsedAt: null };
+    if (opts?.purpose) stored.purpose = opts.purpose;
+    if (flavor) stored.flavor = flavor;
     let full = false;
     this.update((data) => {
       full = data.tokens.length >= MAX_TOKENS;
@@ -322,7 +368,7 @@ export class IngestAuth {
   }
 
   private byToken(data: AuthFile, token: string): IngestCredential | null {
-    if (!TOKEN_PATTERN.test(token)) return null;
+    if (!INGEST_TOKEN_PATTERN.test(token)) return null;
 
     // Every token is compared, so the time taken says nothing about which one came close.
     const hash = sha256(token);
@@ -332,7 +378,11 @@ export class IngestAuth {
 
     this.used.set(found.id, this.now());
     if (this.persistedAt == null || this.now() - this.persistedAt >= PERSIST_MS) this.persistUse();
-    return { kind: "token", label: found.label, key: `t${found.id}` };
+
+    const cred: IngestCredential = { kind: "token", label: found.label, key: `t${found.id}` };
+    if (found.purpose) cred.purpose = found.purpose;
+    if (found.flavor) cred.flavor = found.flavor;
+    return cred;
   }
 
   private async byPassword(stored: { user: string; hash: string }, header: string, encoded: string): Promise<{ cred: IngestCredential | null; checked: boolean }> {

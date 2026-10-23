@@ -339,6 +339,25 @@ describe("plans in use", () => {
     expect(planFor("cursor", null)).toBeNull();
   });
 
+  test("Copilot Chat counts against the Copilot plan, its bring-your-own-key models against none", () => {
+    expect(planFor("copilot-chat", "github-copilot")).toEqual({ provider: "copilot", source: "copilot" });
+    expect(planFor("copilot-chat", null)).toEqual({ provider: "copilot", source: "copilot" });
+    expect(planFor("copilot-chat", "anthropic")).toBeNull();
+    expect(planFor("copilot-chat", "github-copilot")).toEqual(planFor("copilot", null));
+  });
+
+  test("Copilot CLI and Copilot Chat in use together ask about the Copilot plan once", () => {
+    const db = memDb();
+    const w = new DbWriter(db, PriceBook.fromDb(db), ID);
+    const call = (id: string, provider: "copilot" | "copilot-chat") =>
+      w.usage({ id, provider, sessionId: `${provider}:s`, promptId: null, ts: NOW - 60_000, project: null, model: "m", skill: null, agent: "main", isSubagent: false,
+        input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, billing: "github-copilot" });
+    call("a", "copilot");
+    call("b", "copilot-chat");
+
+    expect(activePlans(db, NOW - HOUR)).toEqual([{ provider: "copilot", source: "copilot" }]);
+  });
+
   test("only the plans in use are asked about and shown", async () => {
     const db = memDb();
     const w = new DbWriter(db, PriceBook.fromDb(db), ID);

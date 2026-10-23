@@ -110,6 +110,27 @@ describe("detail retention", () => {
     expect(col(db, `SELECT ${sessionTitle("s")} AS title FROM sessions s WHERE s.id = 'claude:old'`)).toEqual([{ title: `first ${LONG}`.slice(0, 160) }]);
   });
 
+  test("the kept interval of a Copilot Chat request whose file row telemetry replaced goes once it is old", async () => {
+    const { db, prices } = seed();
+    new DbWriter(db, prices, ME).session({ id: "copilot-chat:s1", provider: "copilot-chat", nativeId: "s1", project: null, startedAt: OLD });
+    new DbWriter(db, prices, OTHER).session({ id: "copilot-chat:s2", provider: "copilot-chat", nativeId: "s2", project: null, startedAt: OLD });
+    const meta = db.query("INSERT INTO response_meta (usage_id, start_ts, end_ts) VALUES (?, ?, ?)");
+    meta.run("copilot-chat:s1:f:old", OLD, OLD + 1000);
+    meta.run("copilot-chat:s1:f:new", NEW, NEW + 1000);
+    meta.run("copilot-chat:s2:f:old", OLD, OLD + 1000);
+    // A session whose own id is "f": its rows still meet their session.
+    new DbWriter(db, prices, ME).session({ id: "copilot-chat:f", provider: "copilot-chat", nativeId: "f", project: null, startedAt: OLD });
+    meta.run("copilot-chat:f:f:old", OLD, OLD + 1000);
+    const r = await trimDetail(db, ME.host, 3, { now: NOW });
+
+    // Another machine's interval stays: its own trim decides.
+    expect(col(db, "SELECT usage_id FROM response_meta WHERE usage_id GLOB 'copilot-chat:*' ORDER BY 1")).toEqual([
+      { usage_id: "copilot-chat:s1:f:new" },
+      { usage_id: "copilot-chat:s2:f:old" },
+    ]);
+    expect(r.responseMeta).toBe(7 + 2);
+  });
+
   test("the OTLP rows of 1000 remote hosts are trimmed in one pass under one note, and no other row is", async () => {
     const { db, prices, q } = seed();
     db.transaction(() => {
@@ -249,7 +270,7 @@ describe("compact route", () => {
     const root = tempDir();
     process.env.HARNESS_DASHBOARD_HOME = join(root, "home");
     mkdirSync(join(root, "home"), { recursive: true });
-    writeFileSync(join(root, "home", "config.json"), JSON.stringify({ scanIntervalSec: 0, sources: { enabled: { claude: false, codex: false, omp: false, pi: false, opencode: false, zed: false, cline: false, roo: false, kilo: false, gemini: false, copilot: false } } }));
+    writeFileSync(join(root, "home", "config.json"), JSON.stringify({ scanIntervalSec: 0, sources: { enabled: { claude: false, codex: false, omp: false, pi: false, opencode: false, zed: false, cline: false, roo: false, kilo: false, gemini: false, copilot: false, "copilot-chat": false } } }));
     app = new App(join(root, "test.db"));
     handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token, port: 4317 });
   });

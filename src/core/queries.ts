@@ -399,6 +399,11 @@ export function sessionStatus(base: LiveStatus, s: SessionStatusInput): LiveStat
   return quiet > CLOSED_AFTER_MS ? "closed" : base;
 }
 
+/** A row's SQLite `partial` (0 or 1) as the boolean the API carries. */
+function withPartial<T extends Record<string, unknown>>(row: T): T & { partial: boolean } {
+  return { ...row, partial: !!row.partial };
+}
+
 export class Queries {
   constructor(
     private db: Database,
@@ -502,12 +507,13 @@ export class Queries {
   breakdown(f: Filters, dim: Dimension, limit = 50, sort: "tokens" | "cost" = "cost") {
     const w = whereClause(f);
     const d = dimExpr(dim);
-    const rows = this.all<Totals & { key: string | null; sessions: number; prompts: number; firstTs: number; lastTs: number; estimated: number }>(
+    const rows = this.all<Totals & { key: string | null; sessions: number; prompts: number; firstTs: number; lastTs: number; estimated: number; partial: number }>(
       `SELECT ${d} AS key, ${TOKEN_SUMS},
               COUNT(DISTINCT u.session_id) AS sessions,
               COUNT(DISTINCT u.prompt_id)  AS prompts,
               MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs,
-              MAX(u.cost_estimated) AS estimated
+              MAX(u.cost_estimated) AS estimated,
+              MAX(u.partial) AS partial
        FROM usage u ${w.sql}
        GROUP BY key ORDER BY ${sort === "tokens" ? "tokens" : "cost"} DESC LIMIT $limit`,
       { ...w.params, limit },
@@ -521,6 +527,7 @@ export class Queries {
       rows: rows.map((r) => ({
         ...r,
         key: r.key ?? "(none)",
+        partial: r.partial > 0,
         label: dim === "project" ? projectLabel(r.key) : r.key ?? "(none)",
         cacheHitRate: r.input + r.cacheRead + r.cacheWrite ? r.cacheRead / (r.input + r.cacheRead + r.cacheWrite) : 0,
         share: total.cost ? r.cost / total.cost : 0,
@@ -582,18 +589,20 @@ export class Queries {
   /**
    * Usage by what it was billed through: the plan or account the harness reports per call (omp: "openai-codex",
    * "github-copilot", …), else the harness's own account. Cost stays API-equivalent; Copilot counts premium
-   * requests instead, so those are summed alongside.
+   * requests instead, so those are summed alongside, and Copilot Chat reports its own credits. `partial`: a row of the
+   * group counts only part of its input (Copilot Chat's session file), so its cost is approximate.
    */
   billing(f: Filters) {
     const w = whereClause(f);
-    return this.all<{ key: string; reported: number; calls: number; tokens: number; cost: number; premiumRequests: number; estimated: number }>(
+    return this.all<{ key: string; reported: number; calls: number; tokens: number; cost: number; premiumRequests: number; estimated: number; partial: number; credits: number }>(
       `SELECT COALESCE(u.billing, u.provider) AS key, MAX(u.billing IS NOT NULL) AS reported, COUNT(*) AS calls,
               COALESCE(SUM(u.total_tokens), 0) AS tokens, COALESCE(SUM(u.cost_usd), 0) AS cost,
-              COALESCE(SUM(u.premium_requests), 0) AS premiumRequests, MAX(u.cost_estimated) AS estimated
+              COALESCE(SUM(u.premium_requests), 0) AS premiumRequests, MAX(u.cost_estimated) AS estimated,
+              MAX(u.partial) AS partial, COALESCE(SUM(u.credits), 0) AS credits
        FROM usage u ${w.sql}
        GROUP BY key ORDER BY cost DESC`,
       w.params,
-    ).map((r) => ({ ...r, reported: !!r.reported, estimated: !!r.estimated }));
+    ).map((r) => ({ ...r, reported: !!r.reported, estimated: !!r.estimated, partial: r.partial > 0 }));
   }
 
   /** Day-of-week (0 = Monday) × hour activity matrix. */
@@ -906,14 +915,15 @@ export class Queries {
       params.q = `%${opts.q}%`;
     }
     const sortCol = { cost: "cost", tokens: "tokens", recent: "lastTs", messages: "messages", prompts: "prompts" }[opts.sort ?? "recent"] ?? "lastTs";
-    const rows = this.all<Totals & Record<string, unknown> & { id: string }>(
+    const rows = this.all<Totals & Record<string, unknown> & { id: string; partial: number; credits: number }>(
       `SELECT u.session_id AS id, ${sessionTitle("s")} AS title, s.project, s.provider, s.user, s.host, s.git_branch AS gitBranch,
               s.agent AS sessionAgent, s.parent_session_id AS parentSessionId, s.client,
               ${TOKEN_SUMS},
               COUNT(DISTINCT u.prompt_id) AS prompts,
               GROUP_CONCAT(DISTINCT u.model) AS models,
               SUM(u.is_subagent) AS subagentMessages,
-              MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs
+              MIN(u.ts) AS firstTs, MAX(u.ts) AS lastTs,
+              MAX(u.partial) AS partial, COALESCE(SUM(u.credits), 0) AS credits
        FROM usage u LEFT JOIN sessions s ON s.id = u.session_id
        ${w.sql}
        GROUP BY u.session_id ${having}
@@ -932,6 +942,7 @@ export class Queries {
       total: count,
       rows: rows.map((r) => ({
         ...r,
+        partial: r.partial > 0,
         projectLabel: projectLabel(r.project as string | null),
         tags: tags.get(r.id) ?? [],
         kind: labels.get(r.id)?.kind ?? null,
@@ -969,24 +980,37 @@ export class Queries {
         session.parent = { id: parentId, title: titleOf(parentId), provider: parent?.provider ?? null, startedAt: parent?.started_at ?? null, cost };
       }
     }
-    const totals = this.get<Totals>(`SELECT ${TOKEN_SUMS} FROM usage u WHERE u.session_id = $id`, { id });
+    const totals = this.get<Totals & { partial: number; credits: number }>(
+      `SELECT ${TOKEN_SUMS}, COALESCE(MAX(u.partial), 0) AS partial, COALESCE(SUM(u.credits), 0) AS credits FROM usage u WHERE u.session_id = $id`,
+      { id },
+    );
     const prompts = this.all<Record<string, unknown>>(
       `SELECT p.id, p.ts, p.text, p.skill, p.is_command AS isCommand,
               COALESCE(SUM(u.total_tokens),0) AS tokens, COALESCE(SUM(u.cost_usd),0) AS cost, COUNT(u.id) AS messages,
+              COALESCE(MAX(u.partial), 0) > 0 AS partial,
               (SELECT COUNT(*) FROM tool_calls t WHERE t.prompt_id = p.id) AS toolCalls
        FROM prompts p LEFT JOIN usage u ON u.prompt_id = p.id
        WHERE p.session_id = $id GROUP BY p.id ORDER BY p.ts`,
       { id },
     );
-    const timeline = this.all<Record<string, unknown>>(
+    const timeline = this.all<{
+      ts: number; model: string | null; agent: string | null; run: string; input: number; output: number; cacheRead: number; cacheWrite: number;
+      cost: number; promptId: string | null; partial: number; credits: number;
+    }>(
       `SELECT u.ts, u.model, u.agent, COALESCE(u.spawn_ref, u.session_id) AS run, u.input_tokens AS input, u.output_tokens AS output,
               u.cache_read_tokens AS cacheRead, (u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite,
-              u.cost_usd AS cost, u.prompt_id AS promptId
+              u.cost_usd AS cost, u.prompt_id AS promptId, u.partial, u.credits
        FROM usage u WHERE u.session_id = $id ORDER BY u.ts`,
       { id },
-    );
-    const models = this.all(`SELECT u.model AS key, ${TOKEN_SUMS} FROM usage u WHERE u.session_id = $id GROUP BY u.model ORDER BY cost DESC`, { id });
-    const agents = this.all(`SELECT u.agent AS key, ${TOKEN_SUMS} FROM usage u WHERE u.session_id = $id GROUP BY u.agent ORDER BY cost DESC`, { id });
+    ).map((r) => ({ ...r, partial: r.partial > 0 }));
+    const models = this.all<Totals & { key: string | null; partial: number }>(
+      `SELECT u.model AS key, ${TOKEN_SUMS}, MAX(u.partial) AS partial FROM usage u WHERE u.session_id = $id GROUP BY u.model ORDER BY cost DESC`,
+      { id },
+    ).map((r) => ({ ...r, partial: r.partial > 0 }));
+    const agents = this.all<Totals & { key: string | null; partial: number }>(
+      `SELECT u.agent AS key, ${TOKEN_SUMS}, MAX(u.partial) AS partial FROM usage u WHERE u.session_id = $id GROUP BY u.agent ORDER BY cost DESC`,
+      { id },
+    ).map((r) => ({ ...r, partial: r.partial > 0 }));
     const tools = this.all(
       `SELECT tool AS key, COUNT(*) AS calls FROM tool_calls WHERE session_id = $id GROUP BY tool ORDER BY calls DESC`,
       { id },
@@ -1005,7 +1029,19 @@ export class Queries {
     const gitCond = "(g.session_id = $id OR g.session_id IN (SELECT id FROM sessions WHERE parent_session_id = $id))";
     const git = { ...gitCounts(this.db, gitCond, { id }), ...gitEvents(this.db, gitCond, { id }) };
     const compactions = sessionCompactions(this.db, id);
-    return { session, totals, prompts, timeline, models, agents, tools, files, children, compactions, git };
+    return {
+      session,
+      totals: totals && { ...totals, partial: totals.partial > 0 },
+      prompts: prompts.map(withPartial),
+      timeline,
+      models,
+      agents,
+      tools,
+      files,
+      children,
+      compactions,
+      git,
+    };
   }
 
   /** Every prompt's cost, tokens and provider in the range: the prompts page's cost distribution and Pareto curve. */
@@ -1035,12 +1071,13 @@ export class Queries {
       `SELECT page.*, (SELECT COUNT(*) FROM tool_calls t WHERE t.prompt_id = page.id) AS toolCalls
        FROM (SELECT p.id, p.ts, p.text, p.skill, p.is_command AS isCommand, p.session_id AS sessionId, p.provider,
                     s.project, ${sessionTitle("s")} AS sessionTitle,
-                    agg.tokens, agg.cost, agg.messages, agg.input, agg.output, agg.cacheRead, agg.cacheWrite, agg.models, agg.subagentCost
+                    agg.tokens, agg.cost, agg.messages, agg.input, agg.output, agg.cacheRead, agg.cacheWrite, agg.models, agg.subagentCost, agg.partial
              FROM (SELECT u.prompt_id, SUM(u.total_tokens) AS tokens, SUM(u.cost_usd) AS cost, COUNT(*) AS messages,
                           SUM(u.input_tokens) AS input, SUM(u.output_tokens) AS output, SUM(u.cache_read_tokens) AS cacheRead,
                           SUM(u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite,
                           GROUP_CONCAT(DISTINCT u.model) AS models,
-                          SUM(CASE WHEN u.is_subagent = 1 THEN u.cost_usd ELSE 0 END) AS subagentCost
+                          SUM(CASE WHEN u.is_subagent = 1 THEN u.cost_usd ELSE 0 END) AS subagentCost,
+                          MAX(u.partial) > 0 AS partial
                    FROM usage u ${where} GROUP BY u.prompt_id) agg
              JOIN prompts p ON p.id = agg.prompt_id
              LEFT JOIN sessions s ON s.id = p.session_id
@@ -1054,7 +1091,7 @@ export class Queries {
        JOIN prompts p ON p.id = agg.prompt_id WHERE 1 = 1 ${qcond}`,
       opts.q ? { ...w.params, q: params.q! } : w.params,
     )!.n;
-    return { total, rows: rows.map((r) => ({ ...r, projectLabel: projectLabel(r.project as string | null) })) };
+    return { total, rows: rows.map((r) => ({ ...withPartial(r), projectLabel: projectLabel(r.project as string | null) })) };
   }
 
   promptDetail(id: string) {
@@ -1062,20 +1099,20 @@ export class Queries {
       `SELECT p.*, s.project, ${sessionTitle("s")} AS sessionTitle FROM prompts p LEFT JOIN sessions s ON s.id = p.session_id WHERE p.id = $id`,
       { id },
     );
-    const totals = this.get<Totals>(`SELECT ${TOKEN_SUMS} FROM usage u WHERE u.prompt_id = $id`, { id });
-    const timeline = this.all(
+    const totals = this.get<Totals & { partial: number }>(`SELECT ${TOKEN_SUMS}, COALESCE(MAX(u.partial), 0) AS partial FROM usage u WHERE u.prompt_id = $id`, { id });
+    const timeline = this.all<Record<string, unknown>>(
       `SELECT u.ts, u.model, u.agent, COALESCE(u.spawn_ref, u.session_id) AS run, u.input_tokens AS input, u.output_tokens AS output, u.cache_read_tokens AS cacheRead,
-              (u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite, u.cost_usd AS cost
+              (u.cache_write_tokens + u.cache_write_1h_tokens) AS cacheWrite, u.cost_usd AS cost, u.partial > 0 AS partial
        FROM usage u WHERE u.prompt_id = $id ORDER BY u.ts`,
       { id },
-    );
+    ).map(withPartial);
     const tools = this.all(`SELECT tool AS key, COUNT(*) AS calls FROM tool_calls WHERE prompt_id = $id GROUP BY tool ORDER BY calls DESC`, { id });
     const files = this.all(
       `SELECT file_path AS key, COUNT(*) AS calls FROM tool_calls WHERE prompt_id = $id AND file_path IS NOT NULL GROUP BY file_path ORDER BY calls DESC LIMIT 500`,
       { id },
     );
     const agents = this.all(`SELECT u.agent AS key, ${TOKEN_SUMS} FROM usage u WHERE u.prompt_id = $id GROUP BY u.agent ORDER BY cost DESC`, { id });
-    return { prompt, totals, timeline, tools, files, agents };
+    return { prompt, totals: totals && { ...totals, partial: totals.partial > 0 }, timeline, tools, files, agents };
   }
 
   tools(f: Filters) {

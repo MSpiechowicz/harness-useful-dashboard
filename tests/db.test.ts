@@ -56,11 +56,12 @@ const INGESTED: [path: string, reread: boolean][] = [
   ["/h/cline/tasks/1/ui_messages.json", false],
 ];
 
-/** A database as schema 17 left it: none of 18's tables, its version set back, and logs already read. */
+/** A database as schema 17 left it: none of 18's tables or 20's columns, its version set back, and logs already read. */
 function v17(path: string): void {
   openDb(path, { journalMode: "delete", isDefaultPath: false }).close();
   const db = new Database(path);
   db.exec(`DROP VIEW outcome_counts; DROP TABLE outcome_days; DROP TABLE chart_notes; DROP TABLE git_events; DROP TABLE compactions;
+           ALTER TABLE usage DROP COLUMN partial; ALTER TABLE usage DROP COLUMN credits;
            DELETE FROM meta WHERE key = 'min_reader_schema'; UPDATE meta SET value = '17' WHERE key = 'schema_version'`);
   for (const [p] of INGESTED) db.query("INSERT INTO ingest_files (host, path, size, mtime, offset) VALUES ('h', ?, 1, 1, 1)").run(p);
   db.close();
@@ -187,12 +188,51 @@ describe("schema 19", () => {
     const raw = new Database(path);
     const insert = raw.query("INSERT INTO outcomes (id, provider, session_id, ts, model, kind) VALUES (?, 'claude', 's', 1, ?, 'tool_ok')");
     for (const [id, model] of [["a", "claude-haiku-4-5-20251001"], ["b", "claude-haiku-4-5@20251001"], ["c", "claude-opus-5-5"], ["d", "gpt-4o-2024-08-06"]]) insert.run(id, model);
-    raw.exec("UPDATE meta SET value = '18' WHERE key = 'schema_version'");
+    raw.exec("ALTER TABLE usage DROP COLUMN partial; ALTER TABLE usage DROP COLUMN credits; UPDATE meta SET value = '18' WHERE key = 'schema_version'");
     raw.close();
 
     const db = openDb(path, { journalMode: "delete", isDefaultPath: false });
     const models = db.query<{ model: string }, []>("SELECT model FROM outcomes ORDER BY id").all().map((r) => r.model);
     expect(models).toEqual(["claude-haiku-4-5", "claude-haiku-4-5", "claude-opus-5-5", "gpt-4o-2024-08-06"]);
     db.close();
+  });
+});
+
+describe("schema 20", () => {
+  const columns = (db: Database) => db.query<{ name: string; dflt_value: string | null; notnull: number }, []>("PRAGMA table_info(usage)").all();
+
+  test("a fresh database has the partial and credits columns, defaulting to 0", () => {
+    const db = openDb(":memory:");
+    const cols = columns(db);
+    expect(cols.find((c) => c.name === "partial")).toMatchObject({ dflt_value: "0", notnull: 1 });
+    expect(cols.find((c) => c.name === "credits")).toMatchObject({ dflt_value: "0", notnull: 1 });
+    expect(schemaInfo(db).minReader).toBe(18);
+    db.close();
+  });
+
+  test("a schema 19 database migrates and keeps its usage rows as complete, with no credits", () => {
+    const path = join(tempDir(), "v19.db");
+    openDb(path, { journalMode: "delete", isDefaultPath: false }).close();
+    const raw = new Database(path);
+    raw.exec("ALTER TABLE usage DROP COLUMN partial; ALTER TABLE usage DROP COLUMN credits");
+    raw.exec("INSERT INTO usage (id, provider, session_id, ts, input_tokens) VALUES ('u1', 'claude', 's', 1, 5)");
+    raw.exec("UPDATE meta SET value = '19' WHERE key = 'schema_version'");
+    raw.close();
+
+    const db = openDb(path, { journalMode: "delete", isDefaultPath: false });
+    expect(Number(getMeta(db, "schema_version"))).toBe(SCHEMA_VERSION);
+    expect(db.query("SELECT input_tokens, partial, credits FROM usage WHERE id = 'u1'").get()).toEqual({ input_tokens: 5, partial: 0, credits: 0 });
+    db.close();
+  });
+
+  test("a schema 19 app opens a schema 20 database read-only", () => {
+    const path = join(tempDir(), "v20.db");
+    openDb(path, { journalMode: "delete", isDefaultPath: false }).close();
+    const raw = new Database(path);
+    raw.exec(`UPDATE meta SET value = '${SCHEMA_VERSION}' WHERE key = 'schema_version'`);
+    raw.close();
+    const ro = openDb(path, { readonly: true });
+    expect(schemaInfo(ro).version).toBe(SCHEMA_VERSION);
+    ro.close();
   });
 });

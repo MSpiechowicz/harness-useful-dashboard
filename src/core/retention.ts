@@ -206,6 +206,19 @@ export async function trimDetail(db: Database, host: string | null, months: numb
     }
   }
   if (stop()) return { ...result, done: false };
+  // A Copilot Chat request whose file row telemetry replaced keeps its interval with no usage row (otlp/write.ts):
+  // nothing above finds it, so it goes here once it is past the cutoff, when its session is this host's.
+  if (host != null) {
+    const orphans = db
+      .query(
+        `DELETE FROM response_meta WHERE usage_id GLOB 'copilot-chat:*:f:*' AND start_ts < $cutoff
+           AND NOT EXISTS (SELECT 1 FROM usage u WHERE u.id = response_meta.usage_id)
+           AND EXISTS (SELECT 1 FROM sessions s WHERE s.host = $host AND s.id GLOB 'copilot-chat:*'
+                         AND response_meta.usage_id > s.id || ':f:' AND response_meta.usage_id < s.id || ':f;')`,
+      )
+      .run({ cutoff, host });
+    result.responseMeta += orphans.changes;
+  }
   setMeta(db, metaKey(host), JSON.stringify({ months, until: cutoff, at: now } satisfies TrimNote));
   // Notes of a trim per remote host, as an earlier build kept them: the one note above stands for them all.
   if (host == null) db.query("DELETE FROM meta WHERE key GLOB 'detail_trim_otlp:*'").run();

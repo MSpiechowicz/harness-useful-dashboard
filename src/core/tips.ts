@@ -36,6 +36,7 @@ const CATEGORY: Record<string, TipCategory> = {
   "output-heavy": "models",
   "estimated-pricing": "models",
   "copilot-premium-pace": "models",
+  "copilot-chat-partial": "models",
   "subagent-share": "workflow",
   "guardian-overhead": "workflow",
   "tool-loops": "workflow",
@@ -321,6 +322,13 @@ function computeTips(db: Database, f: Filters, prices: PriceBook): Tip[] {
       link: `#/sessions/${encodeURIComponent(compactions.topSession)}`,
       impact: monthly(compactions.cost),
     });
+  }
+
+  // 23. Copilot Chat read from its session files alone: they keep only the last model call's input of each request, so
+  // its cost is approximate. Connecting VS Code to the collector replaces those rows with the complete ones.
+  const partial = one<{ n: number }>(`SELECT COUNT(*) AS n FROM usage u ${and("u.provider = 'copilot-chat' AND u.partial = 1")}`)!.n;
+  if (partial > 0) {
+    tips.push({ id: "copilot-chat-partial", severity: "info", params: { messages: partial }, link: "#/settings", impact: 0 });
   }
 
   const rank: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };

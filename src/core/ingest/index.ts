@@ -10,6 +10,7 @@ import { detailCutoff } from "../retention.ts";
 import { claudeParser } from "./claude.ts";
 import { codexParser } from "./codex.ts";
 import { copilotParser } from "./copilot.ts";
+import { findCopilotChatFiles, ingestCopilotChatFile } from "./copilotChat.ts";
 import { copilotStoreDatabases, ingestCopilotStore } from "./copilotStore.ts";
 import { geminiParser, ingestGeminiJson } from "./gemini.ts";
 import { ompParser, piParser } from "./omp.ts";
@@ -387,6 +388,17 @@ export async function scan(
           ingestClineSession(file, index.get(file.sessionId), writer, { promptTextLimit: cfg.promptTextLimit, legacyUntil: legacy ? taskLastTs(legacy) : 0 });
         },
       });
+    }
+  }
+  // GitHub Copilot Chat's session files in VS Code (and its forks): a change log each, replayed whole when it changes.
+  if (cfg.sources.enabled["copilot-chat"]) {
+    const seen = new Set<string>();
+    for (const dir of cfg.sources.copilotChatDirs ?? []) {
+      for (const file of findCopilotChatFiles(expandHome(dir))) {
+        if (seen.has(file.path)) continue;
+        seen.add(file.path);
+        jsonFiles.push({ path: file.path, ingest: () => void ingestCopilotChatFile(file, writer, { promptTextLimit: cfg.promptTextLimit }) });
+      }
     }
   }
   // Gemini CLI chats from before v0.39: one JSON object each.

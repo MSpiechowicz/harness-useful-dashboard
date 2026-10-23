@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PartialBadge from "../components/PartialBadge.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import TableCard from "../components/TableCard.svelte";
   import { GitBranch } from "@lucide/svelte";
@@ -37,6 +38,8 @@
     aiTitle: boolean;
     /** Newer servers only. */
     compactions?: number;
+    /** Input counts only the last model call of each request (Copilot Chat before VS Code is connected). Newer servers only. */
+    partial?: boolean;
   }
 
   const keep = keeper();
@@ -146,6 +149,7 @@
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
                     <Link to="#/sessions/{encodeURIComponent(r.id)}" class="truncate font-medium">{titleOf(r)}</Link>
                     {#if r.aiTitle}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted" title={t("label.aiHint")}>{t("label.ai")}</span>{/if}
+                    {#if r.partial}<PartialBadge />{/if}
                     {#if r.sessionAgent}<span class="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-muted">{r.sessionAgent}</span>{/if}
                     {#if r.kind}<KindPill kind={r.kind} />{/if}
                     <TagPills tags={r.tags} />

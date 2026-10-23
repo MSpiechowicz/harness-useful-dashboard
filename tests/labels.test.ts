@@ -438,7 +438,7 @@ describe("migration", () => {
     const dir = tempDir();
     const path = join(dir, "old.db");
     const db = openDb(path);
-    db.exec("DROP TABLE session_labels; DROP TABLE label_attempts; UPDATE meta SET value = '15' WHERE key = 'schema_version'");
+    db.exec("DROP TABLE session_labels; DROP TABLE label_attempts; ALTER TABLE usage DROP COLUMN partial; ALTER TABLE usage DROP COLUMN credits; UPDATE meta SET value = '15' WHERE key = 'schema_version'");
     db.close();
     const again = openDb(path);
     expect(Number(getMeta(again, "schema_version"))).toBe(SCHEMA_VERSION);

@@ -574,12 +574,14 @@ export interface ActivePlan {
 /**
  * The plan a call counts against: Claude Code against the Claude plan of its login, Codex against the ChatGPT plan it
  * logs, and omp, pi and OpenCode against whatever they billed the call through (a Claude or ChatGPT login, Copilot),
- * read with their own logins, and Copilot CLI against the GitHub Copilot plan of its login. Cursor reports none.
+ * read with their own logins, and Copilot CLI and Copilot Chat against the GitHub Copilot plan of Copilot CLI's login. Cursor reports none.
  */
 export function planFor(provider: string, billing: string | null): ActivePlan | null {
   if (provider === "claude") return { provider: "claude", source: "claude" };
   if (provider === "codex") return { provider: "codex", source: "codex" };
   if (provider === "copilot") return { provider: "copilot", source: "copilot" };
+  // Copilot Chat's own models are billed through "github-copilot". Its bring-your-own-key models are billed elsewhere.
+  if (provider === "copilot-chat" && (billing === null || billing === "github-copilot")) return { provider: "copilot", source: "copilot" };
   if ((provider === "omp" || provider === "pi" || provider === "opencode") && billing) {
     // OpenCode names its ChatGPT login "openai".
     const plan = provider === "opencode" && billing === "openai" ? "codex" : (OMP_PROVIDERS[billing] ?? billing);

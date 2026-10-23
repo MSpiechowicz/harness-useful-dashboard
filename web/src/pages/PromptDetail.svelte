@@ -6,6 +6,7 @@
   import Chart from "../components/Chart.svelte";
   import Empty from "../components/Empty.svelte";
   import ListCard from "../components/ListCard.svelte";
+  import PartialBadge from "../components/PartialBadge.svelte";
   import Kpi from "../components/Kpi.svelte";
   import { qs, settled, useFetch, type Totals } from "../lib/api.svelte.ts";
   import type { CallRow } from "../lib/charts.ts";
@@ -18,7 +19,7 @@
 
   interface Detail {
     prompt: { id: string; ts: number; text: string | null; skill: string | null; session_id: string; project: string | null; sessionTitle: string | null; provider: string } | null;
-    totals: Totals | null;
+    totals: (Totals & { partial?: boolean }) | null;
     timeline: CallRow[];
     tools: { key: string; calls: number }[];
     files: { key: string; calls: number }[];
@@ -46,6 +47,7 @@
           <Link class="text-accent-ink hover:underline" to="#/sessions/{encodeURIComponent(p.session_id)}">{p.sessionTitle ?? p.session_id}</Link>
           <span class="font-mono">{p.project}</span>
           {#if p.skill}<span class="inline-flex items-center gap-1 text-accent-ink"><Sparkles size={11} />{p.skill}</span>{/if}
+          {#if tot?.partial}<PartialBadge />{/if}
         </div>
         <p class="mt-3 max-h-72 overflow-auto text-sm leading-relaxed whitespace-pre-wrap text-ink">{p.text ?? t("prompts.noText")}</p>
       </Card>

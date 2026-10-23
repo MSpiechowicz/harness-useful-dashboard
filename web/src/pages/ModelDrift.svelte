@@ -48,6 +48,7 @@
     kilo: "settings.source.kilo",
     gemini: "settings.source.gemini",
     copilot: "settings.source.copilot",
+    "copilot-chat": "settings.source.copilot-chat",
     hermes: "settings.source.hermes",
     otel: "settings.source.otel",
   };

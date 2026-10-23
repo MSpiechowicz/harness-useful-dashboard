@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanName, identityOf, MAX_COST, MAX_HOSTS, MAX_TOKENS, type MapContext, type MappedGroup, mapBatch } from "../src/core/otlp/map.ts";
-import type { OtlpSpan } from "../src/core/otlp/model.ts";
+import { safePart, sessionId as chatSessionId } from "../src/core/ingest/copilotChatIds.ts";
+import type { UsageRecord } from "../src/core/ingest/types.ts";
+import type { Attrs, OtlpBatch, OtlpSpan } from "../src/core/otlp/model.ts";
 import { decodeOtlp } from "../src/core/otlp/write.ts";
 import {
   type AttrIn,
@@ -448,5 +452,278 @@ describe("mapBatch: what a sender can't do", () => {
     expect(mapped.groups.some((g) => g.host === "box-50")).toBe(false);
     expect(mapped.skipped).toBe(r!.records.length);
     expect(mapped.skippedFor).toEqual({ identities: r!.records.length });
+  });
+});
+
+// ---- Copilot Chat fixtures ---------------------------------------------------------------------------------------
+
+const FIXTURES = join(import.meta.dir, "fixtures", "copilot-chat", "otlp");
+const fixture = (file: string) => new Uint8Array(readFileSync(join(FIXTURES, file)));
+
+/** A decoded batch's spans as the resources they came with: a fixture sent as protobuf. */
+function resourcesOf(batch: OtlpBatch): ResourceIn<SpanIn>[] {
+  const out = new Map<Attrs, ResourceIn<SpanIn>>();
+  for (const s of batch.spans) {
+    let r = out.get(s.resource);
+    if (!r) {
+      r = { resource: s.resource as Record<string, AttrIn>, scope: { name: s.scope ?? "" }, records: [] };
+      out.set(s.resource, r);
+    }
+
+    const attrs = Object.fromEntries(Object.entries(s.attrs).filter(([, v]) => v != null)) as Record<string, AttrIn>;
+    r.records.push({
+      traceId: s.traceId,
+      spanId: s.spanId,
+      parentSpanId: s.parentSpanId ?? undefined,
+      name: s.name,
+      kind: s.kind,
+      startMs: s.startMs!,
+      endMs: s.endMs!,
+      attrs,
+      status: { code: s.status.code },
+    });
+  }
+  return [...out.values()];
+}
+
+describe("mapBatch: Copilot Chat", () => {
+  const LOCAL = { host: "devbox", user: "maciej" };
+  const CHAT = "a3dd1178-eb84-45ab-8531-9af4c983e955";
+  const MAIN = `copilot-chat:${CHAT}`;
+
+  const asJson = () => decodeOtlp("traces", fixture("traces-8-rounds.json"), "json");
+  const asProtobuf = () => decodeOtlp("traces", encodeTraces(resourcesOf(asJson())), "protobuf");
+  const day = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const sum = (rows: UsageRecord[], key: "input" | "cacheRead" | "output" | "credits") => rows.reduce((n, r) => n + (r[key] ?? 0), 0);
+
+  for (const [format, batch] of [["OTLP/JSON", asJson], ["protobuf", asProtobuf]] as const) {
+    describe(format, () => {
+      test("this machine's: the eight main calls total the turn, ids and host are its own", () => {
+        const g = only(mapBatch(batch(), { ...CTX, local: LOCAL }).groups);
+        expect(g.local).toBe(true);
+        expect(g.host).toBe("devbox");
+        expect(g.user).toBe("maciej");
+
+        const main = g.usage.filter((u) => u.sessionId === MAIN);
+        expect(main).toHaveLength(8);
+        expect(sum(main, "input")).toBe(307_973 - 260_382);
+        expect(sum(main, "cacheRead")).toBe(260_382);
+        expect(sum(main, "output")).toBe(1_148);
+        expect(sum(main, "credits")).toBeCloseTo(0.82134855, 9);
+
+        expect(new Set(main.map((u) => u.id)).size).toBe(8);
+        for (const u of main) expect(u.id).toMatch(new RegExp(`^${MAIN}:o:[0-9a-f]{32}:[0-9a-f]{16}$`));
+        expect(main[0]).toMatchObject({
+          provider: "copilot-chat",
+          promptId: null,
+          model: "gpt-6-luna",
+          agent: "main",
+          isSubagent: false,
+          input: 26_283,
+          cacheRead: 0,
+          output: 81,
+          cacheWrite: 0,
+          reasoning: 0,
+          billing: "github-copilot",
+          credits: 0.299322,
+          partial: false,
+          costUsd: null,
+        });
+        expect(main[1]).toMatchObject({ input: 27_669 - 26_280, cacheRead: 26_280, output: 146 });
+      });
+
+      test("helper calls with no conversation land in one session for each local day", () => {
+        const g = only(mapBatch(batch(), { ...CTX, local: LOCAL }).groups);
+        const helpers = g.usage.filter((u) => u.sessionId !== MAIN);
+        expect(helpers).toHaveLength(7);
+        expect(new Set(helpers.map((u) => u.agent))).toEqual(new Set(["title", "progressMessages", "copilotLanguageModelWrapper"]));
+        for (const u of helpers) {
+          expect(u.sessionId).toBe(`copilot-chat:background:${day(u.ts)}`);
+          expect(u.isSubagent).toBe(false);
+          expect(u.model).toBe("gpt-4o-mini-2024-07-18");
+        }
+      });
+
+      test("response metadata: times, time to first token and stop reason", () => {
+        const g = only(mapBatch(batch(), { ...CTX, local: LOCAL }).groups);
+        expect(g.meta).toHaveLength(15);
+
+        const first = g.meta.find((m) => m.usageId === g.usage.find((u) => u.sessionId === MAIN)!.id)!;
+        expect(first.stopReason).toBe("stop");
+        expect(first.ttftMs).toBeGreaterThan(0);
+        expect(first.startTs).toBeLessThan(first.endTs!);
+      });
+
+      test("tool calls keep their call id, one without gets its span, outcomes come from the status", () => {
+        const g = only(mapBatch(batch(), { ...CTX, local: LOCAL }).groups);
+        expect(g.tools).toHaveLength(8);
+        expect(g.tools.every((t) => t.sessionId === MAIN && t.usageId === null && t.provider === "copilot-chat" && t.agent === "main" && t.filePath === null)).toBe(true);
+        expect(g.tools.map((t) => t.tool).sort()).toEqual(["apply_patch", "manage_todo_list", "read_file", "read_file", "read_file", "read_file", "run_in_terminal", "read_file"].sort());
+
+        const ids = g.tools.map((t) => t.id);
+        expect(ids).toContain(`${MAIN}:t:call_KfkfSL1XR4KygK1dBPCjktYK`);
+        expect(ids).toContain(`${MAIN}:t:call_CnlndBOudeUmDQJXBkBigpY3`);
+        expect(ids.filter((id) => id.startsWith(`${MAIN}:t:s:`))).toHaveLength(1);
+        expect(g.tools.find((t) => t.tool === "manage_todo_list")!.id).toMatch(new RegExp(`^${MAIN}:t:s:[0-9a-f]{32}:[0-9a-f]{16}$`));
+
+        expect(g.outcomes).toHaveLength(8);
+        expect(g.outcomes.every((o) => o.kind === "tool_ok")).toBe(true);
+        expect(new Set(g.outcomes.map((o) => o.id))).toEqual(new Set(ids));
+      });
+
+      test("invoke_agent adds no usage, it tells when the conversation ran", () => {
+        const g = only(mapBatch(batch(), { ...CTX, local: LOCAL }).groups);
+        // 8 main calls and 7 helpers: the turn's totals on the invoke_agent span are not a row.
+        expect(g.usage).toHaveLength(15);
+
+        const s = sessions(g).find((x) => x.id === MAIN)!;
+        expect(s).toMatchObject({ provider: "copilot-chat", nativeId: CHAT, clientVersion: "0.66.0" });
+        expect(s.startedAt as number).toBeLessThanOrEqual(Math.min(...g.usage.filter((u) => u.sessionId === MAIN).map((u) => u.ts)));
+        expect(s.endedAt as number).toBeGreaterThanOrEqual(Math.max(...g.usage.filter((u) => u.sessionId === MAIN).map((u) => u.ts)));
+      });
+
+      test("from a remote sender the rows are a remote machine's: namespaced by the credential", () => {
+        const g = only(mapBatch(batch(), CTX).groups);
+        expect(g.local).toBe(false);
+        expect(g.host).toBe("ci-token");
+        expect(g.usage).toHaveLength(15);
+        expect(g.usage.every((u) => u.id.startsWith(`${NS}copilot-chat:`) && u.sessionId.startsWith(`${NS}copilot-chat:`))).toBe(true);
+        expect(g.tools.every((t) => t.id.startsWith(`${NS}copilot-chat:`))).toBe(true);
+        expect(g.usage.filter((u) => u.sessionId === `${NS}${MAIN}`)).toHaveLength(8);
+        expect(g.usage.filter((u) => u.sessionId.startsWith(`${NS}copilot-chat:background:`))).toHaveLength(7);
+      });
+
+      test("no content is read: not with text kept either", () => {
+        const mapped = mapBatch(batch(), { ...CTX, storeText: true, local: LOCAL });
+        expect(JSON.stringify(mapped.groups.map((g) => [g.prompts, g.usage, g.tools, g.outcomes, g.meta, sessions(g)]))).not.toContain("SENTINEL_");
+      });
+    });
+  }
+
+  test("its logs make no record, from this machine or another", () => {
+    const logsBatch = decodeOtlp("logs", fixture("logs.json"), "json");
+    expect(logsBatch.logs.length).toBeGreaterThan(0);
+    for (const local of [LOCAL, null]) expect(mapBatch(logsBatch, { ...CTX, local })).toEqual({ groups: [], skipped: 0, skippedFor: {} });
+  });
+
+  describe("one call", () => {
+    const chat = (attrs: Record<string, AttrIn>, over: Partial<SpanIn> = {}): SpanIn => ({
+      traceId: HERMES_TRACE,
+      spanId: "00f067aa0ba902b7",
+      name: "chat gpt-6-luna",
+      startMs: T0,
+      endMs: T0 + 2_000,
+      attrs: {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "github",
+        "gen_ai.request.model": "gpt-6-luna",
+        "gen_ai.conversation.id": "conv-1",
+        "gen_ai.usage.input_tokens": 1_000,
+        "gen_ai.usage.output_tokens": 50,
+        "gen_ai.usage.cache_read.input_tokens": 600,
+        ...attrs,
+      },
+      ...over,
+    });
+    const resource = { "service.name": "copilot-chat", "host.name": "somewhere-else", "service.version": "0.66.0" };
+    const call = (s: SpanIn, ctx: Partial<MapContext> = { local: LOCAL }) => traces([{ resource, scope: { name: "copilot-chat" }, records: [s] }], ctx);
+    const one = (s: SpanIn, ctx?: Partial<MapContext>) => only(call(s, ctx).groups).usage[0]!;
+
+    test("this machine's identity wins over the resource's, and it is never told apart as remote", () => {
+      const g = only(call(chat({})).groups);
+      expect(g).toMatchObject({ host: "devbox", user: "maciej", local: true });
+      expect(g.usage[0]!.id).toBe(`copilot-chat:conv-1:o:${HERMES_TRACE}:00f067aa0ba902b7`);
+      expect(g.usage[0]!.sessionId).toBe("copilot-chat:conv-1");
+    });
+
+    test("conversation and call ids with colons can't pose as other ids: they are hashed, as the chat session file's are", () => {
+      const conversation = "A:f:B";
+      const g = only(call(chat({ "gen_ai.conversation.id": conversation })).groups);
+      const session = chatSessionId(conversation);
+      expect(session).toMatch(/^copilot-chat:h[0-9a-f]{32}$/);
+      expect(g.usage[0]).toMatchObject({ sessionId: session, id: `${session}:o:${HERMES_TRACE}:00f067aa0ba902b7` });
+      expect(sessions(g)[0]).toMatchObject({ id: session, nativeId: conversation });
+
+      const tool: SpanIn = {
+        traceId: HERMES_TRACE,
+        spanId: "00f067aa0ba902b8",
+        name: "execute_tool read_file",
+        startMs: T0,
+        endMs: T0 + 10,
+        attrs: { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.call.id": "call:1:o", "gen_ai.conversation.id": conversation },
+      };
+      expect(only(call(tool).groups).tools[0]!.id).toBe(`${session}:t:${safePart("call:1:o")}`);
+    });
+
+    test("tokens: the cache reads come out of the input (never below 0), the reasoning from either attribute", () => {
+      expect(one(chat({}))).toMatchObject({ input: 400, cacheRead: 600, output: 50, reasoning: 0, model: "gpt-6-luna" });
+      expect(one(chat({ "gen_ai.usage.cache_read.input_tokens": 1_500 }))).toMatchObject({ input: 0, cacheRead: 1_500 });
+      expect(one(chat({ "gen_ai.usage.reasoning.output_tokens": 30 })).reasoning).toBe(30);
+      expect(one(chat({ "gen_ai.usage.reasoning_tokens": 20 })).reasoning).toBe(20);
+      expect(one(chat({ "gen_ai.response.model": "gpt-6-luna-2026" })).model).toBe("gpt-6-luna-2026");
+    });
+
+    test("credits are the nano AI units over 1e9, and none when they are out of bounds", () => {
+      expect(one(chat({ "copilot_chat.copilot_usage_nano_aiu": 2_500_000_000 })).credits).toBe(2.5);
+      expect(one(chat({})).credits).toBe(0);
+      expect(one(chat({ "copilot_chat.copilot_usage_nano_aiu": -5 })).credits).toBe(0);
+      expect(one(chat({ "copilot_chat.copilot_usage_nano_aiu": 1e20 })).credits).toBe(0);
+    });
+
+    test("billing and agent: GitHub's own models bill through the plan, bring-your-own ones through their vendor", () => {
+      expect(one(chat({})).billing).toBe("github-copilot");
+      expect(one(chat({ "gen_ai.provider.name": "anthropic" })).billing).toBe("anthropic");
+      expect(one(chat({ "gen_ai.agent.name": "panel/editAgent" })).agent).toBe("main");
+      expect(one(chat({ "gen_ai.agent.name": "title" })).agent).toBe("title");
+    });
+
+    test("without a conversation the call goes to the background session of its local day", () => {
+      const u = one(chat({ "gen_ai.conversation.id": "" }));
+      expect(u.sessionId).toBe(`copilot-chat:background:${day(T0 + 2_000)}`);
+      expect(u.id).toBe(`copilot-chat:background:${day(T0 + 2_000)}:o:${HERMES_TRACE}:00f067aa0ba902b7`);
+    });
+
+    test("stop reason from a list or a plain value, time to first token only when sane", () => {
+      const meta = (attrs: Record<string, AttrIn>) => only(call(chat(attrs)).groups).meta[0]!;
+      expect(meta({ "gen_ai.response.finish_reasons": ["length", "stop"], "copilot_chat.time_to_first_token": 380 })).toMatchObject({ stopReason: "length", ttftMs: 380, startTs: T0, endTs: T0 + 2_000 });
+      expect(meta({ "gen_ai.response.finish_reasons": "stop" }).stopReason).toBe("stop");
+      expect(meta({ "copilot_chat.time_to_first_token": -1 }).ttftMs).toBeNull();
+    });
+
+    test("a span of copilot-chat's scope counts whatever its service is called", () => {
+      const g = only(traces([{ resource: { "service.name": "something" }, scope: { name: "copilot-chat" }, records: [chat({})] }], { local: LOCAL }).groups);
+      expect(g.usage[0]!.provider).toBe("copilot-chat");
+    });
+
+    test("a call without tokens, or with no time, is no usage row", () => {
+      expect(only(call(chat({ "gen_ai.usage.input_tokens": 0, "gen_ai.usage.output_tokens": 0, "gen_ai.usage.cache_read.input_tokens": 0 })).groups).usage).toEqual([]);
+      expect(call(chat({}, { startMs: 1_000, endMs: 2_000 })).skippedFor).toEqual({ time: 1 });
+    });
+
+    test("tool outcome from the status code: 2 error, 1 ok, 0 none", () => {
+      const tool = (code: number, call_id = "call_x"): SpanIn => ({
+        traceId: HERMES_TRACE,
+        spanId: "00f067aa0ba902b8",
+        name: "execute_tool read_file",
+        startMs: T0,
+        endMs: T0 + 10,
+        attrs: { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "read_file", "gen_ai.tool.call.id": call_id, "gen_ai.conversation.id": "conv-1" },
+        status: { code },
+      });
+      const outcomes = (code: number) => only(call(tool(code)).groups).outcomes.map((o) => o.kind);
+      expect(outcomes(2)).toEqual(["tool_error"]);
+      expect(outcomes(1)).toEqual(["tool_ok"]);
+      expect(outcomes(0)).toEqual([]);
+      expect(only(call(tool(1, "")).groups).tools[0]!.id).toBe(`copilot-chat:conv-1:t:s:${HERMES_TRACE}:00f067aa0ba902b8`);
+    });
+
+    test("content attributes, span events and the status message are never read", () => {
+      const secret = chat({ "copilot_chat.reasoning_content": "SENTINEL_A", "gen_ai.input.messages": "SENTINEL_B", "copilot_chat.user_request": "SENTINEL_C" }, { status: { code: 2, message: "SENTINEL_D" } });
+      const mapped = mapBatch(decodeOtlp("traces", encodeTraces([{ resource, scope: { name: "copilot-chat" }, records: [secret] }]), "protobuf"), { ...CTX, storeText: true, local: LOCAL });
+      expect(JSON.stringify(mapped.groups.map((g) => [g.prompts, g.usage, g.tools, g.meta, sessions(g)]))).not.toContain("SENTINEL_");
+    });
   });
 });

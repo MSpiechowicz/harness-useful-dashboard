@@ -28,6 +28,7 @@ import { VERSION } from "../version.ts";
 import type { App } from "./app.ts";
 import { cookieName, cookieValue, HELLO_NONCE, type Hello, helloProof, sameToken } from "./auth.ts";
 import { type IngestServer, isLoopback } from "./ingest.ts";
+import { connect, disconnect, type FlavorEnv, findFlavors, isSymlinked, readState, systemEnv, type VscodeError, vscodeEndpoint } from "./vscodeSettings.ts";
 import { notify } from "./notify.ts";
 import { type FolderPicker, PickerBusy, folderPicker, listDirs, nativeAvailable } from "./pickFolder.ts";
 import { checkForUpdate, isCompiledBinary } from "./update.ts";
@@ -135,6 +136,8 @@ export interface ServerHooks {
   shutdown(): void;
   /** The OTLP listener for remote agents, with its tokens and basic auth user. Without it, its routes are not there. */
   ingest?: Pick<IngestServer, "status" | "endpoints" | "stats" | "auth">;
+  /** Where the editors keep their settings, for Connect VS Code. This machine's by default. */
+  vscodeEnv?: FlavorEnv;
 }
 
 const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
@@ -217,10 +220,10 @@ function noteError(result: { error: string }): Response {
  * What a read-only database still allows: leaving, and the settings and tip states, which live in the config file (a
  * switch to another database included). The folder picker only serves that switch. Everything else answers 409.
  */
-const READ_ONLY_ROUTES = new Set(["/api/shutdown", "/api/language", "/api/settings", "/api/tips/state", "/api/pick-folder", "/api/ingest/tokens", "/api/ingest/basic"]);
+const READ_ONLY_ROUTES = new Set(["/api/shutdown", "/api/language", "/api/settings", "/api/tips/state", "/api/pick-folder", "/api/ingest/tokens", "/api/ingest/basic", "/api/ingest/vscode"]);
 
 /** The routes that delete something: every other DELETE is answered 404. */
-const DELETE_ROUTES = new Set(["/api/tags", "/api/session/label", "/api/notes", "/api/ingest/tokens", "/api/ingest/basic"]);
+const DELETE_ROUTES = new Set(["/api/tags", "/api/session/label", "/api/notes", "/api/ingest/tokens", "/api/ingest/basic", "/api/ingest/vscode"]);
 
 const isPrice = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const optionalPrice = (v: unknown): number | null => (isPrice(v) ? v : null);
@@ -458,6 +461,9 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/ingest":
           if (!hooks.ingest) break;
           return json(ingestState(hooks.ingest));
+        case "/api/ingest/vscode":
+          if (!hooks.ingest) break;
+          return json(vscodeState(hooks.ingest));
       }
     }
 
@@ -642,6 +648,11 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           const set = await auth.setBasic(body.user, body.password);
           return "error" in set ? error(set.error) : json({ basic: set });
         }
+        // Connect VS Code: writes (POST) or takes out (DELETE) the Copilot Chat OTel settings of one editor.
+        case "/api/ingest/vscode": {
+          if (!hooks.ingest || method === "PUT") break;
+          return connectVscode(hooks.ingest, method, (await jsonBody(req, 4096)) ?? {});
+        }
       }
     }
     return error(`no route for ${method} ${url.pathname}`, 404);
@@ -651,6 +662,54 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
   function ingestState(ingest: NonNullable<ServerHooks["ingest"]>) {
     const config = app.cfg.ingest;
     return { config, status: ingest.status(), loopback: isLoopback(config.bind), endpoints: ingest.endpoints(), basic: ingest.auth.basic(), tokens: ingest.auth.tokens(), stats: ingest.stats() };
+  }
+
+  /** What Settings shows about Connect VS Code: each editor's state, the collector, and whether the environment overrides it. */
+  function vscodeState(ingest: NonNullable<ServerHooks["ingest"]>) {
+    const config = app.cfg.ingest;
+    const flavors = findFlavors(hooks.vscodeEnv ?? systemEnv()).map((f) => ({ id: f.id, installed: f.installed, state: readState(f, ingest.auth, config), symlinked: isSymlinked(f.settingsPath) }));
+    const envOverride = ["OTEL_EXPORTER_OTLP_ENDPOINT", "COPILOT_OTEL_ENABLED", "COPILOT_OTEL_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"].some((name) => process.env[name] !== undefined);
+
+    return {
+      flavors,
+      collector: { enabled: config.enabled, state: ingest.status().state, port: config.port, loopback: isLoopback(config.bind) },
+      lastVscodeAt: ingest.stats().lastVscodeAt,
+      envOverride,
+    };
+  }
+
+  function vscodeError(code: VscodeError | "unknown-flavor" | "collector-off"): Response {
+    const statuses: Record<string, number> = { "not-installed": 404, "other-endpoint": 409, "collector-off": 409, symlinked: 409, "write-failed": 500 };
+    return error(code, statuses[code] ?? 400);
+  }
+
+  /** { flavor, overwrite?, enableCollector?, confirmSymlink? } to connect, { flavor } to disconnect. The token never leaves the server. */
+  function connectVscode(ingest: NonNullable<ServerHooks["ingest"]>, method: string, input: unknown): Response {
+    const body = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
+    const flavor = findFlavors(hooks.vscodeEnv ?? systemEnv()).find((f) => f.id === body.flavor);
+    if (!flavor) return vscodeError("unknown-flavor");
+    if (!flavor.installed) return vscodeError("not-installed");
+
+    if (method === "DELETE") {
+      const done = disconnect(flavor, ingest.auth, app.cfg.ingest);
+      return "error" in done ? vscodeError(done.error) : json({ ok: true, ...vscodeState(ingest) });
+    }
+
+    // Refused before the collector is turned on, so a refusal changes nothing.
+    if (!vscodeEndpoint(app.cfg.ingest)) return vscodeError("not-local-bind");
+
+    if (isSymlinked(flavor.settingsPath) && body.confirmSymlink !== true) return vscodeError("symlinked");
+
+    const enabling = !app.cfg.ingest.enabled;
+    if (enabling && body.enableCollector !== true) return vscodeError("collector-off");
+    if (enabling) app.updateConfig({ ingest: { enabled: true } });
+
+    const done = connect(flavor, ingest.auth, app.cfg.ingest, { overwrite: body.overwrite === true, confirmSymlink: body.confirmSymlink === true });
+    if ("error" in done) {
+      if (enabling) app.updateConfig({ ingest: { enabled: false } });
+      return vscodeError(done.error);
+    }
+    return json({ ok: true, ...vscodeState(ingest) });
   }
 
   /**

@@ -301,7 +301,7 @@ describe("the app and its routes", () => {
     home = join(root, "home");
     process.env.HARNESS_DASHBOARD_HOME = home;
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ scanIntervalSec: 0, sources: { enabled: { claude: false, codex: false, omp: false, pi: false, opencode: false, zed: false, cline: false, roo: false, kilo: false, gemini: false, copilot: false } } }));
+    writeFileSync(join(home, "config.json"), JSON.stringify({ scanIntervalSec: 0, sources: { enabled: { claude: false, codex: false, omp: false, pi: false, opencode: false, zed: false, cline: false, roo: false, kilo: false, gemini: false, copilot: false, "copilot-chat": false } } }));
     app = new App(join(root, "test.db"));
     handle = createHandler(app, { get: async () => null }, { shutdown() {} }, { token, port: 4317 });
   });

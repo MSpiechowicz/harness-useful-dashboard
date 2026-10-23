@@ -3,7 +3,7 @@
   import { t } from "../lib/i18n.svelte.ts";
   import { PROVIDER_NAMES } from "../lib/palette.ts";
 
-  export type BillingSortKey = "label" | "cost" | "tokens" | "calls" | "premiumRequests";
+  export type BillingSortKey = "label" | "cost" | "tokens" | "calls" | "premiumRequests" | "credits";
 
   /** Names for the plans and accounts harnesses report; anything else shows as reported. */
   const PLANS: Record<string, string> = {
@@ -21,8 +21,9 @@
 </script>
 
 <script lang="ts">
+  import PartialBadge from "./PartialBadge.svelte";
   import SortTh from "./SortTh.svelte";
-  import { compact, usd } from "../lib/format.ts";
+  import { compact, decimal, usd } from "../lib/format.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface Props {
@@ -35,7 +36,7 @@
   }
   let { rows, offset = 0, limit, sortKey = $bindable("cost"), asc = $bindable(false) }: Props = $props();
 
-  const value = (r: BillingRow, k: BillingSortKey) => (k === "label" ? billingLabel(r) : r[k]);
+  const value = (r: BillingRow, k: BillingSortKey) => (k === "label" ? billingLabel(r) : (r[k] ?? 0));
   const sorted = $derived(
     [...rows].sort((a, b) => {
       const x = value(a, sortKey);
@@ -47,6 +48,8 @@
   const visible = $derived(limit == null ? sorted : sorted.slice(offset, offset + limit));
   // Premium requests only mean something for Copilot; the column shows once any row has them.
   const premium = $derived(rows.some((r) => r.premiumRequests > 0));
+  // Credits come from Copilot Chat, which reports them per call: the same, a column once any row has some.
+  const credits = $derived(rows.some((r) => (r.credits ?? 0) > 0));
 
   function sortBy(k: BillingSortKey) {
     if (sortKey === k) asc = !asc;
@@ -66,6 +69,7 @@
       <SortTh num label={t("col.tokens")} sort={dir("tokens")} onclick={() => sortBy("tokens")} />
       <SortTh num label={t("col.calls")} sort={dir("calls")} onclick={() => sortBy("calls")} />
       {#if premium}<SortTh num label={t("col.premiumRequests")} sort={dir("premiumRequests")} onclick={() => sortBy("premiumRequests")} />{/if}
+      {#if credits}<SortTh num label={t("col.credits")} sort={dir("credits")} onclick={() => sortBy("credits")} />{/if}
     </tr>
   </thead>
   <tbody>
@@ -75,12 +79,14 @@
           <div class="flex items-center gap-2">
             <span class="truncate">{billingLabel(r)}</span>
             {#if r.estimated}<span class="rounded bg-surface-2 px-1.5 text-[10px] text-muted" title={t("common.estimatedHint")}>{t("common.estimated")}</span>{/if}
+            {#if r.partial}<PartialBadge />{/if}
           </div>
         </td>
         <td class="num font-medium">{usd(r.cost)}</td>
         <td class="num text-ink-2">{compact(r.tokens)}</td>
         <td class="num text-ink-2">{compact(r.calls)}</td>
         {#if premium}<td class="num text-ink-2">{r.premiumRequests ? compact(r.premiumRequests) : "–"}</td>{/if}
+        {#if credits}<td class="num text-ink-2">{r.credits ? decimal(r.credits, 2) : "–"}</td>{/if}
       </tr>
     {/each}
   </tbody>

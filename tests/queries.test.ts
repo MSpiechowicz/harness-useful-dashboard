@@ -251,3 +251,66 @@ describe("pairs", () => {
     expect(one.some((r) => r.key === "__other__" && r.label === "other")).toBe(true);
   });
 });
+
+describe("Copilot Chat partial rows", () => {
+  /** One session whose first request is only known from the chat session file (partial), the second from telemetry (complete, with credits). */
+  function seedChat() {
+    const db = memDb();
+    const prices = new PriceBook();
+    const w = new DbWriter(db, prices, ID);
+    const call = (id: string, ts: number, over: Partial<UsageRecord> = {}) =>
+      usage({ id, provider: "copilot-chat", sessionId: "copilot-chat:c1", promptId: null, ts, model: "gpt-6-luna", billing: "github-copilot", ...over });
+
+    w.session({ id: "copilot-chat:c1", provider: "copilot-chat", nativeId: "c1", project: "/work/alpha", title: "Chat" });
+    w.session({ id: "claude:s1", provider: "claude", nativeId: "s1", project: "/work/alpha", title: "Alpha work" });
+    w.usage(call("copilot-chat:c1:f:r1", T0, { partial: true, model: "gpt-6-sol" }));
+    w.usage(call("copilot-chat:c1:o:r2", T0 + 60_000, { credits: 0.8 }));
+    w.usage(call("copilot-chat:c1:o:r3", T0 + 120_000, { credits: 0.45 }));
+    w.usage(usage({ id: "u1" }));
+    return { db, q: new Queries(db, () => prices) };
+  }
+
+  test("a breakdown row is partial when any of its calls is, others are not", () => {
+    const { q } = seedChat();
+    const byProvider = new Map(q.breakdown({}, "provider").rows.map((r) => [r.key, r.partial]));
+    expect(byProvider.get("copilot-chat")).toBe(true);
+    expect(byProvider.get("claude")).toBe(false);
+
+    const byModel = new Map(q.breakdown({}, "model").rows.map((r) => [r.key, r.partial]));
+    expect(byModel.get("gpt-6-sol")).toBe(true);
+    expect(byModel.get("gpt-6-luna")).toBe(false);
+  });
+
+  test("billing carries partial and sums the credits Copilot reports", () => {
+    const { q } = seedChat();
+    const rows = new Map(q.billing({}).map((r) => [r.key, r]));
+    expect(rows.get("github-copilot")).toMatchObject({ calls: 3, partial: true });
+    expect(rows.get("github-copilot")!.credits).toBeCloseTo(1.25, 9);
+    expect(rows.get("claude")).toMatchObject({ partial: false, credits: 0 });
+
+    expect(new Map(q.billing({ model: "gpt-6-luna" }).map((r) => [r.key, r.partial])).get("github-copilot")).toBe(false);
+  });
+
+  test("session list and detail say which sessions and calls are partial", () => {
+    const { q } = seedChat();
+    const list = new Map(q.sessions({}, {}).rows.map((r) => [r.id, r]));
+    expect(list.get("copilot-chat:c1")).toMatchObject({ partial: true });
+    expect(list.get("copilot-chat:c1")!.credits).toBeCloseTo(1.25, 9);
+    expect(list.get("claude:s1")).toMatchObject({ partial: false, credits: 0 });
+
+    const detail = q.sessionDetail("copilot-chat:c1");
+    expect(detail.totals).toMatchObject({ partial: true });
+    expect(detail.totals!.credits).toBeCloseTo(1.25, 9);
+    expect(detail.timeline.map((t) => t.partial)).toEqual([true, false, false]);
+    expect(new Map(detail.models.map((m) => [m.key, m.partial]))).toEqual(new Map([["gpt-6-sol", true], ["gpt-6-luna", false]]));
+    expect(q.sessionDetail("claude:s1").totals).toMatchObject({ partial: false });
+  });
+
+  test("a complete call replacing the partial one clears the flag", () => {
+    const { q, db } = seedChat();
+    db.exec("DELETE FROM usage WHERE id = 'copilot-chat:c1:f:r1'");
+
+    expect(q.breakdown({}, "provider").rows.find((r) => r.key === "copilot-chat")!.partial).toBe(false);
+    expect(q.sessionDetail("copilot-chat:c1").totals).toMatchObject({ partial: false });
+  });
+});

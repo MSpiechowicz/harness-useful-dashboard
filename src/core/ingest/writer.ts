@@ -43,6 +43,13 @@ export class DbWriter implements IngestSink {
   private sReading: Statement;
   private sRolledDay: Statement;
   private sHasCalls: Statement;
+  private sCovered: Statement;
+  private sFillProject: Statement[];
+  private sLinkUsage: Statement;
+  private sLinkTools: Statement;
+  private sDropPartial: Statement;
+  private sDropMeta: Statement;
+  private sUnlinkTools: Statement;
   private sSupersede: Statement;
   private sGitEvent: Statement;
   private sDropGitEvent: Statement;
@@ -52,7 +59,7 @@ export class DbWriter implements IngestSink {
   private sMoveTools: Statement;
 
   constructor(
-    db: Database,
+    private db: Database,
     private prices: PriceBook,
     private identity: { user: string; host: string },
     /**
@@ -97,10 +104,10 @@ export class DbWriter implements IngestSink {
       INSERT INTO usage (id, provider, session_id, prompt_id, ts, project, user, host, model, skill, agent, is_subagent,
                          spawn_ref, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                          cache_write_1h_tokens, reasoning_tokens, total_tokens, cost_usd, cost_estimated, speed,
-                         billing, premium_requests)
+                         billing, premium_requests, partial, credits)
       VALUES ($id, $provider, $sessionId, $promptId, $ts, $project, $user, $host, $model, $skill, $agent, $isSubagent,
               $spawnRef, $input, $output, $cacheRead, $cacheWrite, $cacheWrite1h, $reasoning, $total, $cost,
-              $estimated, $speed, $billing, $premiumRequests)
+              $estimated, $speed, $billing, $premiumRequests, $partial, $credits)
       ON CONFLICT(id) DO UPDATE SET
         -- Streaming transcripts can repeat a message with growing counts: keep the largest.
         input_tokens          = MAX(usage.input_tokens, excluded.input_tokens),
@@ -115,7 +122,10 @@ export class DbWriter implements IngestSink {
         skill                 = COALESCE(usage.skill, excluded.skill),
         billing               = COALESCE(usage.billing, excluded.billing),
         speed                 = COALESCE(usage.speed, excluded.speed),
-        premium_requests      = MAX(usage.premium_requests, excluded.premium_requests)
+        premium_requests      = MAX(usage.premium_requests, excluded.premium_requests),
+        -- A complete reading of a row is never made partial again.
+        partial               = MIN(usage.partial, excluded.partial),
+        credits               = MAX(usage.credits, excluded.credits)
     `);
     // Only a newer reading replaces the one kept, so rereading an old log can't roll a limit back.
     this.sLimit = db.prepare(`
@@ -181,6 +191,16 @@ export class DbWriter implements IngestSink {
     // totals give up their tokens only once there are calls to carry them.
     const hasCalls = "SELECT 1 FROM usage WHERE id > $sessionId || ':u:' AND id < $sessionId || ':u;' LIMIT 1";
     this.sHasCalls = db.prepare(hasCalls);
+    // idx_usage_session narrows it to the session's rows: a session has few enough to filter by time.
+    this.sCovered = db.prepare("SELECT 1 FROM usage WHERE session_id = $sessionId AND partial = 0 AND ts >= $from AND ts < $to LIMIT 1");
+    this.sFillProject = ["usage", "tool_calls", "outcomes"].map((table) =>
+      db.prepare(`UPDATE ${table} SET project = $project WHERE session_id = $sessionId AND project IS NULL`),
+    );
+    this.sLinkUsage = db.prepare("UPDATE usage SET prompt_id = $promptId WHERE session_id = $sessionId AND prompt_id IS NULL AND partial = 0 AND ts >= $from AND ts < $to");
+    this.sLinkTools = db.prepare("UPDATE tool_calls SET prompt_id = $promptId WHERE session_id = $sessionId AND prompt_id IS NULL AND ts >= $from AND ts < $to");
+    this.sDropPartial = db.prepare("DELETE FROM usage WHERE id = $id AND partial = 1");
+    this.sDropMeta = db.prepare("DELETE FROM response_meta WHERE usage_id = $id");
+    this.sUnlinkTools = db.prepare("UPDATE tool_calls SET usage_id = NULL WHERE usage_id = $id");
     this.sSupersede = db.prepare(`
       UPDATE usage SET input_tokens = 0, output_tokens = 0, cache_read_tokens = 0, cache_write_tokens = 0,
                        cache_write_1h_tokens = 0, reasoning_tokens = 0, total_tokens = 0, cost_usd = 0
@@ -306,10 +326,79 @@ export class DbWriter implements IngestSink {
       speed: u.speed ?? null,
       billing: u.billing ?? null,
       premiumRequests: u.premiumRequests ?? 0,
+      partial: u.partial ? 1 : 0,
+      credits: u.credits != null && Number.isFinite(u.credits) ? u.credits : 0,
     });
     // The upsert keeps the larger counts of a row written before the session's calls came in.
     if (superseded) this.supersedeRollups(u.sessionId);
     this.stats.usage++;
+  }
+
+  covered(sessionId: string, from: number, to: number): boolean {
+    return this.sCovered.get({ sessionId, from, to }) != null;
+  }
+
+  linkPrompt(sessionId: string, promptId: string, from: number, to: number): void {
+    const range = { sessionId, promptId, from, to };
+    this.sLinkUsage.run(range);
+    this.sLinkTools.run(range);
+  }
+
+  dropPartial(usageId: string): void {
+    this.sDropPartial.run({ id: usageId });
+    this.sUnlinkTools.run({ id: usageId });
+
+    // The request's tool calls without an id (keyed by their place in it): the telemetry has them by span.
+    const file = /^(.*):f:([^:]*)$/.exec(usageId);
+    if (file) this.dropFileTools(file[1]!, file[2]!);
+  }
+
+  /** The tool calls of a chat session file request that have no call id, and their outcomes. */
+  private dropFileTools(sessionId: string, requestId: string): void {
+    const range = { from: `${sessionId}:t:f:${requestId}:`, to: `${sessionId}:t:f:${requestId};` };
+    this.db.query("DELETE FROM tool_calls WHERE id >= $from AND id < $to").run(range);
+    this.db.query("DELETE FROM outcomes WHERE id >= $from AND id < $to").run(range);
+  }
+
+  dropRequests(sessionId: string, keep: ReadonlySet<string>): void {
+    const files = `${sessionId}:f:`;
+    const filesEnd = `${sessionId}:f;`;
+    const ids = this.db
+      .query<{ id: string }, { from: string; to: string }>("SELECT id FROM usage WHERE id >= $from AND id < $to AND partial = 1 UNION SELECT usage_id FROM response_meta WHERE usage_id >= $from AND usage_id < $to")
+      .all({ from: files, to: filesEnd })
+      .map((r) => r.id);
+
+    for (const id of ids) {
+      if (keep.has(id.slice(files.length))) continue;
+      this.sDropPartial.run({ id });
+      this.sDropMeta.run({ id });
+      this.sUnlinkTools.run({ id });
+    }
+
+    // Tool calls without an id (keyed by their place in the request), and the prompts of requests gone.
+    const calls = `${sessionId}:t:f:`;
+    const callRows = this.db
+      .query<{ id: string }, { from: string; to: string }>("SELECT id FROM tool_calls WHERE id >= $from AND id < $to")
+      .all({ from: calls, to: `${sessionId}:t:f;` });
+    for (const { id } of callRows) {
+      if (keep.has(id.slice(calls.length).split(":")[0]!)) continue;
+      this.db.query("DELETE FROM tool_calls WHERE id = $id").run({ id });
+      this.db.query("DELETE FROM outcomes WHERE id = $id").run({ id });
+    }
+
+    const prompts = this.db.query<{ id: string }, { sessionId: string }>("SELECT id FROM prompts WHERE session_id = $sessionId AND provider = 'copilot-chat'").all({ sessionId });
+    for (const { id } of prompts) {
+      if (keep.has(id.slice(sessionId.length + 1))) continue;
+      this.db
+        .query("DELETE FROM prompts WHERE id = $id AND NOT EXISTS (SELECT 1 FROM usage WHERE prompt_id = $id) AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE prompt_id = $id)")
+        .run({ id });
+    }
+  }
+
+  fillProject(sessionId: string, project: string): void {
+    const resolved = this.project(project);
+    if (resolved == null) return;
+    for (const s of this.sFillProject) s.run({ sessionId, project: resolved });
   }
 
   supersedeRollups(sessionId: string): void {

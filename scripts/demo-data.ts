@@ -248,6 +248,7 @@ const MODELS: Record<Provider, [string, number][]> = {
   kilo: [["claude-sonnet-5-5", 1], ["gpt-5-codex", 1]],
   gemini: [["gemini-3.5-flash", 3], ["gemini-3.1-pro-preview", 2]],
   copilot: [["claude-sonnet-5-5", 3], ["gpt-5", 2]],
+  "copilot-chat": [["gpt-6-luna", 4], ["claude-sonnet-5-5", 3], ["gpt-5", 1]],
   hermes: [["claude-sonnet-5-5", 2], ["gpt-5", 1]],
   otel: [["gpt-5", 1]],
 };
@@ -270,6 +271,7 @@ const BILLING: Record<string, [string, number][]> = {
   pi: [["anthropic", 3], ["openai-codex", 1]],
   opencode: [["anthropic", 2], ["github-copilot", 2], ["openai", 1]],
   copilot: [["github-copilot", 1]],
+  "copilot-chat": [["github-copilot", 1]],
 };
 
 rmSync(out, { force: true });

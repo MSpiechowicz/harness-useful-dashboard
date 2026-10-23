@@ -103,6 +103,8 @@ export interface IngestStats {
   skipped: number;
   /** Why most records of the last request with skipped ones were left out, null before any was. */
   lastSkipReason: SkipReason | null;
+  /** When a request from a vscode token (Connect VS Code) was last accepted, null before any was. */
+  lastVscodeAt: number | null;
 }
 
 export interface IngestDeps {
@@ -120,6 +122,22 @@ export interface IngestDeps {
 /** Whether a bind address is reachable from this machine only. */
 export function isLoopback(bind: string): boolean {
   return bind === "localhost" || bind === "::1" || bind.startsWith("127.");
+}
+
+/**
+ * Whether a peer address is on this machine: 127.0.0.0/8, ::1, or an IPv4 loopback address mapped into IPv6. Anything
+ * else, including "unknown" (no peer address known), is not.
+ */
+export function isLoopbackPeer(ip: string): boolean {
+  const addr = ip.trim().toLowerCase().replace(/%.*$/, "");
+  if (!addr.includes(":")) return /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(addr) && addr.split(".").every((n) => Number(n) <= 255);
+
+  const groups = ipv6Groups(addr);
+  if (!groups) return false;
+
+  if (groups.slice(0, 7).every((g) => g === "0") && groups[7] === "1") return true;
+  if (groups.slice(0, 5).every((g) => g === "0") && groups[5] === "ffff") return dottedIPv4(groups[6]!, groups[7]!).startsWith("127.");
+  return false;
 }
 
 const hostPort = (host: string, port: number) => (host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`);
@@ -337,6 +355,7 @@ export class IngestServer {
   private dataSeen = false;
   private skipped = 0;
   private lastSkipReason: SkipReason | null = null;
+  private lastVscodeAt: number | null = null;
   /** Records skipped that the server log hasn't told of yet, by reason, and when it last did. */
   private unloggedSkips: Partial<Record<SkipReason, number>> = {};
   private skipsLoggedAt: number | null = null;
@@ -439,6 +458,7 @@ export class IngestServer {
       metricsOnly: this.metricsSeen && !this.dataSeen,
       skipped: this.skipped,
       lastSkipReason: this.lastSkipReason,
+      lastVscodeAt: this.lastVscodeAt,
     };
   }
 
@@ -484,7 +504,7 @@ export class IngestServer {
     if (!signal) return text(404, "not found");
     if (req.method !== "POST") return text(405, "method not allowed", { Allow: "POST" });
 
-    const cred = await this.signIn(req.headers.get("authorization"), addressKey(ip));
+    const cred = await this.signIn(req.headers.get("authorization"), ip);
     if (cred instanceof Response) return cred;
 
     const format = formatOf(req.headers.get("content-type"));
@@ -501,7 +521,7 @@ export class IngestServer {
     if (this.receiving >= MAX_RECEIVING) return text(503, "busy receiving", { "Retry-After": String(RECEIVING_RETRY_S) });
     this.receiving++;
     try {
-      return await this.receive(req, signal, format, encoding, cred);
+      return await this.receive(req, signal, format, encoding, cred, ip);
     } finally {
       this.receiving--;
     }
@@ -514,6 +534,7 @@ export class IngestServer {
     format: "protobuf" | "json",
     encoding: string,
     cred: IngestCredential,
+    ip: string,
   ): Promise<Response> {
     let wire: Uint8Array | null;
     try {
@@ -538,6 +559,7 @@ export class IngestServer {
 
     if (signal === "metrics") {
       this.metricsSeen = true;
+      this.noteVscode(cred);
       return accepted(format);
     }
 
@@ -552,7 +574,7 @@ export class IngestServer {
 
     let result: WriteResult;
     try {
-      result = this.write(batch, cred);
+      result = this.write(batch, cred, ip);
     } catch (err) {
       if (!(err instanceof SQLiteError)) throw err;
       // Locked by another machine on a shared database, or the disk is full: worth another try.
@@ -562,11 +584,17 @@ export class IngestServer {
 
     this.dataSeen = true;
     this.lastAt = this.now();
+    this.noteVscode(cred);
     if (result.hosts.length) this.lastHost = result.hosts[result.hosts.length - 1]!;
     this.usage += result.usage;
     if (result.skipped) this.noteSkipped(result.skippedFor);
     if (result.usage || result.prompts || result.tools) this.changed(result);
     return accepted(format);
+  }
+
+  /** Notes the time of an accepted request from a vscode token, for Settings to show. */
+  private noteVscode(cred: IngestCredential): void {
+    if (cred.purpose === "vscode") this.lastVscodeAt = this.now();
   }
 
   /**
@@ -595,14 +623,20 @@ export class IngestServer {
     this.unloggedSkips = {};
   }
 
-  /** Writes an export with this machine's settings: prompt text only when kept, and no detail older than retention keeps. */
-  private write(batch: ReturnType<typeof decodeOtlp>, cred: IngestCredential): WriteResult {
+  /**
+   * Writes an export with this machine's settings: prompt text only when kept, and no detail older than retention keeps.
+   * An export from a vscode token over loopback is VS Code on this machine: it is written as this machine's own.
+   */
+  private write(batch: ReturnType<typeof decodeOtlp>, cred: IngestCredential, ip: string): WriteResult {
     const cfg = this.app.cfg;
+    const { host, user } = this.app.identity;
+    const local = cred.purpose === "vscode" && isLoopbackPeer(ip) ? { host, user } : null;
     const opts = {
       storeText: cfg.ingest.storeText,
       promptTextLimit: cfg.promptTextLimit,
       detailBefore: detailCutoff(retentionMonths(cfg.detailRetentionMonths)) ?? 0,
-      localHost: this.app.identity.host,
+      localHost: host,
+      local,
     };
     return writeOtlp(this.app.db, this.app.priceBook(), batch, cred, opts);
   }
@@ -627,18 +661,22 @@ export class IngestServer {
     this.app.emit({ type: "scan", result: { filesSeen: 0, filesParsed: 1, usageRows: usage, prompts, tools, errors: [], durationMs: 0 } });
   }
 
-  /** Who sent a request from the address `key`, or the response that refuses it (see the top of this file). */
-  private async signIn(header: string | null, key: string): Promise<IngestCredential | Response> {
+  /** Who sent a request from the address `ip`, or the response that refuses it (see the top of this file). */
+  private async signIn(header: string | null, ip: string): Promise<IngestCredential | Response> {
     const kind = signInKind(header);
-    if (kind === "token") return this.tokenSignIn(header!, key);
-    if (kind === "basic") return this.basicSignIn(header!, key);
+    if (kind === "token") return this.tokenSignIn(header!, ip);
+    if (kind === "basic") return this.basicSignIn(header!, addressKey(ip));
     return unauthorized();
   }
 
-  /** A token: a valid one always passes, a wrong one is counted against the address's wrong tokens. */
-  private async tokenSignIn(header: string, key: string): Promise<IngestCredential | Response> {
+  /**
+   * A token: a valid one always passes, a wrong one is counted against the address's wrong tokens. A vscode token is
+   * for VS Code on this machine only: from any other address it is refused like a wrong one.
+   */
+  private async tokenSignIn(header: string, ip: string): Promise<IngestCredential | Response> {
+    const key = addressKey(ip);
     const cred = await this.auth.authenticate(header);
-    if (cred) return cred;
+    if (cred && (cred.purpose !== "vscode" || isLoopbackPeer(ip))) return cred;
 
     const now = this.now();
     const wait = this.tokenFailures.wait(key, now);

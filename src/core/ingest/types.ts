@@ -1,6 +1,6 @@
 import { redact } from "../redact.ts";
 
-export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot" | "hermes" | "otel";
+export type Provider = "claude" | "codex" | "cursor" | "omp" | "pi" | "opencode" | "zed" | "cline" | "roo" | "kilo" | "gemini" | "copilot" | "copilot-chat" | "hermes" | "otel";
 
 export interface SessionRecord {
   id: string;
@@ -54,6 +54,13 @@ export interface UsageRecord {
   billing?: string | null;
   /** GitHub Copilot premium requests the call counted for. */
   premiumRequests?: number;
+  /** GitHub Copilot credits the call used, as the harness reports them. */
+  credits?: number;
+  /**
+   * Only part of the call is known (Copilot Chat's session file keeps the input of a request's last model call): the
+   * cost is approximate. A complete row of the same request replaces it.
+   */
+  partial?: boolean;
   /** Overrides the ingesting machine's identity (e.g. team CSV exports). */
   user?: string | null;
   /**
@@ -227,6 +234,20 @@ export interface IngestSink {
   compaction?(c: CompactionRecord): void;
   /** A record stored as a prompt that is none (a compact summary): it goes, and what pointed at it points at `previous`. */
   notPrompt?(id: string, previous: string | null): void;
+  /** Whether a complete (non-partial) usage row of the session is timed in [from, to): a partial reading of it has been replaced. */
+  covered?(sessionId: string, from: number, to: number): boolean;
+  /** Complete rows and tool calls of the session timed in [from, to) that came in without a prompt belong to this one. */
+  linkPrompt?(sessionId: string, promptId: string, from: number, to: number): void;
+  /** A partial usage row that a complete reading replaced goes, the tool calls pointing to it are unlinked. Its response_meta stays: the request's interval. */
+  dropPartial?(usageId: string): void;
+  /**
+   * The session file no longer holds some requests (it was cut or the chat rewritten): what was read of the requests
+   * that are not in `keep` (their ids as they go into record ids) goes: partial rows, intervals, tool calls without an
+   * id, and prompts nothing else points to.
+   */
+  dropRequests?(sessionId: string, keep: ReadonlySet<string>): void;
+  /** Rows of the session that came in without a project (telemetry knows no folder) take this one. */
+  fillProject?(sessionId: string, project: string): void;
   /** A session's calls were read one by one: its rollup rows (`UsageRecord.rollup`) keep only their premium requests. */
   supersedeRollups?(sessionId: string): void;
 }

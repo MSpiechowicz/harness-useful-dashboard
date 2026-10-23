@@ -275,6 +275,7 @@ const NAMES: Record<AlertLang, Record<string, string>> = {
     "tip:repeated-prompt": "The same prompt was sent {count} times",
     "tip:edit-churn": "{file} was edited {count}× in one session",
     "tip:copilot-premium-pace": "On pace for {pace} Copilot premium requests a month",
+    "tip:copilot-chat-partial": "Copilot Chat cost is approximate for {messages} requests",
   },
   de: {
     "reason:timeout": "Zeitüberschreitung",
@@ -308,6 +309,7 @@ const NAMES: Record<AlertLang, Record<string, string>> = {
     "tip:repeated-prompt": "Derselbe Prompt wurde {count}-mal gesendet",
     "tip:edit-churn": "{file} wurde in einer Sitzung {count}× bearbeitet",
     "tip:copilot-premium-pace": "Auf Kurs für {pace} Copilot-Premium-Anfragen im Monat",
+    "tip:copilot-chat-partial": "Copilot-Chat-Kosten sind für {messages} Anfragen geschätzt",
   },
   es: {
     "reason:timeout": "Tiempo agotado",
@@ -341,6 +343,7 @@ const NAMES: Record<AlertLang, Record<string, string>> = {
     "tip:repeated-prompt": "El mismo prompt se envió {count} veces",
     "tip:edit-churn": "{file} se editó {count}× en una sesión",
     "tip:copilot-premium-pace": "Al ritmo actual, {pace} solicitudes premium de Copilot al mes",
+    "tip:copilot-chat-partial": "El costo de Copilot Chat es aproximado en {messages} solicitudes",
   },
   fr: {
     "reason:timeout": "Délai dépassé",
@@ -374,6 +377,7 @@ const NAMES: Record<AlertLang, Record<string, string>> = {
     "tip:repeated-prompt": "Le même prompt a été envoyé {count} fois",
     "tip:edit-churn": "{file} modifié {count} fois dans une même session",
     "tip:copilot-premium-pace": "Au rythme actuel, {pace} requêtes premium Copilot par mois",
+    "tip:copilot-chat-partial": "Le coût de Copilot Chat est approximatif pour {messages} requêtes",
   },
   pl: {
     "reason:timeout": "Przekroczony czas",
@@ -407,6 +411,7 @@ const NAMES: Record<AlertLang, Record<string, string>> = {
     "tip:repeated-prompt": "Ten sam prompt wysłano {count} razy",
     "tip:edit-churn": "Plik {file} edytowano {count}× w jednej sesji",
     "tip:copilot-premium-pace": "Prognoza zapytań premium Copilot: {pace} miesięcznie",
+    "tip:copilot-chat-partial": "Koszt Copilot Chat jest przybliżony dla {messages} zapytań",
   },
   pt: {
     "reason:timeout": "Tempo esgotado",
@@ -440,6 +445,7 @@ const NAMES: Record<AlertLang, Record<string, string>> = {
     "tip:repeated-prompt": "O mesmo prompt foi enviado {count}×",
     "tip:edit-churn": "{file} foi editado {count}× em uma sessão",
     "tip:copilot-premium-pace": "No ritmo de {pace} requisições premium do Copilot por mês",
+    "tip:copilot-chat-partial": "O custo do Copilot Chat é aproximado em {messages} requisições",
   },
 };
 

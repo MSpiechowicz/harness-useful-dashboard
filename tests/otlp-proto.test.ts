@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_BYTES, MAX_LIST, MAX_VALUES } from "../src/core/otlp/model.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { type Attrs, MAX_BYTES, MAX_LIST, MAX_VALUES, type OtlpBatch } from "../src/core/otlp/model.ts";
 import { decodeOtlp, MAX_RECORDS, OtlpDecodeError, OtlpTooLarge } from "../src/core/otlp/write.ts";
-import { type AttrIn, claudeLogs, dbl, encodeLogs, encodeTraces, HERMES_TRACE, hermesSpans, logsJson, Pb, type SpanIn, T0, tracesJson } from "./otlpEncode.ts";
+import { type AttrIn, claudeLogs, dbl, encodeLogs, encodeTraces, HERMES_TRACE, hermesSpans, logsJson, Pb, type ResourceIn, type SpanIn, T0, tracesJson } from "./otlpEncode.ts";
 
 const span = (over: Partial<SpanIn> = {}): SpanIn => ({ traceId: HERMES_TRACE, spanId: "00f067aa0ba902b7", name: "chat gpt-5", startMs: T0, endMs: T0 + 1500, ...over });
 const traces = (spans: SpanIn[], resource: Record<string, AttrIn> = { "service.name": "svc" }) => [{ resource, scope: { name: "my.scope", version: "1.0" }, records: spans }];
@@ -297,5 +299,77 @@ describe("decodeOtlp limits", () => {
     const kv = new Pb().string(1, "k").bytes(2, twice);
     const body = new Pb().message(1, new Pb().message(2, new Pb().message(2, new Pb().fixed64(1, 1n).message(6, kv)))).finish();
     expect(decodeOtlp("logs", body, "protobuf").logs[0]!.attrs).toEqual({ k: "second" });
+  });
+});
+
+// ---- Copilot Chat fixtures ---------------------------------------------------------------------------------------
+
+const FIXTURES = join(import.meta.dir, "fixtures", "copilot-chat", "otlp");
+const fixture = (file: string) => new Uint8Array(readFileSync(join(FIXTURES, file)));
+
+/** A decoded batch's spans as the resources they came with: a fixture sent as protobuf. */
+function resourcesOf(batch: OtlpBatch): ResourceIn<SpanIn>[] {
+  const out = new Map<Attrs, ResourceIn<SpanIn>>();
+  for (const s of batch.spans) {
+    let r = out.get(s.resource);
+    if (!r) {
+      r = { resource: s.resource as Record<string, AttrIn>, scope: { name: s.scope ?? "" }, records: [] };
+      out.set(s.resource, r);
+    }
+
+    const attrs = Object.fromEntries(Object.entries(s.attrs).filter(([, v]) => v != null)) as Record<string, AttrIn>;
+    r.records.push({
+      traceId: s.traceId,
+      spanId: s.spanId,
+      parentSpanId: s.parentSpanId ?? undefined,
+      name: s.name,
+      kind: s.kind,
+      startMs: s.startMs!,
+      endMs: s.endMs!,
+      attrs,
+      status: { code: s.status.code },
+    });
+  }
+  return [...out.values()];
+}
+
+describe("decodeOtlp: a Copilot Chat export", () => {
+  const batch = decodeOtlp("traces", fixture("traces-8-rounds.json"), "json");
+
+  test("reads span names, the status code, list attributes and times from OTLP/JSON", () => {
+    const names = batch.spans.map((s) => s.name.split(" ")[0]);
+    expect(names.filter((n) => n === "chat")).toHaveLength(15);
+    expect(names.filter((n) => n === "execute_tool")).toHaveLength(8);
+    expect(names.filter((n) => n === "invoke_agent")).toHaveLength(1);
+
+    const call = batch.spans.find((s) => s.attrs["gen_ai.agent.name"] === "panel/editAgent")!;
+    expect(call.scope).toBe("copilot-chat");
+    expect(call.resource["service.name"]).toBe("copilot-chat");
+    expect(call.attrs["gen_ai.response.finish_reasons"]).toEqual(["stop"]);
+    expect(call.attrs["copilot_chat.copilot_usage_nano_aiu"]).toBe(299_322_000);
+    expect(call.endMs! - call.startMs!).toBeGreaterThan(0);
+    expect(batch.spans.filter((s) => s.name.startsWith("execute_tool")).every((s) => s.status.code === 1)).toBe(true);
+  });
+
+  test("the same export as protobuf decodes to the same spans", () => {
+    const again = decodeOtlp("traces", encodeTraces(resourcesOf(batch)), "protobuf");
+    expect(again.spans).toHaveLength(batch.spans.length);
+    for (const [i, s] of again.spans.entries()) {
+      const was = batch.spans[i]!;
+      expect({ ...s, resource: { ...s.resource }, attrs: { ...s.attrs } }).toMatchObject({
+        traceId: was.traceId,
+        spanId: was.spanId,
+        parentSpanId: was.parentSpanId,
+        name: was.name,
+        startMs: was.startMs,
+        endMs: was.endMs,
+        status: { code: was.status.code },
+        attrs: Object.fromEntries(Object.entries(was.attrs).filter(([, v]) => v != null)),
+      });
+    }
+  });
+
+  test("its log export decodes too", () => {
+    expect(decodeOtlp("logs", fixture("logs.json"), "json").logs.length).toBeGreaterThan(0);
   });
 });

@@ -33,7 +33,9 @@ export interface SourceConfig {
   geminiDirs: string[];
   /** GitHub Copilot CLI home directories (contain session-state/). */
   copilotDirs: string[];
-  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean; zed: boolean; cline: boolean; roo: boolean; kilo: boolean; gemini: boolean; copilot: boolean };
+  /** VS Code's user folders (and its forks') whose chat sessions GitHub Copilot Chat keeps (workspaceStorage, globalStorage). */
+  copilotChatDirs: string[];
+  enabled: { claude: boolean; codex: boolean; omp: boolean; pi: boolean; opencode: boolean; zed: boolean; cline: boolean; roo: boolean; kilo: boolean; gemini: boolean; copilot: boolean; "copilot-chat": boolean };
 }
 
 export interface AppConfig {
@@ -138,7 +140,8 @@ export function defaultConfig(): AppConfig {
       kiloDirs: extensionDirs(home, "kilocode.kilo-code", [join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "kilo")]),
       geminiDirs: [join(process.env.GEMINI_CLI_HOME ?? home, ".gemini")],
       copilotDirs: [process.env.COPILOT_HOME ?? join(home, ".copilot")],
-      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true },
+      copilotChatDirs: copilotChatDirs(home),
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true, "copilot-chat": true },
     },
     limits: { claude: true, omp: true, codex: true, pi: true, opencode: true, copilot: true },
     cursorSync: false,
@@ -172,7 +175,10 @@ function clineDataDir(home: string): string {
 }
 
 /** Editors that run VS Code extensions, by the folder they keep their settings in. */
-const VSCODE_EDITORS = ["Code", "Code - Insiders", "VSCodium", "Cursor", "Windsurf"];
+const VSCODE_EDITORS = ["Code", "Code - Insiders", "Code - OSS", "VSCodium", "Cursor", "Windsurf"];
+
+/** The editors GitHub Copilot Chat runs in (Cursor and Windsurf have their own assistants). */
+const COPILOT_CHAT_EDITORS = ["Code", "Code - Insiders", "Code - OSS", "VSCodium"];
 
 /** The folder apps keep their settings in: ~/.config, ~/Library/Application Support, %APPDATA%. */
 function settingsBase(home: string): string {
@@ -184,6 +190,20 @@ function settingsBase(home: string): string {
 /** Where VS Code and its forks keep extension data: <settings folder>/<editor>/User/globalStorage. */
 function editorStorageDirs(home: string): string[] {
   return VSCODE_EDITORS.map((e) => join(settingsBase(home), e, "User", "globalStorage"));
+}
+
+/**
+ * The user folders of the editors Copilot Chat runs in, as <settings folder>/<editor>/User, and on Linux the ones of
+ * the Flatpak builds. The ones that exist, else VS Code's, so the list shows where the chats will be.
+ */
+function copilotChatDirs(home: string): string[] {
+  const dirs = COPILOT_CHAT_EDITORS.map((e) => join(settingsBase(home), e, "User"));
+  if (process.platform === "linux") {
+    dirs.push(join(home, ".var", "app", "com.visualstudio.code", "config", "Code", "User"));
+    dirs.push(join(home, ".var", "app", "com.vscodium.codium", "config", "VSCodium", "User"));
+  }
+  const found = dirs.filter((d) => existsSync(d));
+  return found.length ? found : [dirs[0]!];
 }
 
 /** Cline's JetBrains plugin keeps extension data per IDE: <settings folder>/JetBrains/<IDE>/globalStorage. */
@@ -281,8 +301,8 @@ export function retentionMonths(months: unknown): number {
   return Math.min(120, Math.max(MIN_RETENTION_MONTHS, Math.round(n)));
 }
 
-const SOURCE_DIRS = ["claudeDirs", "codexDirs", "ompDirs", "piDirs", "opencodeDirs", "zedDirs", "clineDirs", "rooDirs", "kiloDirs", "geminiDirs", "copilotDirs"] as const;
-const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo", "gemini", "copilot"] as const;
+const SOURCE_DIRS = ["claudeDirs", "codexDirs", "ompDirs", "piDirs", "opencodeDirs", "zedDirs", "clineDirs", "rooDirs", "kiloDirs", "geminiDirs", "copilotDirs", "copilotChatDirs"] as const;
+const SOURCES = ["claude", "codex", "omp", "pi", "opencode", "zed", "cline", "roo", "kilo", "gemini", "copilot", "copilot-chat"] as const;
 const LIMIT_SOURCES = ["claude", "omp", "codex", "pi", "opencode", "copilot"] as const;
 
 /** A settings change: what `parseSettings` lets through, merged into the config by the server. */

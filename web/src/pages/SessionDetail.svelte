@@ -7,6 +7,7 @@
   import Empty from "../components/Empty.svelte";
   import ListCard from "../components/ListCard.svelte";
   import Pager from "../components/Pager.svelte";
+  import PartialBadge from "../components/PartialBadge.svelte";
   import SessionLabel from "../components/SessionLabel.svelte";
   import SortTh from "../components/SortTh.svelte";
   import TableCard from "../components/TableCard.svelte";
@@ -17,7 +18,7 @@
   import type { CallRow } from "../lib/charts.ts";
   import CallCharts from "../components/CallCharts.svelte";
   import { colorFor } from "../lib/colors.svelte.ts";
-  import { compact, count, dateTime, duration, percent, time, usd } from "../lib/format.ts";
+  import { compact, count, dateTime, decimal, duration, percent, time, usd } from "../lib/format.ts";
   import { PROVIDER_NAMES } from "../lib/palette.ts";
   import { t } from "../lib/i18n.svelte.ts";
   import { navigate, store } from "../lib/state.svelte.ts";
@@ -27,7 +28,7 @@
 
   interface Detail {
     session: { id: string; title: string | null; project: string | null; provider: string; git_branch: string | null; client: string | null; client_version: string | null; agent: string | null; parent_session_id: string | null; parent?: { id: string; title: string | null; provider: string | null; startedAt: number | null; cost: number }; brief?: string | null; started_at: number; ended_at: number; user: string; host: string } | null;
-    totals: Totals | null;
+    totals: (Totals & { partial?: boolean; credits?: number }) | null;
     prompts: { id: string; ts: number; text: string | null; skill: string | null; tokens: number; cost: number; messages: number; toolCalls: number }[];
     timeline: (CallRow & { promptId: string | null })[];
     models: (Totals & { key: string })[];
@@ -52,8 +53,11 @@
   const costHint = $derived.by(() => {
     const cost = tot?.cost ?? 0;
     const prompts = d.data?.prompts.length ?? 0;
-    if (prompts > 1) return t("detail.costPerPrompt", { cost: usd(cost / prompts) });
-    return tot?.messages ? t("detail.costPerCall", { cost: usd(cost / tot.messages) }) : undefined;
+    const base = prompts > 1 ? t("detail.costPerPrompt", { cost: usd(cost / prompts) }) : tot?.messages ? t("detail.costPerCall", { cost: usd(cost / tot.messages) }) : undefined;
+    // Copilot Chat reports the credits each call used.
+    if (!tot?.credits) return base;
+    const credits = t("detail.credits", { n: decimal(tot.credits, 2) });
+    return base ? `${base} · ${credits}` : credits;
   });
   let briefOpen = $state(false);
   // Each prompt's place in the session (1, 2, …): the table's "#" and the call charts' prompt marks use the same.
@@ -138,6 +142,7 @@
               <span class="h-2 w-2 rounded-full" style:background={colorFor("provider", s.provider)}></span>
               {PROVIDER_NAMES[s.provider as keyof typeof PROVIDER_NAMES] ?? s.provider}{s.client_version ? ` ${s.client_version}` : ""}
               {#if s.client}<span class="text-muted">{s.client}</span>{/if}
+              {#if tot?.partial}<PartialBadge />{/if}
             </span>
           {/if}
           {#if s?.agent}<span class="inline-flex items-center gap-1.5"><Bot size={13} class="-translate-y-px text-muted" />{s.agent}</span>{/if}

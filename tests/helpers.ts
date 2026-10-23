@@ -35,7 +35,8 @@ export function testConfig(root: string, patch: Partial<AppConfig> = {}): AppCon
       kiloDirs: [join(root, "vscode", "globalStorage"), join(root, "kilo")],
       geminiDirs: [join(root, "gemini")],
       copilotDirs: [join(root, "copilot")],
-      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true },
+      copilotChatDirs: [join(root, "vscode-user")],
+      enabled: { claude: true, codex: true, omp: true, pi: true, opencode: true, zed: true, cline: true, roo: true, kilo: true, gemini: true, copilot: true, "copilot-chat": true },
     },
     ...patch,
   };

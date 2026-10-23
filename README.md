@@ -8,7 +8,7 @@
 # Harness Dashboard
 
 **Token usage across your AI coding tools, in one local app.** Harness Dashboard reads the sessions that
-Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, pi, omp (oh-my-pi), Zed and the Cline, Roo Code and Kilo
+Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, GitHub Copilot Chat in VS Code, OpenCode, pi, omp (oh-my-pi), Zed and the Cline, Roo Code and Kilo
 Code extensions already write to disk, plus Cursor usage from cursor.com or its CSV export. It stores
 everything in a local SQLite database and shows clear, interactive charts of where your tokens and money go.
 
@@ -255,6 +255,7 @@ neutral dark gray with a blue accent.
 | Kilo Code | its folder in VS Code's extension storage (`…/globalStorage/kilocode.kilo-code`, also the forks) and `~/.local/share/kilo` | task folders of Kilo Code up to 5.x and Kilo Code 7's database: a row per model call with the cost Kilo worked out |
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/` (or `$GEMINI_CLI_HOME/.gemini`) | per-response usage with cached and thinking tokens, prompts, tools and their errors, subagent chats, session summaries as titles. The project comes from the folder's `.project_root`. Chats from before v0.39 (one JSON file each) are read too |
 | GitHub Copilot CLI | `~/.copilot/session-state/<id>/events.jsonl` and `~/.copilot/session-store.db` (or `$COPILOT_HOME`) | prompts, tools and their errors, and the tokens and premium requests per model and agent that Copilot writes when a session ends, as one row per model on that moment. When `session-store.db` exists, its `assistant_usage_events` table gives the tokens of each call, opened read-only. A session with rows there keeps only its premium requests from the end-of-session totals, so nothing is counted twice. GitHub does not document that database, so support is best effort and was tested with made-up data only. A session whose store holds only some of its calls is undercounted. Without the file, or for a session that never ended cleanly, there are no tokens per call. Compactions Copilot runs itself show up as compactions. Billed through GitHub Copilot, cost shown at API prices |
+| Copilot Chat | the chat session files of VS Code, Code - Insiders, Code - OSS and VSCodium: `workspaceStorage/*/chatSessions` and `globalStorage/emptyWindowChatSessions` in the editor's `User` folder (`~/.config/Code/User`, macOS `~/Library/Application Support/Code/User`, Windows `%APPDATA%\Code\User`, also the Flatpak's). Cursor and Windsurf are not read | GitHub Copilot Chat, with no setup. VS Code keeps only the last model call's input of each request, so these rows are marked **partial**. Output tokens and Copilot credits are exact, input and cost are approximate. Connect VS Code (see [Copilot Chat](#copilot-chat)) for exact rows. Prompts and tools too. Billed through GitHub Copilot, cost shown at API prices |
 | Cursor | cursor.com, asked with the login the Cursor editor keeps on the machine (`~/.config/Cursor/User/globalStorage/state.vscdb`, macOS `~/Library/Application Support/Cursor/…`, Windows `%APPDATA%\Cursor\…`), or the CSV export from cursor.com → Dashboard → Usage | Cursor keeps usage server-side. Turn on **Settings → Sync Cursor usage** (off by default) to fetch it every 6 hours, or import the CSV in **Settings** or with `import-cursor`. A row per model call with its tokens and the cost Cursor charged. A call that is both synced and imported counts once. The login is read from Cursor's database each time (read-only), never stored, logged or renewed, and sent to cursor.com only. An expired one is reported until Cursor signs in again |
 | Hermes Agent | sent over OTLP by the `hermes_otel` plugin (see [Remote agents](#remote-agents)) | a row per model call with the cost Hermes reports, tools and their outcomes, subagent sessions |
 | Claude Code on other machines | sent over OTLP by Claude Code's own telemetry (see [Remote agents](#remote-agents)) | a row per API request priced with the price book, tools and their outcomes, prompts. The machine the dashboard runs on is read from its logs instead |
@@ -834,6 +835,29 @@ listen on `0.0.0.0`.
 - Remote usage has no logs on this machine. A full rescan can't rebuild it, and deleting the database loses it.
 - The AI session labeler never reads remote sessions.
 
+### Copilot Chat
+
+GitHub Copilot Chat in VS Code, Code - Insiders, Code - OSS and VSCodium shows up as its own source without any setup. The
+dashboard reads the chat session files the editor keeps. They hold the output tokens and the Copilot credits of each
+request, but for input only the last model call. Such rows are marked **partial**, and the hint on the badge says that
+input counts only the last model call of each request and cost is approximate. A tip in the dashboard points to the fix
+below. Folders can be changed in **Settings → Data sources** (`sources.copilotChatDirs`), and the source can be switched
+off there (`enabled["copilot-chat"]`).
+
+**Connect VS Code** in **Settings** makes every model call arrive exactly, with its cached tokens, credits and time to
+first token. Each exact row replaces the partial row of its request, so nothing counts twice. It needs the collector
+from [Remote agents](#remote-agents) to be on, and offers to turn it on. Connect then:
+
+- writes six `github.copilot.chat.otel.*` settings into the editor's `settings.json`: `enabled`, `exporterType`
+  (`otlp-http`), `otlpEndpoint` (the local collector), `headers` (a token made only for this editor), `captureContent`
+  (`false`) and `maxAttributeSizeChars` (`64`)
+- keeps those settings out of Settings Sync
+- keeps a backup of `settings.json` next to it and asks you to reload the VS Code window
+
+**Disconnect** removes the settings and revokes the token. Connect works for VS Code on the same machine, not over
+Remote-SSH. An environment variable or an enterprise policy can override these settings, and Settings warns when the
+dashboard's own environment sets one. Copilot may send prompt and response text over OTel, and the dashboard never stores it.
+
 ### Database size
 
 Two months of heavy use come to about 250 MB, mostly one row per tool call and per tool result with its indexes. To keep
@@ -930,7 +954,7 @@ Every data color comes from one palette (`web/src/lib/palette.ts`), and each col
 
 - **Reserved.** Each harness has its own color: Claude Code orange, Codex blue, Cursor gold, omp plum, pi teal,
   OpenCode crimson, Zed indigo, Cline lime, Roo Code magenta, Kilo Code amber, Gemini CLI cyan (slate blue in the Graphite
-  theme), Copilot CLI wine, Hermes Agent deep navy (pale pink in the Graphite theme) and OpenTelemetry dusty mauve (yellow in Graphite). Models wear their maker's color whichever harness or plan they ran under (a Claude model through
+  theme), Copilot CLI wine, Copilot Chat periwinkle, Hermes Agent deep navy (pale pink in the Graphite theme) and OpenTelemetry dusty mauve (yellow in Graphite). Models wear their maker's color whichever harness or plan they ran under (a Claude model through
   omp or Copilot is still Claude orange), with shades generated from it so models of one maker stay apart in a stacked
   chart. The four token types have their own set (green-teal, olive, lilac, purple).
 - **General pool.** Projects, users, skills, agents and sources take the top values' colors by hue first (green, sky,
@@ -953,7 +977,8 @@ URLs of pull requests the agents opened are stored.
 
 A few files outside the agents' logs are read, all on this machine. For Live, the files `~/.claude/sessions/*.json` are
 read for the process id and session id only, never the `.key` files next to them. Copilot's `session-store.db` is opened
-read-only.
+read-only. So are VS Code's chat session files for Copilot Chat. Connect VS Code edits the editor's `settings.json` after
+you ask for it, keeps a backup, and Disconnect undoes it.
 
 The app makes three kinds of outbound request, and never sends your usage in any: the optional update check against
 the GitHub releases API, while the Live view is open the plan-limit checks: with Anthropic, ChatGPT and GitHub,
@@ -966,7 +991,8 @@ The Prometheus endpoint sends nothing: it is off by default, and once on it only
 token. Nothing leaves the machine unless something scrapes it.
 
 The remote agents port is off by default as well. Once on, it only accepts data from a sender that signs in with a token
-or the basic auth user, and it never gives any back.
+or the basic auth user, and it never gives any back. Connect VS Code uses that port on this machine only, and the content
+Copilot Chat could send over OTel is never stored.
 
 ## Development
 

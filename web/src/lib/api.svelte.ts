@@ -151,6 +151,8 @@ export interface BreakdownRow extends Totals {
   firstTs: number;
   lastTs: number;
   estimated: number;
+  /** Some of the usage has only the last model call's input (Copilot Chat before VS Code is connected). Newer servers only. */
+  partial?: boolean;
   cacheHitRate: number;
   share: number;
   tokenShare: number;
@@ -165,6 +167,10 @@ export interface BillingRow {
   cost: number;
   premiumRequests: number;
   estimated: boolean;
+  /** Newer servers only. */
+  partial?: boolean;
+  /** Copilot credits the calls used, as the editor reports them. Newer servers only. */
+  credits?: number;
 }
 
 /** One tag's usage (/api/tags): the sessions that carry it, a subagent's included. */

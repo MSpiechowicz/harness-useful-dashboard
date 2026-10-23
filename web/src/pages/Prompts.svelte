@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PartialBadge from "../components/PartialBadge.svelte";
   import ValueBar from "../components/ValueBar.svelte";
   import ViewGate from "../components/ViewGate.svelte";
   import TableCard from "../components/TableCard.svelte";
@@ -21,6 +22,8 @@
     ts: number;
     text: string | null;
     skill: string | null;
+    /** Input counts only the last model call of each request. Newer servers only. */
+    partial?: boolean;
     provider: string;
     projectLabel: string;
     project: string | null;
@@ -137,6 +140,7 @@
                   <div class="flex items-center gap-2">
                     <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style:background={colorFor("provider", r.provider)} title={r.provider}></span>
                     <Link to="#/prompts/{encodeURIComponent(r.id)}" class="truncate text-ink">{r.text ?? t("prompts.noText")}</Link>
+                    {#if r.partial}<PartialBadge />{/if}
                   </div>
                 </td>
                 <td class="max-w-40 text-xs" title={r.skill ?? undefined}>
