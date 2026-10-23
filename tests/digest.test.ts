@@ -370,8 +370,9 @@ describe("the app and its routes", () => {
     const now = Date.now();
     expect(app.checkDigest(now)).toBeNull();
 
-    // The next Monday 9:00 comes: a digest of the week that ended, and a notification
-    const monday = latestSlot(now, 1, 9) + 7 * 86_400_000;
+    // The next Monday 9:00 comes: a digest of the week that ended, and a notification. Found as a slot, not by adding
+    // 7 × 24 hours: a week that crosses a clock change is an hour longer or shorter.
+    const monday = latestSlot(now + 7 * 86_400_000, 1, 9);
     const first = app.checkDigest(monday + 5 * MIN);
     expect(first).not.toBeNull();
     expect(first!.digest.week).toBe("last");
@@ -386,7 +387,7 @@ describe("the app and its routes", () => {
     expect(shown).toHaveLength(1);
 
     // The app was off over the next Monday: it writes that week's digest when it starts, once
-    const later = monday + 7 * 86_400_000 + 4 * 3_600_000;
+    const later = latestSlot(monday + 8 * 86_400_000, 1, 9) + 4 * 3_600_000;
     expect(app.checkDigest(later)).not.toBeNull();
     expect(app.checkDigest(later + 3_600_000)).toBeNull();
     expect(shown).toHaveLength(2);
@@ -396,7 +397,7 @@ describe("the app and its routes", () => {
     const shown: string[] = [];
     app.notifier = async (title) => (shown.push(title), true);
     await req("/api/language", "POST", post, { language: "pl" });
-    const next = latestSlot(Date.now(), 1, 9) + 28 * 86_400_000;
+    const next = latestSlot(Date.now() + 28 * 86_400_000, 1, 9);
     app.checkDigest(next);
     expect(shown).toEqual(["Podsumowanie tygodnia jest gotowe"]);
   });
