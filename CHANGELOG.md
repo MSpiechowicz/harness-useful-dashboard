@@ -1,3 +1,10 @@
+## [2.8.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.8.0...v2.8.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* the plan limit dials read more clearly, with the percentage lower in the dial and the limit name in white ([6ed2f56](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/6ed2f562a7ccbf4bd5cb5b3efcfdee72ff654226))
+
 # [2.8.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.7.0...v2.8.0) (2026-10-24)
 
 
