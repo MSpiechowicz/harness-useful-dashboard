@@ -880,7 +880,7 @@
 </script>
 
 <!-- The cards stay at a reading width, so a control sits near its label. On wide screens the sections are listed beside them. -->
-<div class="flex items-start gap-8">
+<div class="settings-page flex items-start gap-8">
   {#if sections.length}
     <div class="sticky top-[4.5rem] hidden max-h-[calc(100vh-5.5rem)] w-48 shrink-0 overflow-y-auto xl:block">
       <SectionNav items={sections} label={t("settings.sections")} />
@@ -921,7 +921,7 @@
 
       <Card id="settings-database" title={t("settings.database")} subtitle={t("settings.dbHint")} divided>
         <SettingRow label={t("settings.dbInUse")} hint={currentDb}>
-          <span class="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-ink-2">
+          <span class="rounded-full border border-line px-3 py-1 text-[13px] text-ink-2">
             {currentDb === defaultDb ? t("settings.dbDefault") : t("settings.dbCustom")}
           </span>
         </SettingRow>
@@ -1017,7 +1017,7 @@
             <!-- Exact token counts come from VS Code itself: its settings are pointed at the collector on this machine. -->
             <SettingRow label={t("settings.vscode")} hint={t("settings.vscodeHint")} wide>
               <!-- As wide as a source's switch, so the name lines up with the sources above. -->
-              {#snippet lead()}<span class="block w-7" aria-hidden="true"></span>{/snippet}
+              {#snippet lead()}<span class="block w-[44px]" aria-hidden="true"></span>{/snippet}
               <div class="flex w-full min-w-0 flex-col gap-2">
                 <div class="flex items-center justify-end gap-2">
                   {#if vscodeInstalled.length}
@@ -1266,7 +1266,7 @@
           {#each [{ key: "hermes", name: t("settings.source.hermes"), hint: t("settings.ingestHermesHint"), text: hermesSnippet }, { key: "claude", name: t("settings.source.claude"), hint: t("settings.ingestClaudeHint"), text: claudeSnippet }] as snip (snip.key)}
             <SettingRow label={snip.name} hint={snip.hint} wide>
               <pre class="min-w-0 flex-1 overflow-x-auto rounded-lg bg-surface-2 px-3 py-2 font-mono text-[11px] leading-relaxed text-ink-2">{snip.text}</pre>
-              <button class="btn shrink-0 self-start" onclick={() => copyText(snip.key, snip.text)}>
+              <button class="btn shrink-0" onclick={() => copyText(snip.key, snip.text)}>
                 {#if copied === snip.key}<Check size={14} />{t("settings.metricsCopied")}{:else}<Copy size={14} />{t("settings.metricsCopy")}{/if}
               </button>
             </SettingRow>

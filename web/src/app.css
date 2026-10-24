@@ -501,8 +501,26 @@ body {
   transform: translateX(0.75rem);
   background: white;
 }
+/* The Switch component is Harness Desktop's switch: a fixed 44x24 track with a 1px rim and 2px padding, so the 18px
+   knob sits 2px from each side and travels exactly 20px. Pixel sizes, so no subpixel gap splits unevenly. The small
+   switch inside a Toggle button keeps the size above. */
 button.switch {
   cursor: pointer;
+  width: 44px;
+  height: 24px;
+  border: 1px solid var(--border-strong);
+  box-shadow: none;
+}
+button.switch::after {
+  width: 18px;
+  height: 18px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+button.switch.on {
+  border-color: transparent;
+}
+button.switch.on::after {
+  transform: translateX(20px);
 }
 button.switch:disabled {
   opacity: 0.5;
@@ -548,6 +566,26 @@ button.switch:focus-visible {
   justify-content: center;
   gap: 0.375rem;
   height: 1.625rem;
+}
+/* The Settings page takes Harness Desktop's control size: 36px controls with 14px text, 16px aside in a button. The
+   segmented control keeps 2px inside its rim, so its buttons are 30px. The rest of the dashboard keeps 2rem controls. */
+.settings-page .btn {
+  height: 36px;
+  padding: 0 1rem;
+  font-size: 14px;
+}
+.settings-page .btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+.settings-page .input {
+  height: 36px;
+  font-size: 14px;
+}
+.settings-page .seg.wide button {
+  height: 30px;
+  font-size: 13px;
 }
 .input:focus-within:not(:focus) {
   outline: 2px solid var(--accent);
