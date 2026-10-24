@@ -1,3 +1,10 @@
+# [2.8.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.7.0...v2.8.0) (2026-10-24)
+
+
+### Features
+
+* Settings takes Harness Desktop's switch, text and control sizes, with every row centred ([4b62f29](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/4b62f292f4054243ef210eee350093f200765c37))
+
 # [2.7.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.6.0...v2.7.0) (2026-10-24)
 
 
