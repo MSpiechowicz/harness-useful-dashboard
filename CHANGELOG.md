@@ -1,3 +1,10 @@
+## [2.9.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.9.0...v2.9.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* plan limit gauges grow into the card's free space and the card fits its gauges under the chart ([750cb1c](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/750cb1c4435a9fa0248e2671090e42ec4c0bc963))
+
 # [2.9.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.8.1...v2.9.0) (2026-10-24)
 
 
