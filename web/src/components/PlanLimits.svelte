@@ -183,7 +183,7 @@
 <!-- One dial: the track, the red end, the solid arc, the pale forecast arc, the ticks, the needle and the number. -->
 {#snippet dial(provider: string, w: LimitWindow, d: { value: number; solid: number; ahead: { from: number; to: number } | null }, label: string, small: boolean)}
   {@const color = colorFor("provider", provider)}
-  <svg viewBox="0 0 120 106" width={small ? 92 : 112} height={small ? 81 : 99} class="shrink-0" role="img" aria-label={label}>
+  <svg viewBox="0 0 120 106" width={small ? 96 : 120} height={small ? 85 : 106} class="shrink-0" role="img" aria-label={label}>
     <path d={arc(0, 1)} fill="none" class="stroke-surface-3" stroke-width="8" />
     <path d={mode === "used" ? arc(0.9, 1) : arc(0, 0.1)} fill="none" stroke="var(--bad-ink)" stroke-opacity=".55" stroke-width="8" />
     {#if d.ahead}<path d={arc(d.ahead.from, d.ahead.to)} fill="none" stroke={color} stroke-opacity=".35" stroke-width="8" />{/if}
@@ -196,8 +196,8 @@
     <polygon points={needle(d.value)} class="fill-ink stroke-ink" stroke-width=".8" stroke-linejoin="round" />
     <circle cx={CX} cy={CY} r="6.5" class="fill-ink" />
     <circle cx={CX} cy={CY} r="2.2" class="fill-surface" />
-    <text x={CX} y="81" text-anchor="middle" dominant-baseline="central" font-size="17" font-weight="650" class="fill-ink">{Math.round(d.value * 100)}%</text>
-    <text x={CX} y="99" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="500" class="fill-ink-2">{t(mode === "used" ? "live.dial.used" : "live.dial.left")}</text>
+    <text x={CX} y="83" text-anchor="middle" dominant-baseline="central" font-size="21" font-weight="650" class="fill-ink">{Math.round(d.value * 100)}%</text>
+    <text x={CX} y="101" text-anchor="middle" dominant-baseline="central" font-size="9.5" font-weight="500" class="fill-ink-2">{t(mode === "used" ? "live.dial.used" : "live.dial.left")}</text>
   </svg>
 {/snippet}
 
@@ -213,17 +213,17 @@
     <div class="flex items-center gap-[22px] px-1 py-0.5">
       {@render dial(r.provider, w, d, label, false)}
       <div class="mb-1.5 flex min-w-0 flex-col items-start gap-1.5">
-        <span class="text-[13px] text-ink">{windowName(w)}</span>
-        <span class="flex h-6 items-center">{@render chip(c)}</span>
-        <span class="text-xs text-muted">{@render counted()}</span>
+        <span class="text-[13px] font-medium text-ink">{windowName(w)}</span>
+        <span class="flex h-5 items-center">{@render chip(c)}</span>
+        <span class="text-[11px] text-muted">{@render counted()}</span>
       </div>
     </div>
   {:else}
     <div class="flex w-full min-w-0 flex-col items-center gap-1.5 text-center">
-      <div class="mb-1.5">{@render dial(r.provider, w, d, label, dense)}</div>
-      <span class="h-[18px] max-w-full truncate text-xs leading-[18px] text-ink" title={windowName(w)}>{dense ? shortName(w) : windowName(w)}</span>
-      <span class="flex h-6 max-w-full items-center justify-center">{@render chip(c)}</span>
-      <span class="min-h-4 text-[11px] leading-4 text-balance text-muted">{@render counted()}</span>
+      {@render dial(r.provider, w, d, label, dense)}
+      <span class="mt-1.5 h-[18px] max-w-full truncate text-[13px] leading-[18px] font-medium text-ink" title={windowName(w)}>{dense ? shortName(w) : windowName(w)}</span>
+      <span class="flex h-5 max-w-full items-center justify-center">{@render chip(c)}</span>
+      <span class="min-h-3.5 text-[10.5px] leading-[14px] text-balance text-muted">{@render counted()}</span>
     </div>
   {/if}
 {/snippet}
