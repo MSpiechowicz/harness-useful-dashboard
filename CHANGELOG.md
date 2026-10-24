@@ -1,3 +1,10 @@
+## [2.9.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.9.1...v2.9.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* plan limit chips share one width and their texts fit every column in every language ([486b48a](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/486b48ada01e6b0682c3f400b18a172e76a78ad7))
+
 ## [2.9.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.9.0...v2.9.1) (2026-10-24)
 
 
