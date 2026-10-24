@@ -1,3 +1,10 @@
+# [2.9.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.8.1...v2.9.0) (2026-10-24)
+
+
+### Features
+
+* plan limits as a tachometer, segmented arc, VU meter, thermometer or rings, picked in the card and remembered ([5455ddb](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/5455ddb1528ecf132ce18c3cf1e88a6af57e59c9))
+
 ## [2.8.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.8.0...v2.8.1) (2026-10-24)
 
 
