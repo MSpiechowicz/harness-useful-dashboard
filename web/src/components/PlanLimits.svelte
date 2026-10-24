@@ -162,7 +162,7 @@
 {/snippet}
 
 {#snippet chip(c: Chip | null)}
-  {#if c}<span class="limit-chip {c.kind}">{c.text}</span>{/if}
+  {#if c}<span class="limit-chip {c.kind}" title={c.text}><span class="min-w-0 truncate">{c.text}</span></span>{/if}
 {/snippet}
 
 <!-- A limit: its gauge, name, status chip and reset line, in rows of fixed height so a missing chip moves nothing. A lone

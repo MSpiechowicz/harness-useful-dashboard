@@ -825,9 +825,13 @@ table.data th.num {
 
 /* Plan limits: the status chip under a dial. One style for every state, a solid fill without a border, only the color
    changes. White text sits on the two fills (green, red), like on the primary and danger buttons. */
+/* One width for every chip, the longest text in any language (French "Épuisé mer. 04:37"), so a row of them reads as
+   one set. The text is centred. A narrower column still wins (max-width), and a text too long ends in "…". */
 .limit-chip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 116px;
   max-width: 100%;
   padding: 2px 9px;
   border-radius: 9999px;
@@ -850,10 +854,10 @@ table.data th.num {
 }
 /* Four or more dials share a row: a smaller chip, so neighbours never touch. */
 .limit-dense .limit-chip {
-  padding: 1px 7px;
-  font-size: 10.5px;
+  width: 95px;
+  padding: 1px 5px;
+  font-size: 10px;
 }
-/* A chip in the list beside the rings: the row's own height is a line of small text. */
 /* The pager under the dials: one row shorter than a table's, so the card keeps the chart's height. */
 .limit-pager .table-footer {
   padding-block: 0.5rem;
