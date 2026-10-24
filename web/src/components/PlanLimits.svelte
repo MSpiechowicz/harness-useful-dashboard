@@ -28,9 +28,9 @@
     fetchedAt: number;
     /** The plans the sessions in the window ran on, when the limits were asked for a window. */
     active: { provider: string; source: Source }[] | null;
-    /** What the dials show: the share used or the share left. Older servers send none, which is used. */
+    /** What the gauges show: the share used or the share left. Older servers send none, which is used. */
     bars?: "used" | "left";
-    /** Whether the dials draw where each limit is heading by the reset. Older servers send none, which is yes. */
+    /** Whether the gauges draw where each limit is heading by the reset. Older servers send none, which is yes. */
     forecast?: boolean;
   }
 
@@ -60,7 +60,7 @@
     return w.scope ? `${base} · ${w.scope}` : base;
   }
 
-  /** The name for a narrow dial: the scope alone when there is one ("Fable"), otherwise the length of the window ("Week"). */
+  /** The name for a narrow gauge: the scope alone when there is one ("Fable"), otherwise the length of the window ("Week"). */
   export function shortName(w: LimitWindow): string {
     if (w.scope) return w.scope;
 
@@ -78,9 +78,13 @@
 <script lang="ts">
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, relative, until } from "../lib/format.ts";
+  import type { LimitGauge as GaugeStyle } from "../lib/state.svelte.ts";
+  import LimitGauge, { type Dial, type GaugeKind } from "./LimitGauge.svelte";
+  import LimitRings, { ringOpacity } from "./LimitRings.svelte";
   import Pager from "./Pager.svelte";
 
-  let { data, now }: { data: LimitsResult; now: number } = $props();
+  /** `gauge` is how the limits are drawn: the viewer's pick on Live. */
+  let { data, now, gauge = "tach" }: { data: LimitsResult; now: number; gauge?: GaugeStyle } = $props();
 
   // One provider per page. The page is kept by the provider's key, so a refresh stays on it, and one that has gone falls
   // back to the first.
@@ -88,8 +92,10 @@
   const index = $derived(Math.max(0, data.reports.findIndex((r) => r.key === current)));
   const shownKey = $derived(data.reports[index]?.key);
 
-  // The dial shows the share used or the share left, always in the provider's color. Only the red end of the dial says
+  // The gauge shows the share used or the share left, always in the provider's color. Only the red end of the scale says
   // where the limit runs out: the 100% end when counting up, the 0% end when counting down.
+  // The rings are laid out apart from the others, which are one gauge to a limit.
+  const kind = $derived<GaugeKind>(gauge === "rings" ? "tach" : gauge);
   const mode = $derived(data.bars ?? "used");
   const showForecast = $derived(data.forecast ?? true);
   const used = (w: LimitWindow) => Math.max(0, Math.min(1, w.usedFraction));
@@ -112,7 +118,7 @@
   const clock = (ts: number) =>
     new Intl.DateTimeFormat(i18n.locale, ts - now > 20 * HOUR ? { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts);
 
-  // The chip under a dial. None when there is nothing to say: used, but no window to measure the pace against.
+  // The chip under a gauge. None when there is nothing to say: used, but no window to measure the pace against.
   type Chip = { kind: "ok" | "out" | "idle"; text: string };
   function chipOf(w: LimitWindow, p: ReturnType<typeof pace>): Chip | null {
     if (w.usedFraction < 0.02) return { kind: "idle", text: t("live.chip.idle") };
@@ -122,11 +128,11 @@
     return null;
   }
 
-  // What the dial draws, as fractions of its sweep from the left end. The solid arc ends at the needle. With the forecast,
+  // What the gauge draws, as fractions of its scale from the 0% end. The solid arc ends at the needle. With the forecast,
   // used: a pale arc runs on from the needle to where the use will have got by the reset. Left: the solid arc stops where
   // the reset will leave what is left, and the pale arc fills in up to the needle. Both end at the red end when it runs out.
   const MIN_ARC = 0.005;
-  function dialOf(w: LimitWindow, p: ReturnType<typeof pace>): { value: number; solid: number; ahead: { from: number; to: number } | null } {
+  function dialOf(w: LimitWindow, p: ReturnType<typeof pace>): Dial {
     const value = mode === "used" ? used(w) : 1 - used(w);
     if (!showForecast || !p) return { value, solid: value, ahead: null };
 
@@ -139,32 +145,9 @@
     return value - to > MIN_ARC ? { value, solid: to, ahead: { from: to, to: value } } : { value, solid: value, ahead: null };
   }
 
-  // The dial's geometry in a 120 by 106 box: a half circle round the hub at (60, 60), the left end at 0% and the right at 100%.
-  const CX = 60;
-  const CY = 60;
-  const RADIUS = 44;
-  const point = (f: number, radius = RADIUS): [number, number] => [CX + radius * Math.cos(Math.PI * (1 + f)), CY + radius * Math.sin(Math.PI * (1 + f))];
-  const xy = (pt: [number, number]) => `${pt[0].toFixed(2)} ${pt[1].toFixed(2)}`;
-  const arc = (from: number, to: number) => `M${xy(point(from))} A${RADIUS} ${RADIUS} 0 0 1 ${xy(point(to))}`;
-
-  // Ticks at every quarter, the middle one longer.
-  const TICKS = [0, 0.25, 0.5, 0.75, 1].map((f) => ({ from: point(f, RADIUS - 12), to: point(f, RADIUS - (f === 0.5 ? 5 : 7)) }));
-
-  // A pointer tapering from the hub towards the share f, as the points of a polygon.
-  function needle(f: number): string {
-    const angle = Math.PI * (1 + f);
-    const ux = Math.cos(angle);
-    const uy = Math.sin(angle);
-    const tip: [number, number] = [CX + ux * (RADIUS - 15), CY + uy * (RADIUS - 15)];
-    const back: [number, number] = [CX - ux * 6, CY - uy * 6];
-    return [
-      [tip[0] - uy * 0.9, tip[1] + ux * 0.9],
-      [tip[0] + uy * 0.9, tip[1] - ux * 0.9],
-      [back[0] + uy * 3.2, back[1] - ux * 3.2],
-      [back[0] - uy * 3.2, back[1] + ux * 3.2],
-    ]
-      .map(([x, y]) => `${x!.toFixed(2)},${y!.toFixed(2)}`)
-      .join(" ");
+  // The name read out for a limit: what it is, how much, and how it is heading.
+  function labelOf(w: LimitWindow, d: Dial, c: Chip | null): string {
+    return [windowName(w), t(mode === "used" ? "live.used" : "live.left", { pct: Math.round(d.value * 100) }), c?.text].filter(Boolean).join(", ");
   }
 
   // A reading is only dated when it's old (Codex logs it only while in use): a fresh one needs no note.
@@ -180,38 +163,17 @@
   {#if c}<span class="limit-chip {c.kind}">{c.text}</span>{/if}
 {/snippet}
 
-<!-- One dial: the track, the red end, the solid arc, the pale forecast arc, the ticks, the needle and the number. -->
-{#snippet dial(provider: string, w: LimitWindow, d: { value: number; solid: number; ahead: { from: number; to: number } | null }, label: string, small: boolean)}
-  {@const color = colorFor("provider", provider)}
-  <svg viewBox="0 0 120 106" width={small ? 96 : 120} height={small ? 85 : 106} class="shrink-0" role="img" aria-label={label}>
-    <path d={arc(0, 1)} fill="none" class="stroke-surface-3" stroke-width="8" />
-    <path d={mode === "used" ? arc(0.9, 1) : arc(0, 0.1)} fill="none" stroke="var(--bad-ink)" stroke-opacity=".55" stroke-width="8" />
-    {#if d.ahead}<path d={arc(d.ahead.from, d.ahead.to)} fill="none" stroke={color} stroke-opacity=".35" stroke-width="8" />{/if}
-    {#if d.solid > 0.003}<path d={arc(0, d.solid)} fill="none" stroke={color} stroke-width="8" />{/if}
-    {#each TICKS as tick, i (i)}
-      <line x1={tick.from[0]} y1={tick.from[1]} x2={tick.to[0]} y2={tick.to[1]} class="stroke-muted" stroke-width="1.5" stroke-linecap="round" />
-    {/each}
-    <text x={CX - RADIUS} y={CY + 12} text-anchor="middle" font-size="8.5" font-weight="700" class={mode === "used" ? "fill-ink-2" : "fill-bad"}>0%</text>
-    <text x={CX + RADIUS} y={CY + 12} text-anchor="middle" font-size="8.5" font-weight="700" class={mode === "used" ? "fill-bad" : "fill-ink-2"}>100%</text>
-    <polygon points={needle(d.value)} class="fill-ink stroke-ink" stroke-width=".8" stroke-linejoin="round" />
-    <circle cx={CX} cy={CY} r="6.5" class="fill-ink" />
-    <circle cx={CX} cy={CY} r="2.2" class="fill-surface" />
-    <text x={CX} y="83" text-anchor="middle" dominant-baseline="central" font-size="21" font-weight="650" class="fill-ink">{Math.round(d.value * 100)}%</text>
-    <text x={CX} y="101" text-anchor="middle" dominant-baseline="central" font-size="9.5" font-weight="500" class="fill-ink-2">{t(mode === "used" ? "live.dial.used" : "live.dial.left")}</text>
-  </svg>
-{/snippet}
-
-<!-- A limit: its dial, name, status chip and reset line, in rows of fixed height so a missing chip moves nothing. A lone
+<!-- A limit: its gauge, name, status chip and reset line, in rows of fixed height so a missing chip moves nothing. A lone
      limit sits beside its details, several sit in a column each. -->
 {#snippet limit(r: LimitReport, w: LimitWindow, solo: boolean, dense: boolean)}
   {@const p = pace(w)}
   {@const c = chipOf(w, p)}
   {@const d = dialOf(w, p)}
-  {@const label = [windowName(w), t(mode === "used" ? "live.used" : "live.left", { pct: Math.round(d.value * 100) }), c?.text].filter(Boolean).join(", ")}
+  {@const label = labelOf(w, d, c)}
   {#snippet counted()}{#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })} · {/if}{@render reset(w)}{/snippet}
   {#if solo}
     <div class="flex items-center gap-[22px] px-1 py-0.5">
-      {@render dial(r.provider, w, d, label, false)}
+      <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={false} />
       <div class="mb-1.5 flex min-w-0 flex-col items-start gap-1.5">
         <span class="text-[13px] font-medium text-ink">{windowName(w)}</span>
         <span class="flex h-5 items-center">{@render chip(c)}</span>
@@ -220,12 +182,41 @@
     </div>
   {:else}
     <div class="flex w-full min-w-0 flex-col items-center gap-1.5 text-center">
-      {@render dial(r.provider, w, d, label, dense)}
+      <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={dense} />
       <span class="mt-1.5 h-[18px] max-w-full truncate text-[13px] leading-[18px] font-medium text-ink" title={windowName(w)}>{dense ? shortName(w) : windowName(w)}</span>
       <span class="flex h-5 max-w-full items-center justify-center">{@render chip(c)}</span>
       <span class="min-h-3.5 text-[10.5px] leading-[14px] text-balance text-muted">{@render counted()}</span>
     </div>
   {/if}
+{/snippet}
+
+<!-- A provider's limits as rings: one ring each, outer first, with a list beside them in the same order. Each row carries the
+     text, the rings themselves are only a picture. -->
+{#snippet rings(r: LimitReport)}
+  {@const color = colorFor("provider", r.provider)}
+  {@const rows = r.windows.map((w) => {
+    const p = pace(w);
+    return { w, c: chipOf(w, p), d: dialOf(w, p) };
+  })}
+  <div class="flex items-center gap-4 px-1">
+    <LimitRings dials={rows.map((row) => row.d)} {color} />
+    <div class="flex min-w-0 flex-1 flex-col gap-2.5">
+      {#each rows as { w, c, d }, i (w.id)}
+        <div class="grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
+          <i class="h-2.5 w-2.5 rounded-full" style:background={color} style:opacity={ringOpacity(i)}></i>
+          <span class="truncate text-[13px] leading-[18px] font-medium text-ink" title={windowName(w)}>{windowName(w)}</span>
+          <span class="row-span-2 text-right text-[21px] leading-none font-semibold text-ink tabular-nums">{Math.round(d.value * 100)}%<span class="sr-only"> {t(mode === "used" ? "live.dial.used" : "live.dial.left")}</span></span>
+          <!-- When the chip and the reset time don't fit side by side, the time goes under the chip rather than being cut. -->
+          <span class="col-start-2 flex min-h-5 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] leading-[14px] text-muted">
+            <span class="shrink-0">{@render chip(c)}</span>
+            <span class="whitespace-nowrap">
+              {#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })} · {/if}{@render reset(w)}
+            </span>
+          </span>
+        </div>
+      {/each}
+    </div>
+  </div>
 {/snippet}
 
 <div class="flex h-[296px] flex-col">
@@ -237,28 +228,31 @@
       <div class="grid">
         {#each data.reports as r (r.key)}
           {@const n = r.windows.length}
-          <section class="flex flex-col gap-2.5 [grid-area:1/1] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
+          <section class="flex flex-col gap-2 [grid-area:1/1] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
             <header class="flex items-center gap-2.5">
               <span class="h-2.5 w-2.5 shrink-0 rounded-full" style:background={colorFor("provider", r.provider)}></span>
               <span class="text-[13px] font-semibold text-ink">{NAMES[r.provider] ?? r.provider}</span>
               {#if r.plan}<span class="rounded-full border border-line px-2 py-px text-[11px] text-ink-2">{planName(r.plan)}</span>{/if}
               {#if r.account}<span class="truncate font-mono text-[11px] text-muted">{r.account}</span>{/if}
               {#if now - r.observedAt > STALE_MS}<span class="ml-auto shrink-0 text-[11px] text-muted">{t("live.asOf", { ago: relative(r.observedAt) })}</span>{/if}
+              <!-- The key to the gauges, beside the provider rather than under the gauges, where it read as part of them. -->
+              {#if showForecast && r.windows.some((w) => pace(w))}
+                <span class="ml-auto flex shrink-0 items-center gap-3 text-[11px] text-muted {now - r.observedAt > STALE_MS ? '!ml-3' : ''}">
+                  <span><i class="limit-swatch" style:background={colorFor("provider", r.provider)}></i>{t(mode === "used" ? "live.legend.usedNow" : "live.legend.leftNow")}</span>
+                  <span><i class="limit-swatch" style:background={colorFor("provider", r.provider)} style:opacity="0.35"></i>{t(mode === "used" ? "live.legend.pacedUsed" : "live.legend.pacedLeft")}</span>
+                </span>
+              {/if}
             </header>
-            {#if n === 1}
+            {#if gauge === "rings" && n > 0}
+              {@render rings(r)}
+            {:else if n === 1}
               {@render limit(r, r.windows[0]!, true, false)}
             {:else if n > 1}
-              <!-- Up to four to a row in columns of one width, so a short row doesn't spread out. Four or more get smaller dials. -->
+              <!-- Up to four to a row in columns of one width, so a short row doesn't spread out. Four or more get smaller gauges. -->
               <div class="grid justify-items-center gap-x-2 gap-y-3 {n >= 4 ? 'limit-dense' : ''}" style:grid-template-columns="repeat({Math.min(n, 4)}, minmax(0, 1fr))">
                 {#each r.windows as w (w.id)}
                   {@render limit(r, w, false, n >= 4)}
                 {/each}
-              </div>
-            {/if}
-            {#if showForecast && r.windows.some((w) => pace(w))}
-              <div class="flex justify-center gap-4 border-t border-line pt-1.5 text-[11px] text-muted">
-                <span><i class="limit-swatch" style:background={colorFor("provider", r.provider)}></i>{t(mode === "used" ? "live.legend.usedNow" : "live.legend.leftNow")}</span>
-                <span><i class="limit-swatch" style:background={colorFor("provider", r.provider)} style:opacity="0.35"></i>{t(mode === "used" ? "live.legend.pacedUsed" : "live.legend.pacedLeft")}</span>
               </div>
             {/if}
           </section>

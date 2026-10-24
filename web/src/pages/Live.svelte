@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Ban, ChevronDown, ChevronUp, CircleStop, CircleX, Gauge, MessageSquareText, ServerCrash } from "@lucide/svelte";
+  import { Ban, ChevronDown, ChevronUp, CircleStop, CircleX, Gauge, MessageSquareText, RefreshCw, ServerCrash } from "@lucide/svelte";
   import Card from "../components/Card.svelte";
   import HarnessChips from "../components/HarnessChips.svelte";
   import Chart from "../components/Chart.svelte";
@@ -18,7 +18,7 @@
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
   import { everyWhileVisible } from "../lib/visibility.ts";
-  import { navigate, store } from "../lib/state.svelte.ts";
+  import { LIMIT_GAUGES, navigate, store } from "../lib/state.svelte.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
   interface LiveSession {
@@ -349,10 +349,19 @@
       </Card>
       <Card title={t("live.limits")} subtitle={t(limits.data?.bars === "left" ? "live.limitsHintLeft" : "live.limitsHintUsed")} info={t("live.limitsInfo")} class="xl:col-span-2" pad={false}>
         {#snippet actions()}
-          <button class="btn !h-7 !px-2 !text-xs" onclick={refreshLimits} disabled={refreshing}>{t("live.refresh")}</button>
+          <Dropdown
+            label={t("live.gauge")}
+            value={store.limitGauge}
+            options={LIMIT_GAUGES.map((g) => ({ value: g, label: t(`live.gauge.${g}`) }))}
+            onchange={(g) => store.setLimitGauge(g)}
+          />
+          <!-- An icon, so the gauge picker keeps its full name beside the title in every language. -->
+          <button class="btn btn-icon" onclick={refreshLimits} disabled={refreshing} title={t("live.refresh")} aria-label={t("live.refresh")}>
+            <RefreshCw size={14} class={refreshing ? "animate-spin" : ""} />
+          </button>
         {/snippet}
         {#if limits.data && (limits.data.reports.length || limits.data.problems.length)}
-          <PlanLimits data={limits.data} {now} />
+          <PlanLimits data={limits.data} {now} gauge={store.limitGauge} />
         {:else if limits.data?.active && !limits.data.active.length}
           <div class="flex h-full flex-col justify-center gap-2 px-5 pt-6 pb-10 text-center">
             <div class="text-sm text-ink-2">{t("live.noActive")}</div>

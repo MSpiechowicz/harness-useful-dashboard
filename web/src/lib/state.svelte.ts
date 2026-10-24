@@ -4,6 +4,9 @@ import { INTRO_KEY, INTRO_SOUND_KEY } from "./splash-policy.ts";
 export type RangePreset = "today" | "7d" | "30d" | "90d" | "month" | "all" | "custom";
 export type Metric = "tokens" | "cost";
 export type ThemePref = "system" | "light" | "dark";
+/** How the plan limits are drawn on Live: a tachometer, a segmented arc, a VU meter, a thermometer or concentric rings. */
+export const LIMIT_GAUGES = ["tach", "segments", "vu", "thermo", "rings"] as const;
+export type LimitGauge = (typeof LIMIT_GAUGES)[number];
 export type FilterKey = "provider" | "project" | "user" | "host" | "model" | "skill" | "agent" | "tag" | "kind";
 export const FILTER_KEYS: FilterKey[] = ["provider", "project", "user", "host", "model", "skill", "agent", "tag", "kind"];
 
@@ -95,6 +98,8 @@ class Store {
   /** Whether project views list the work done outside any project ("No project"). */
   showNoProject = $state<boolean>(load("hd.showNoProject", ["true", "false"] as const, "true") === "true");
   theme = $state<ThemePref>(load("hd.theme", ["system", "light", "dark"] as const, "system"));
+  /** How the plan limits are drawn on Live. Per viewer, like the theme. */
+  limitGauge = $state<LimitGauge>(load("hd.limitGauge", LIMIT_GAUGES, "tach"));
   /** Whether the intro animation plays when the dashboard opens. Per viewer, like the theme. */
   intro = $state<boolean>(load(INTRO_KEY, ["true", "false"] as const, "true") === "true");
   /** Whether the logo's sound plays with the intro. */
@@ -184,6 +189,11 @@ class Store {
     save("hd.theme", pref);
     if (pref === "system") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = pref;
+  }
+
+  setLimitGauge(gauge: LimitGauge): void {
+    this.limitGauge = gauge;
+    save("hd.limitGauge", gauge);
   }
 
   setIntro(on: boolean): void {

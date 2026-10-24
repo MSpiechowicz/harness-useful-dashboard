@@ -853,6 +853,7 @@ table.data th.num {
   padding: 1px 7px;
   font-size: 10.5px;
 }
+/* A chip in the list beside the rings: the row's own height is a line of small text. */
 /* The pager under the dials: one row shorter than a table's, so the card keeps the chart's height. */
 .limit-pager .table-footer {
   padding-block: 0.5rem;
