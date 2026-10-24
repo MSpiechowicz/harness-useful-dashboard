@@ -4,6 +4,7 @@ import { dirname, join, posix, resolve, win32 } from "node:path";
 import { en } from "../../web/src/lib/locales/en.ts";
 import { branchDetail, branches, branchId, type BranchRow } from "../core/branches.ts";
 import type { BudgetConfig } from "../core/budgets.ts";
+import type { LimitBars } from "../core/config.ts";
 import { per100, sessionLines } from "../core/changes.ts";
 import { friction } from "../core/friction.ts";
 import type { PriceBook } from "../core/pricing.ts";
@@ -26,6 +27,8 @@ export interface ToolContext {
   /** Where the database is. It is opened read-only on first use, and again later if it didn't exist yet. */
   dbPath: string;
   budgets: BudgetConfig;
+  /** How the user reads plan limits: "used" (the default) or "left". A function is asked on each call, so a change in Settings reaches a running server. */
+  limitBars?: LimitBars | (() => LimitBars);
   /** This machine's user, as its usage rows are tagged: budgets count this user's spend. */
   user: string;
   host: string;
@@ -407,15 +410,17 @@ export function createTools(ctx: ToolContext): { tools: Tool[]; close: () => voi
     name: "limits",
     title: "Plan limits",
     description:
-      "How much of each subscription plan limit is used (Claude 5-hour and weekly windows, Codex, Copilot premium requests, …), when it resets, and how old the reading is. Readings come from the database the dashboard keeps while it runs. Providers are never asked.",
+      "How much of each subscription plan limit is used (Claude 5-hour and weekly windows, Codex, Copilot premium requests, …), when it resets, and how old the reading is. The user's setting decides whether each window reports usedPercent or leftPercent, never both. Readings come from the database the dashboard keeps while it runs. Providers are never asked.",
     inputSchema: { type: "object", additionalProperties: false },
     run() {
       const { db } = store.get();
-      const out = limitWindows(db, ctx.host, now());
+      const windows = limitWindows(db, ctx.host, now());
+      const bars = typeof ctx.limitBars === "function" ? ctx.limitBars() : (ctx.limitBars ?? "used");
+      const left = bars === "left";
       return {
-        windows: out,
-        note: out.length
-          ? "Readings older than 15 minutes are stale. The dashboard refreshes them every few minutes while it runs."
+        windows: left ? windows.map(({ usedPercent, ...w }) => ({ ...w, leftPercent: usedPercent == null ? null : Math.max(0, Math.round((100 - usedPercent) * 10) / 10) })) : windows,
+        note: windows.length
+          ? `Each window reports ${left ? "leftPercent, how much of it is left" : "usedPercent, how much of it is used"}, as the user's setting says. Readings older than 15 minutes are stale. The dashboard refreshes them every few minutes while it runs.`
           : "No plan-limit readings stored in the last 30 days. Start the dashboard to record them.",
       };
     },

@@ -271,6 +271,34 @@ describe("tools", () => {
     ]);
   });
 
+  test("limits: the user's setting decides between leftPercent and usedPercent", () => {
+    const window = { provider: "claude", plan: "max", window: "5h", resetsAt: new Date(NOW + 80 * MIN).toISOString(), observedAt: new Date(NOW - 2 * MIN).toISOString(), ageMinutes: 2, status: "fresh" };
+    const bars = (limitBars: "used" | "left" | (() => "used" | "left")) => {
+      const { tools, close } = createTools({ dbPath: DB, budgets: BUDGETS, limitBars, user: "alex", host: "here", cwd: REPO, env: {}, now: () => NOW });
+      const s = new McpServer(tools, { name: "harness-dashboard", title: "Harness Dashboard", version: "1.0.0" }, "Usage data.");
+      return { r: call("limits", {}, s), close };
+    };
+    const left = bars("left");
+    expect(left.r.windows).toEqual([{ ...window, leftPercent: 58 }]);
+    expect(left.r.windows[0]).not.toHaveProperty("usedPercent");
+    expect(left.r.note).toContain("leftPercent");
+    left.close();
+
+    const used = bars("used");
+    expect(used.r.windows).toEqual([{ ...window, usedPercent: 42 }]);
+    expect(used.r.note).toContain("usedPercent");
+    used.close();
+
+    // A function is asked on each call: a change in Settings reaches a server that is running.
+    let mode: "used" | "left" = "used";
+    const { tools, close } = createTools({ dbPath: DB, budgets: BUDGETS, limitBars: () => mode, user: "alex", host: "here", cwd: REPO, env: {}, now: () => NOW });
+    const s = new McpServer(tools, { name: "harness-dashboard", title: "Harness Dashboard", version: "1.0.0" }, "Usage data.");
+    expect(call("limits", {}, s).windows[0]).toHaveProperty("usedPercent", 42);
+    mode = "left";
+    expect(call("limits", {}, s).windows[0]).toHaveProperty("leftPercent", 58);
+    close();
+  });
+
   test("budget_status: today and this month against the caps", () => {
     const r = call("budget_status");
     expect(r.user).toBe("alex");

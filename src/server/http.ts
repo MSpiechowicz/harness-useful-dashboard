@@ -427,7 +427,7 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
           const active = minutes > 0 ? activePlans(app.db, Date.now() - minutes * 60_000) : undefined;
           const result = await app.limits.get(app.db, app.identity.host, app.cfg.limits, sp.get("force") === "1", active, () => app.writable());
           app.sendAlerts(result.reports).catch((err) => console.error("[alerts]", err));
-          return json({ ...result, active: active ?? null });
+          return json({ ...result, active: active ?? null, bars: app.cfg.limitBars, forecast: app.cfg.limitForecast });
         }
         case "/api/cursor/sync":
           return json(cursorSyncStatus(app, syncState(app.db, app.identity.host)));

@@ -170,8 +170,11 @@ function painter(color: boolean): Paint {
   return color ? (code, s) => `${ANSI[code]}${s}${ANSI.reset}` : (_code, s) => s;
 }
 
-/** The value of each placeholder, "" when unknown. */
-export function placeholders(d: StatusData, o: { color: boolean; now: number }): Record<string, string> {
+/** What is left of a limit when `used` percent of it is gone, never below 0. */
+export const leftPercent = (used: number): number => Math.max(0, 100 - used);
+
+/** The value of each placeholder, "" when unknown. `bars: "left"` shows the limit as what is left, the tone still follows what is used. */
+export function placeholders(d: StatusData, o: { color: boolean; now: number; bars?: "used" | "left" }): Record<string, string> {
   const p = painter(o.color);
   const money = (label: string, v: number | null) => (v == null ? "" : `${p("dim", label)} ${formatUsd(v)}`);
   let limit = "";
@@ -179,7 +182,8 @@ export function placeholders(d: StatusData, o: { color: boolean; now: number }):
     const pct = Math.round(d.limit.usedFraction * 100);
     const tone = pct >= 90 ? "red" : pct >= 70 ? "yellow" : "green";
     const resets = d.limit.resetsAt != null && d.limit.resetsAt > o.now ? ` ${p("dim", `(resets ${formatDuration(d.limit.resetsAt - o.now)})`)}` : "";
-    limit = `${p("dim", "5h")} ${p(tone, `${pct}%`)}${resets}`;
+    const shown = o.bars === "left" ? `${leftPercent(pct)}% left` : `${pct}%`;
+    limit = `${p("dim", "5h")} ${p(tone, shown)}${resets}`;
   }
   return {
     model: d.model ? p("bold", d.model) : "",
@@ -221,7 +225,7 @@ export function fillTemplate(template: string, values: Record<string, string>): 
   return tokens.map((t) => t.text).join("").trim();
 }
 
-export function render(d: StatusData, o: { format?: string; color: boolean; now: number }): string {
+export function render(d: StatusData, o: { format?: string; color: boolean; now: number; bars?: "used" | "left" }): string {
   const line = fillTemplate(o.format || DEFAULT_FORMAT, placeholders(d, o));
   return line || fallbackLine(d.model);
 }

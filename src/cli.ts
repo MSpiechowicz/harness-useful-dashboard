@@ -311,7 +311,7 @@ async function statusline(args: Args, dbFlag: string | undefined): Promise<void>
     const data = gather(db, input, { user: cfg.userName || localIdentity().user, host: localIdentity().host, now });
     db?.close();
     const format = typeof args.flags.format === "string" ? args.flags.format : undefined;
-    console.log(render(data, { format, color: useColor(args.flags["no-color"] === true, process.env), now }));
+    console.log(render(data, { format, bars: cfg.limitBars, color: useColor(args.flags["no-color"] === true, process.env), now }));
   } catch {
     console.log(fallbackLine(model));
   }
@@ -327,7 +327,8 @@ async function mcp(dbFlag: string | undefined): Promise<void> {
   console.log = console.info = console.error;
   const cfg = loadConfig();
   const { user, host } = localIdentity();
-  const { tools, close } = createTools({ dbPath: resolveDbPath(cfg, dbFlag).path, budgets: cfg.budgets, user: cfg.userName || user, host, cwd: process.cwd(), env: process.env });
+  // The setting is read again on each call, so a change in Settings reaches a running server.
+  const { tools, close } = createTools({ dbPath: resolveDbPath(cfg, dbFlag).path, budgets: cfg.budgets, limitBars: () => loadConfig().limitBars, user: cfg.userName || user, host, cwd: process.cwd(), env: process.env });
   const server = new McpServer(
     tools,
     { name: BIN_NAME, title: "Harness Dashboard", version: VERSION },
@@ -363,7 +364,7 @@ async function report(cmd: ReportCommand, args: Args, dbFlag: string | undefined
     const cfg = loadConfig();
     const { user, host } = localIdentity();
     const { out, code } = runReport(cmd, args.flags, {
-      dbPath: resolveDbPath(cfg, dbFlag).path, budgets: cfg.budgets, user: cfg.userName || user, host, now: Date.now(), env: process.env, isTTY: process.stdout.isTTY === true,
+      dbPath: resolveDbPath(cfg, dbFlag).path, budgets: cfg.budgets, limitBars: cfg.limitBars, user: cfg.userName || user, host, now: Date.now(), env: process.env, isTTY: process.stdout.isTTY === true,
     });
     process.stdout.write(out);
     process.exitCode = code;

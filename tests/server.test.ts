@@ -68,6 +68,17 @@ describe("settings input", () => {
     // The dashboard's port as the change itself sets it.
     expect("error" in parseSettings({ port: 5000, ingest: { port: 5000 } }, current)).toBe(true);
   });
+  test("limitForecast is a boolean", () => {
+    expect(parseSettings({ limitForecast: false })).toEqual({ patch: { limitForecast: false } });
+    expect(parseSettings({ limitForecast: true })).toEqual({ patch: { limitForecast: true } });
+    for (const limitForecast of ["false", "", 0, 1, null]) expect("error" in parseSettings({ limitForecast }), JSON.stringify(limitForecast)).toBe(true);
+  });
+
+  test("limitBars is used or left", () => {
+    expect(parseSettings({ limitBars: "left" })).toEqual({ patch: { limitBars: "left" } });
+    expect(parseSettings({ limitBars: "used" })).toEqual({ patch: { limitBars: "used" } });
+    for (const limitBars of ["remaining", "", 1, true, null]) expect("error" in parseSettings({ limitBars }), JSON.stringify(limitBars)).toBe(true);
+  });
   test("a scan interval is off, or between 5 seconds and a day", () => {
     expect([scanInterval(0), scanInterval(-1), scanInterval("x"), scanInterval(0.001), scanInterval(30), scanInterval(1e9)]).toEqual([0, 0, 0, 5, 30, 86_400]);
   });
@@ -245,6 +256,33 @@ describe("HTTP API", () => {
     expect(same.status).toBe(200);
     // Pages are still served, so the app opens from a link or a bookmark.
     expect((await handle(new Request("http://localhost/", { headers: { host: "localhost", "sec-fetch-site": "cross-site" } }))).status).toBe(200);
+  });
+
+  test("limits are read as used until Settings says left, and the limits answer says which", async () => {
+    const post = (body: unknown) =>
+      handle(new Request("http://localhost/api/settings", { method: "POST", headers: { host: "localhost", "x-harness-dashboard": "1", "content-type": "application/json" }, body: JSON.stringify(body) }));
+    // Only the plans of the last minute are asked about: none, so no provider is called.
+    const bars = async () => ((await (await get("/api/limits?minutes=1")).json()) as { bars: string }).bars;
+    expect(((await (await get("/api/settings")).json()) as { config: { limitBars: string } }).config.limitBars).toBe("used");
+    expect(await bars()).toBe("used");
+    expect((await post({ limitBars: "left" })).status).toBe(200);
+    expect(((await (await get("/api/settings")).json()) as { config: { limitBars: string } }).config.limitBars).toBe("left");
+    expect(await bars()).toBe("left");
+    expect((await post({ limitBars: "most" })).status).toBe(400);
+    expect(await bars()).toBe("left");
+    await post({ limitBars: "used" });
+    expect(await bars()).toBe("used");
+    // The forecast shows until Settings turns it off, and the limits answer says which.
+    const forecast = async () => ((await (await get("/api/limits?minutes=1")).json()) as { forecast: boolean }).forecast;
+    expect(((await (await get("/api/settings")).json()) as { config: { limitForecast: boolean } }).config.limitForecast).toBe(true);
+    expect(await forecast()).toBe(true);
+    expect((await post({ limitForecast: false })).status).toBe(200);
+    expect(((await (await get("/api/settings")).json()) as { config: { limitForecast: boolean } }).config.limitForecast).toBe(false);
+    expect(await forecast()).toBe(false);
+    expect((await post({ limitForecast: "no" })).status).toBe(400);
+    expect(await forecast()).toBe(false);
+    await post({ limitForecast: true });
+    expect(await forecast()).toBe(true);
   });
 
   test("settings with a bad value are refused and change nothing", async () => {

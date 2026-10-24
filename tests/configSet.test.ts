@@ -61,6 +61,47 @@ describe("config set", () => {
     expect(loadConfig(path).ingest).toEqual(defaultConfig().ingest);
   });
 
+  test("limits read as used by default, also from a config file that has no such setting", () => {
+    const path = join(tempDir(), "config.json");
+    expect(defaultConfig().limitBars).toBe("used");
+    writeFileSync(path, JSON.stringify({ port: 4400 }));
+    expect(loadConfig(path).limitBars).toBe("used");
+    writeFileSync(path, JSON.stringify({ limitBars: "left" }));
+    expect(loadConfig(path).limitBars).toBe("left");
+    writeFileSync(path, JSON.stringify({ limitBars: "remaining" }));
+    expect(loadConfig(path).limitBars).toBe("used");
+  });
+
+  test("limitBars is set to used or left and nothing else", () => {
+    const cfg = defaultConfig();
+    expect(mergeConfig(cfg, configKeyPatch(cfg, "limitBars", "left")).limitBars).toBe("left");
+    expect(mergeConfig({ ...cfg, limitBars: "left" }, configKeyPatch(cfg, "limitBars", "used")).limitBars).toBe("used");
+    expect(() => configKeyPatch(cfg, "limitBars", "remaining")).toThrow("invalid value for limitBars");
+    expect(() => configKeyPatch(cfg, "limitBars", true)).toThrow("invalid value for limitBars");
+    expect(() => configKeyPatch(cfg, "limitBars.mode", "left")).toThrow("unknown config key");
+  });
+
+  test("the forecast shows by default, also from a config file that has no such setting or a bad one", () => {
+    const path = join(tempDir(), "config.json");
+    expect(defaultConfig().limitForecast).toBe(true);
+    writeFileSync(path, JSON.stringify({ port: 4400 }));
+    expect(loadConfig(path).limitForecast).toBe(true);
+    writeFileSync(path, JSON.stringify({ limitForecast: false }));
+    expect(loadConfig(path).limitForecast).toBe(false);
+    for (const bad of ["false", 0, null, "no"]) {
+      writeFileSync(path, JSON.stringify({ limitForecast: bad }));
+      expect(loadConfig(path).limitForecast, JSON.stringify(bad)).toBe(true);
+    }
+  });
+
+  test("limitForecast is set to true or false and nothing else", () => {
+    const cfg = defaultConfig();
+    expect(mergeConfig(cfg, configKeyPatch(cfg, "limitForecast", false)).limitForecast).toBe(false);
+    expect(mergeConfig({ ...cfg, limitForecast: false }, configKeyPatch(cfg, "limitForecast", true)).limitForecast).toBe(true);
+    for (const bad of ["false", "yes", 0, null]) expect(() => configKeyPatch(cfg, "limitForecast", bad)).toThrow("invalid value for limitForecast");
+    expect(() => configKeyPatch(cfg, "limitForecast.mode", true)).toThrow("unknown config key");
+  });
+
   test("the window setting of older versions is dropped from the config file", () => {
     const path = join(tempDir(), "config.json");
     writeFileSync(path, JSON.stringify({ openMode: "browser", port: 4400 }));

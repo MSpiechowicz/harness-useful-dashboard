@@ -10,6 +10,18 @@ import { configPath, defaultDbPath, expandHome, localIdentity } from "./paths.ts
 
 export type JournalMode = "auto" | "wal" | "delete";
 
+export type LimitBars = "used" | "left";
+
+/** A hand-edited config file may hold anything: only "left" turns the left-over reading on, the rest is "used". */
+export function limitBars(v: unknown): LimitBars {
+  return v === "left" ? "left" : "used";
+}
+
+/** A hand-edited config file may hold anything: only a real false hides the forecast, the rest shows it. */
+export function limitForecast(v: unknown): boolean {
+  return v !== false;
+}
+
 export interface SourceConfig {
   /** Claude Code transcript roots (each contains per-project folders of *.jsonl). */
   claudeDirs: string[];
@@ -74,6 +86,10 @@ export interface AppConfig {
   labels: LabelConfig;
   /** The UI's language, which the desktop alerts use too. */
   language: AlertLang;
+  /** How plan limits read everywhere: how much is "used" (the default) or how much is "left". Tones and alerts follow what is used. */
+  limitBars: LimitBars;
+  /** Whether the Live view shows the forecast of when a plan limit runs out. The CLI, status line and MCP show none. */
+  limitForecast: boolean;
   /** The Prometheus endpoint at /metrics. */
   metrics: MetricsConfig;
   /** Tips the user put away: `hidden` holds rule ids (never shown again), `read` holds tip keys (seen, kept on the Tips page). */
@@ -150,6 +166,8 @@ export function defaultConfig(): AppConfig {
     digest: { ...DEFAULT_DIGEST },
     labels: { ...DEFAULT_LABELS },
     language: "en",
+    limitBars: "used",
+    limitForecast: true,
     metrics: { enabled: false, token: "", projectLabels: true },
     tips: { hidden: [], read: [] },
     ingest: { ...DEFAULT_INGEST },
@@ -230,6 +248,8 @@ export function mergeConfig(base: AppConfig, patch: Partial<AppConfig>): AppConf
   return {
     ...base,
     ...patch,
+    limitBars: limitBars(patch.limitBars ?? base.limitBars),
+    limitForecast: limitForecast(patch.limitForecast ?? base.limitForecast),
     sources: {
       ...base.sources,
       ...(patch.sources ?? {}),
@@ -497,6 +517,14 @@ export function parseSettings(body: unknown, current?: AppConfig): { patch: Sett
     }
     patch.ingest = ingest;
   }
+  if (has("limitBars")) {
+    if (!["used", "left"].includes(body.limitBars as string)) return invalid("limitBars");
+    patch.limitBars = body.limitBars as LimitBars;
+  }
+  if (has("limitForecast")) {
+    if (typeof body.limitForecast !== "boolean") return invalid("limitForecast");
+    patch.limitForecast = body.limitForecast;
+  }
   if (has("language")) {
     if (!["en", "de", "es", "fr", "pl", "pt"].includes(body.language as string)) return invalid("language");
     patch.language = body.language as AlertLang;
@@ -538,6 +566,18 @@ export function configKeyPatch(cfg: AppConfig, key: string, value: unknown): Par
     const field = rest[0] ?? null;
     if (rest.length > 1 || (field !== null && !Object.hasOwn(DEFAULT_INGEST, field))) throw new Error(`unknown config key: ${key}`);
     return { ingest: ingestPatch(cfg, field as keyof IngestConfig | null, value) };
+  }
+  if (top === "limitBars") {
+    if (rest.length) throw new Error(`unknown config key: ${key}`);
+    const parsed = parseSettings({ limitBars: value }, cfg);
+    if ("error" in parsed) throw new Error(parsed.error);
+    return { limitBars: parsed.patch.limitBars };
+  }
+  if (top === "limitForecast") {
+    if (rest.length) throw new Error(`unknown config key: ${key}`);
+    const parsed = parseSettings({ limitForecast: value }, cfg);
+    if ("error" in parsed) throw new Error(parsed.error);
+    return { limitForecast: parsed.patch.limitForecast };
   }
   if (!rest.length) return { [top]: value } as Partial<AppConfig>;
   const section = structuredClone((cfg as unknown as Record<string, unknown>)[top]);

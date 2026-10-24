@@ -23,6 +23,8 @@
   /* Fill under white text for destructive buttons (delete): the error red, 6.4:1 against white. */
   --danger-fill: #b42323;
   --danger-fill-hover: #962020;
+  /* Fill under white text for a good state (the on-track chip), the same in both themes. */
+  --good-fill: #1f9d5c;
   /* The switch track under the white knob. Dark takes the darker fill: the light accent behind a white knob is only 2.5:1. */
   --switch-on: var(--accent);
   /* Neutral ink for single-measure marks (totals, inline bars): color in charts always means identity. */
@@ -783,43 +785,48 @@ table.data th.num {
   }
 }
 
-/* Plan limits: the time left in the window, a tick on the bar with a ring in the card colour so it reads on any fill,
-   and a soft glow in its own colour. A thin outline in the tick's shape grows out of it and fades, mostly sideways so it
-   stays clear of the text above. Only transform and opacity move. */
-.pace-mark {
-  box-shadow:
-    0 0 0 1.5px var(--surface),
-    0 0 6px 1px color-mix(in srgb, currentColor 55%, transparent);
-}
-.pace-mark::after {
-  content: "";
-  position: absolute;
-  inset: -2px;
+/* Plan limits: the status chip under a dial. One style for every state, a solid fill without a border, only the color
+   changes. White text sits on the two fills (green, red), like on the primary and danger buttons. */
+.limit-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 9px;
   border-radius: 9999px;
-  border: 1px solid currentColor;
-  opacity: 0;
-  pointer-events: none;
-  animation: pace-ripple 3s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
 }
-@keyframes pace-ripple {
-  0% {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-  75%,
-  100% {
-    transform: scale(2.4, 1.3);
-    opacity: 0;
-  }
+.limit-chip.ok {
+  background: var(--good-fill);
+  color: #fff;
 }
-/* The stretch a limit falls short of the time left, hatched in the warning colour. */
-.pace-gap {
-  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--warn-ink) 45%, transparent) 0 2px, transparent 2px 5px);
+.limit-chip.out {
+  background: var(--danger-fill);
+  color: #fff;
 }
-@media (prefers-reduced-motion: reduce) {
-  .pace-mark::after {
-    animation: none;
-  }
+.limit-chip.idle {
+  background: var(--surface-4, var(--surface-3));
+  color: var(--ink-2);
+}
+/* Four or more dials share a row: a smaller chip, so neighbours never touch. */
+.limit-dense .limit-chip {
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+/* The pager under the dials: one row shorter than a table's, so the card keeps the chart's height. */
+.limit-pager .table-footer {
+  padding-block: 0.5rem;
+}
+/* The legend swatch: a short bar in the dial's color, solid or pale. */
+.limit-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 4px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: 2px;
 }
 
 ::-webkit-scrollbar {

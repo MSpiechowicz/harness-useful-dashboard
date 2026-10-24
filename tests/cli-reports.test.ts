@@ -161,6 +161,41 @@ describe("limits", () => {
   });
 });
 
+describe("limits read as what is left", () => {
+  const left = (patch: Partial<ReportEnv> = {}) => env({ limitBars: "left", ...patch });
+
+  test("the table and today's line show what is left, used stays as it was", () => {
+    expect(runReport("limits", {}, left()).out).toMatch(/claude max\s+5h\s+58% left\s+resets in 1h20m\s+read 2m ago/);
+    expect(runReport("today", {}, left()).out).toMatch(/Claude 5h limit\s+58% left\s+resets in 1h20m/);
+    expect(runReport("limits", {}, env({ limitBars: "used" })).out).toBe(runReport("limits", {}, env()).out);
+    expect(runReport("today", {}, env({ limitBars: "used" })).out).toBe(runReport("today", {}, env()).out);
+    expect(runReport("limits", {}, env()).out).toMatch(/claude max\s+5h\s+42%\s+resets in/);
+  });
+
+  test("colors follow what is used", () => {
+    const warm = { warn: "40" };
+    expect(runReport("limits", warm, left({ isTTY: true })).out).toContain("\x1b[33m58% left\x1b[0m");
+    expect(runReport("limits", {}, left({ isTTY: true })).out).toContain("\x1b[32m58% left\x1b[0m");
+  });
+
+  test("JSON, the check and the exit codes are the same in both modes", () => {
+    for (const flags of <Record<string, string | boolean>[]>[{ json: true }, { json: true, check: true }, { check: true, warn: "40" }, { check: true }]) {
+      const used = runReport("limits", flags, env());
+      const other = runReport("limits", flags, left());
+      expect(other.code, JSON.stringify(flags)).toBe(used.code);
+      if (flags.json) expect(other.out).toBe(used.out);
+    }
+    expect(runReport("limits", { check: true, warn: "40" }, left()).code).toBe(10);
+    expect(runReport("limits", { check: true }, left({ dbPath: EMPTY })).code).toBe(2);
+    expect(runReport("today", { json: true }, left()).out).toBe(runReport("today", { json: true }, env()).out);
+  });
+
+  test("a window that reset since its reading has no figure in either mode", () => {
+    const later = { now: NOW + 2 * 60 * MIN };
+    expect(runReport("limits", {}, left(later)).out).toMatch(/5h\s+-\s+reset since the reading/);
+  });
+});
+
 describe("output", () => {
   test("colors only on a terminal, and never with NO_COLOR or --no-color", () => {
     const esc = "\x1b[";

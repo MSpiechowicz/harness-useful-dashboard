@@ -52,6 +52,15 @@ describe("statusline", () => {
     expect(render(d, { color: false, now: NOW })).toBe("Opus 5.5 · session $1.74 · today $3.74 · 5h 42% (resets 1h20m)");
   });
 
+  test("limit shown as what is left, with the tone still by what is used", () => {
+    const d = gather(fixture(), parseInput(INPUT), opts);
+    expect(render(d, { color: false, now: NOW, bars: "left" })).toBe("Opus 5.5 · session $1.74 · today $3.74 · 5h 58% left (resets 1h20m)");
+    expect(render(d, { color: false, now: NOW, bars: "used" })).toBe(render(d, { color: false, now: NOW }));
+    const hot = { model: "M", sessionCost: null, todayCost: null, limit: { usedFraction: 0.95, resetsAt: null } };
+    expect(render(hot, { color: true, now: NOW, bars: "left" })).toContain("\x1b[31m5% left\x1b[0m");
+    expect(render({ ...hot, limit: { usedFraction: 1.2, resetsAt: null } }, { color: false, now: NOW, bars: "left" })).toBe("M · 5h 0% left");
+  });
+
   test("falls back to stdin's cost for a session not scanned yet, and to no limit when stale or reset", () => {
     const db = fixture();
     const input = parseInput(JSON.stringify({ session_id: "new", model: { display_name: "Sonnet" }, cost: { total_cost_usd: 0.5 } }));

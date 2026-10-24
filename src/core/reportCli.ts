@@ -1,10 +1,11 @@
 import { type ExportRow, normalizeRow, toCsv } from "../../web/src/lib/export.ts";
 import type { BudgetConfig } from "./budgets.ts";
+import type { LimitBars } from "./config.ts";
 import {
   type BudgetRow, InputError, type LimitsReport, limitsReport, openReadOnly, RANGES, type ReportContext, type TodayReport, todayReport,
   type UsageReport, usageReport,
 } from "./reports.ts";
-import { formatDuration, formatUsd } from "./statusline.ts";
+import { formatDuration, formatUsd, leftPercent } from "./statusline.ts";
 
 /**
  * The `today`, `report` and `limits` commands: the reports of reports.ts as aligned tables for a terminal, or as JSON
@@ -17,6 +18,8 @@ export type ReportCommand = (typeof REPORT_COMMANDS)[number];
 export interface ReportEnv {
   dbPath: string;
   budgets: BudgetConfig;
+  /** How plan limits read in the tables: as what is used (the default) or what is left. JSON and CSV stay on used. */
+  limitBars?: LimitBars;
   user: string;
   host: string;
   now: number;
@@ -42,7 +45,7 @@ export function runReport(cmd: ReportCommand, flags: Flags, e: ReportEnv): { out
     const p = painter(flags["no-color"] !== true && !e.env.NO_COLOR && e.isTTY);
     if (cmd === "today") {
       const r = todayReport(c, args);
-      return { out: format === "json" ? json(r) : renderToday(r, p, e.now), code: 0 };
+      return { out: format === "json" ? json(r) : renderToday(r, p, e.now, e.limitBars), code: 0 };
     }
     if (cmd === "report") {
       const r = usageReport(c, { ...args, by: flags.by === undefined ? undefined : text(flags, "by") });
@@ -52,7 +55,7 @@ export function runReport(cmd: ReportCommand, flags: Flags, e: ReportEnv): { out
     }
     const r = limitsReport(c, warn);
     const code = flags.check === true ? r.check.exitCode : 0;
-    return { out: format === "json" ? json(r) : renderLimits(r, p, e.now, flags.check === true), code };
+    return { out: format === "json" ? json(r) : renderLimits(r, p, e.now, flags.check === true, e.limitBars), code };
   } finally {
     db.close();
   }
@@ -133,6 +136,8 @@ export function formatCount(n: number): string {
 }
 
 const percent = (v: number | null) => (v == null ? "-" : `${Math.round(v)}%`);
+/** A limit's reading: "16%", or "84% left" when the user reads limits as what is left. */
+const limitText = (used: number | null, bars: LimitBars) => (used == null || bars === "used" ? percent(used) : `${leftPercent(Math.round(used))}% left`);
 const toneOf = (pct: number, warn = 80): Tone => (pct >= 100 ? "red" : pct >= warn ? "yellow" : "green");
 
 function formatChange(v: number | null, now: number): string {
@@ -178,7 +183,7 @@ function budgetLines(budgets: BudgetRow[], p: Paint, warn = 80): string[] {
   );
 }
 
-export function renderToday(r: TodayReport, p: Paint, now: number): string {
+export function renderToday(r: TodayReport, p: Paint, now: number, bars: LimitBars = "used"): string {
   const day = new Date(now).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
   const lines = [`${p("bold", "Today")}  ${p("dim", day)}`, ...filterLine(r.filters, p), ""];
   const row = (label: string, k: "costUsd" | "tokens" | "sessions" | "prompts", fmt: (n: number) => string, ch: number | null) => [
@@ -210,7 +215,7 @@ export function renderToday(r: TodayReport, p: Paint, now: number): string {
   if (r.claudeFiveHour) {
     const { usedPercent, resetsAt } = r.claudeFiveHour;
     const resets = resetsAt ? p("dim", `resets in ${formatDuration(Date.parse(resetsAt) - now)}`) : "";
-    lines.push("", `${p("bold", "Claude 5h limit")}  ${p(toneOf(usedPercent ?? 0), percent(usedPercent))}  ${resets}`.trimEnd());
+    lines.push("", `${p("bold", "Claude 5h limit")}  ${p(toneOf(usedPercent ?? 0), limitText(usedPercent, bars))}  ${resets}`.trimEnd());
   }
   if (!r.today.modelCalls && !r.yesterday.modelCalls) lines.push("", p("dim", "No usage today or yesterday yet."));
   return lines.join("\n") + "\n";
@@ -256,13 +261,13 @@ const CHECK_TEXT: Record<string, (warn: number) => string> = {
   unknown: () => "no fresh limit reading",
 };
 
-export function renderLimits(r: LimitsReport, p: Paint, now: number, check: boolean): string {
+export function renderLimits(r: LimitsReport, p: Paint, now: number, check: boolean, bars: LimitBars = "used"): string {
   const warn = r.check.warnPercent;
   const lines = [p("bold", "Plan limits")];
   if (r.windows.length) {
     const rows = r.windows.map((w) => {
       const fresh = w.status === "fresh";
-      const used = fresh ? p(toneOf(w.usedPercent ?? 0, warn), percent(w.usedPercent)) : p("dim", percent(w.usedPercent));
+      const used = fresh ? p(toneOf(w.usedPercent ?? 0, warn), limitText(w.usedPercent, bars)) : p("dim", limitText(w.usedPercent, bars));
       const resets = w.resetsAt && fresh ? `resets in ${formatDuration(Date.parse(w.resetsAt) - now)}` : "";
       const age = w.status === "reset since reading" ? "reset since the reading" : `read ${formatDuration(w.ageMinutes * 60_000)} ago${fresh ? "" : ", stale"}`;
       return [[w.provider, w.plan, w.scope, w.host && `on ${w.host}`].filter(Boolean).join(" "), w.window, used, resets, p("dim", age)];

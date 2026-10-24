@@ -74,6 +74,10 @@
     checkUpdates: boolean;
     sources: Record<DirsKey, string[]> & { enabled: Record<SourceKey, boolean> };
     limits: Record<LimitKey, boolean>;
+    /** What the plan limit bars show. Newer servers only. */
+    limitBars?: "used" | "left";
+    /** Whether the plan limit dials draw the forecast. Newer servers only, and yes when missing. */
+    limitForecast?: boolean;
     budgets?: { daily: number | null; monthly: number | null; projects: Record<string, number>; notify: boolean; limitAlerts: boolean };
     cursorSync?: boolean;
     digest?: { enabled: boolean; day: number; hour: number; dir: string };
@@ -84,9 +88,10 @@
   interface Settings {
     config: Config;
     dbPath: string;
-    defaultDbPath: string;
-    syncFolders: { name: string; path: string }[];
-    sharedFolder: string;
+    /** Only the settings read sends these three, a save answers without them. */
+    defaultDbPath?: string;
+    syncFolders?: { name: string; path: string }[];
+    sharedFolder?: string;
   }
   type DbState = "default" | "current" | "existing" | "new" | "missing" | "invalid";
   interface Rule {
@@ -129,7 +134,7 @@
   let cfg = $state<Config | null>(null);
   let currentDb = $state("");
   let defaultDb = $state("");
-  let syncFolders = $state<Settings["syncFolders"]>([]);
+  let syncFolders = $state<NonNullable<Settings["syncFolders"]>>([]);
   let sharedFolder = $state("");
   let dbInput = $state("");
   let target = $state<{ file: string; state: DbState } | null>(null);
@@ -212,9 +217,10 @@
     const limits = Object.fromEntries(LIMIT_SOURCES.map((k) => [k, s.config.limits?.[k] ?? true])) as Record<LimitKey, boolean>;
     cfg = { ...s.config, sources: { ...s.config.sources, enabled: { ...s.config.sources.enabled, ...enabled } }, limits: { ...s.config.limits, ...limits } };
     currentDb = s.dbPath;
-    defaultDb = s.defaultDbPath;
-    syncFolders = s.syncFolders;
-    sharedFolder = s.sharedFolder;
+    // A save answers with the config and the database only: what it leaves out stays as it was loaded.
+    defaultDb = s.defaultDbPath ?? defaultDb;
+    syncFolders = s.syncFolders ?? syncFolders;
+    sharedFolder = s.sharedFolder ?? sharedFolder;
     dbInput = asFolder(s.config.dbPath);
     for (const src of SOURCES) dirs[src.key] = s.config.sources[src.dirs]?.length ? [...s.config.sources[src.dirs]] : [""];
     const b = s.config.budgets;
@@ -680,6 +686,34 @@
     }
   }
 
+  async function saveLimitBars(limitBars: "used" | "left") {
+    busy = true;
+    errorMsg = null;
+    try {
+      apply(await send<Settings>("/api/settings", { limitBars }));
+      flash(t("settings.saved"));
+    } catch (e) {
+      errorMsg = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function saveLimitForecast(limitForecast: boolean) {
+    busy = true;
+    errorMsg = null;
+    try {
+      apply(await send<Settings>("/api/settings", { limitForecast }));
+      flash(t("settings.saved"));
+    } catch (e) {
+      // The switch turned itself already: back to what the server still holds.
+      if (cfg) cfg = { ...cfg, limitForecast: !limitForecast };
+      errorMsg = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+
   async function saveDb() {
     await save({ dbPath: dbInput, copyDb });
   }
@@ -1043,6 +1077,16 @@
       </Card>
 
       <Card id="settings-limits" title={t("settings.limits")} subtitle={t("settings.limitsHint")} divided>
+        <SettingRow label={t("settings.limitBars")} hint={t("settings.limitBarsHint")}>
+          <div class="seg wide" role="radiogroup" aria-label={t("settings.limitBars")}>
+            {#each ["used", "left"] as const as value (value)}
+              <button role="radio" aria-checked={(cfg.limitBars ?? "used") === value} disabled={busy} onclick={() => saveLimitBars(value)}>{t(`settings.limitBars.${value}`)}</button>
+            {/each}
+          </div>
+        </SettingRow>
+        <SettingRow label={t("settings.limitForecast")} hint={t("settings.limitForecastHint")}>
+          <Switch checked={cfg.limitForecast ?? true} label={t("settings.limitForecast")} disabled={busy} onchange={(on) => saveLimitForecast(on)} />
+        </SettingRow>
         {#each LIMIT_SOURCES as key (key)}
           <SettingRow label={t(`settings.limits.${key}`)} hint={t(`settings.limits.${key}Hint`)}>
             <Switch bind:checked={cfg!.limits[key]} label={t(`settings.limits.${key}`)} onchange={() => save()} />
