@@ -11,8 +11,10 @@
     /** One dial per limit, the outer ring first. */
     dials: Dial[];
     color: string;
+    /** Larger, when the card has the room: no pager under it. */
+    roomy?: boolean;
   }
-  let { dials, color }: Props = $props();
+  let { dials, color, roomy = false }: Props = $props();
 
   // Rings of 270 degrees from the top, nested in a 128 box. Up to four have room for a thick stroke, more get thinner rings.
   const CENTER = 64;
@@ -25,7 +27,7 @@
   const step = $derived(dials.length > 4 ? (56 - 14) / (dials.length - 1) : 13);
 </script>
 
-<svg viewBox="0 0 128 128" width="136" height="136" class="shrink-0" aria-hidden="true">
+<svg viewBox="0 0 128 128" width={roomy ? 164 : 136} height={roomy ? 164 : 136} class="shrink-0" aria-hidden="true">
   {#each dials as dial, i (i)}
     {@const r = 56 - i * step}
     {@const opacity = ringOpacity(i)}

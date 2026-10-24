@@ -41,14 +41,17 @@
     label: string;
     /** Smaller, when four or more share a row. */
     small: boolean;
+    /** Larger, when the card has the room: no pager under the gauges. */
+    roomy?: boolean;
   }
-  let { kind, color, dial, mode, label, small }: Props = $props();
+  let { kind, color, dial, mode, label, small, roomy = false }: Props = $props();
 
   // Ids in an svg are shared by the whole page: each gauge needs its own for its clip path.
   const uid = $props.id();
 
   const size = $derived(SIZES[kind]);
-  const width = $derived(size.width[small ? 1 : 0]);
+  // A fifth larger with room to spare. It never outgrows its column: the svg shrinks to fit (max-w-full, h-auto).
+  const width = $derived(Math.round(size.width[small ? 1 : 0] * (roomy ? 1.2 : 1)));
   const height = $derived(Math.round((width * size.box[1]) / size.box[0]));
   const pct = $derived(`${Math.round(dial.value * 100)}%`);
   const word = $derived(t(mode === "used" ? "live.dial.used" : "live.dial.left"));
@@ -151,7 +154,7 @@
 </script>
 
 {#if kind === "tach"}
-  <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="shrink-0" role="img" aria-label={label}>
+  <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>
     <path d={tachArc(0, 1)} fill="none" class="stroke-surface-3" stroke-width="7" stroke-linecap="round" />
     <path d={tachArc(red[0], red[1])} fill="none" stroke={RED} stroke-opacity=".55" stroke-width="7" />
     {#if dial.ahead}<path d={tachArc(dial.ahead.from, dial.ahead.to)} fill="none" stroke={color} stroke-opacity=".35" stroke-width="7" />{/if}
@@ -166,7 +169,7 @@
     <text x={TACH.cx} y="106" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="500" class="fill-ink-2">{word}</text>
   </svg>
 {:else if kind === "segments"}
-  <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="shrink-0" role="img" aria-label={label}>
+  <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>
     {#each blocks as block, i (i)}
       <path d={block.d} fill="none" stroke={block.fill} stroke-opacity={block.opacity} stroke-width="11" />
     {/each}
@@ -178,7 +181,7 @@
 {:else if kind === "vu"}
   <!-- A short face, so the number gets a line of its own under it. -->
   <div class="flex shrink-0 flex-col items-center gap-1.5">
-    <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="shrink-0" role="img" aria-label={label}>
+    <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>
       <defs><clipPath id="{uid}-face"><rect x="2" y="2" width="116" height="66" rx="9" /></clipPath></defs>
       <rect x="2" y="2" width="116" height="66" rx="9" class="fill-surface-2 stroke-line-strong" />
       <g clip-path="url(#{uid}-face)">
@@ -201,7 +204,7 @@
     </span>
   </div>
 {:else}
-  <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="shrink-0" role="img" aria-label={label}>
+  <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>
     <defs>
       <clipPath id="{uid}-glass">
         <rect x={THERMO.x - channel / 2} y={THERMO.top} width={channel} height={THERMO.bulb - THERMO.top} rx={channel / 2} />

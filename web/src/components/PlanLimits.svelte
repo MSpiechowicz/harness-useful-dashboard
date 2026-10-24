@@ -98,6 +98,8 @@
   const kind = $derived<GaugeKind>(gauge === "rings" ? "tach" : gauge);
   const mode = $derived(data.bars ?? "used");
   const showForecast = $derived(data.forecast ?? true);
+  // With one provider there is no pager under the gauges, and they take the room it would have used.
+  const roomy = $derived(data.reports.length <= 1);
   const used = (w: LimitWindow) => Math.max(0, Math.min(1, w.usedFraction));
 
   // Where the use is heading: the use so far, kept up, over the whole window. Above 1 it runs out before the reset.
@@ -173,7 +175,7 @@
   {#snippet counted()}{#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })} · {/if}{@render reset(w)}{/snippet}
   {#if solo}
     <div class="flex items-center gap-[22px] px-1 py-0.5">
-      <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={false} />
+      <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={false} {roomy} />
       <div class="mb-1.5 flex min-w-0 flex-col items-start gap-1.5">
         <span class="text-[13px] font-medium text-ink">{windowName(w)}</span>
         <span class="flex h-5 items-center">{@render chip(c)}</span>
@@ -182,7 +184,7 @@
     </div>
   {:else}
     <div class="flex w-full min-w-0 flex-col items-center gap-1.5 text-center">
-      <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={dense} />
+      <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={dense} {roomy} />
       <span class="mt-1.5 h-[18px] max-w-full truncate text-[13px] leading-[18px] font-medium text-ink" title={windowName(w)}>{dense ? shortName(w) : windowName(w)}</span>
       <span class="flex h-5 max-w-full items-center justify-center">{@render chip(c)}</span>
       <span class="min-h-3.5 text-[10.5px] leading-[14px] text-balance text-muted">{@render counted()}</span>
@@ -199,7 +201,7 @@
     return { w, c: chipOf(w, p), d: dialOf(w, p) };
   })}
   <div class="flex items-center gap-4 px-1">
-    <LimitRings dials={rows.map((row) => row.d)} {color} />
+    <LimitRings dials={rows.map((row) => row.d)} {color} {roomy} />
     <div class="flex min-w-0 flex-1 flex-col gap-2.5">
       {#each rows as { w, c, d }, i (w.id)}
         <div class="grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
@@ -219,13 +221,14 @@
   </div>
 {/snippet}
 
-<div class="flex h-[296px] flex-col">
-  <!-- The card is as tall as the chart beside it: more limits than fit scroll here, the pager stays below. -->
+<div class="flex flex-col xl:h-[296px]">
+  <!-- Beside the chart (xl), the card is as tall as the chart: more limits than fit scroll here, the pager stays below.
+       Under the chart, on narrower screens, it is as tall as its gauges. -->
   <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 {data.reports.length > 1 ? '' : 'pb-4'}">
     {#if data.reports.length}
       <!-- Every provider sits in the same grid cell, so the card stays as tall as the tallest one and the pager doesn't
-           jump while paging. The others are hidden. -->
-      <div class="grid">
+           jump while paging. The others are hidden. The cell takes the body's spare height, and the gauges sit in its middle. -->
+      <div class="grid flex-1">
         {#each data.reports as r (r.key)}
           {@const n = r.windows.length}
           <section class="flex flex-col gap-2 [grid-area:1/1] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
@@ -243,18 +246,20 @@
                 </span>
               {/if}
             </header>
-            {#if gauge === "rings" && n > 0}
-              {@render rings(r)}
-            {:else if n === 1}
-              {@render limit(r, r.windows[0]!, true, false)}
-            {:else if n > 1}
-              <!-- Up to four to a row in columns of one width, so a short row doesn't spread out. Four or more get smaller gauges. -->
-              <div class="grid justify-items-center gap-x-2 gap-y-3 {n >= 4 ? 'limit-dense' : ''}" style:grid-template-columns="repeat({Math.min(n, 4)}, minmax(0, 1fr))">
-                {#each r.windows as w (w.id)}
-                  {@render limit(r, w, false, n >= 4)}
-                {/each}
-              </div>
-            {/if}
+            <div class="flex flex-1 flex-col justify-center">
+              {#if gauge === "rings" && n > 0}
+                {@render rings(r)}
+              {:else if n === 1}
+                {@render limit(r, r.windows[0]!, true, false)}
+              {:else if n > 1}
+                <!-- Up to four to a row in columns of one width, so a short row doesn't spread out. Four or more get smaller gauges. -->
+                <div class="grid justify-items-center gap-x-2 gap-y-3 {n >= 4 ? 'limit-dense' : ''}" style:grid-template-columns="repeat({Math.min(n, 4)}, minmax(0, 1fr))">
+                  {#each r.windows as w (w.id)}
+                    {@render limit(r, w, false, n >= 4)}
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </section>
         {/each}
       </div>
