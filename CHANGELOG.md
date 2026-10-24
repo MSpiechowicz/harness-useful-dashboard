@@ -1,3 +1,10 @@
+# [2.7.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.6.0...v2.7.0) (2026-10-24)
+
+
+### Features
+
+* plan limits show as dial gauges with a forecast, and read as used or left in the dashboard, CLI and MCP ([80fdedf](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/80fdedfc386a32c81a5267f3eb386adae6501615))
+
 # [2.6.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.5.0...v2.6.0) (2026-10-23)
 
 
