@@ -1,3 +1,15 @@
+# [2.10.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.9.2...v2.10.0) (2026-10-25)
+
+
+### Bug Fixes
+
+* update buttons in Settings stay on one line in every language ([714fe3f](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/714fe3fe81eb6c6b46397dcfcb22709a849e22af))
+
+
+### Features
+
+* plan limits as bars, a waffle or a battery, with bars by default and the card under the chart on medium screens ([3f1f8bc](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/3f1f8bc4bb8d98fa162b91c84bd5ded88e0a99e6))
+
 ## [2.9.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.9.1...v2.9.2) (2026-10-24)
 
 
