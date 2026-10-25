@@ -1354,15 +1354,15 @@
       </Card>
 
       <Card id="settings-app" title={t("settings.app")} subtitle={t("settings.appHint")} divided>
-        <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={updateText || live.status?.platform}>
+        <SettingRow label={t("settings.version", { v: live.status?.version ?? "" })} hint={updateText || live.status?.platform} wide>
           {#if update?.available && isShell() && (!updater.message || !updater.installing)}
-            <button class="btn btn-primary" onclick={installUpdate} disabled={updater.installing}>
+            <button class="btn btn-primary whitespace-nowrap" onclick={installUpdate} disabled={updater.installing}>
               {#if updater.installing}<Loader size={14} class="animate-spin" />{t("update.installing")}{:else}<Download size={14} />{t("update.install")}{/if}
             </button>
           {:else if update?.available && update.releaseUrl && !isShell()}
-            <a class="btn" href={update.releaseUrl} target="_blank" rel="noreferrer"><Download size={14} />{t("update.manual")}</a>
+            <a class="btn whitespace-nowrap" href={update.releaseUrl} target="_blank" rel="noreferrer"><Download size={14} />{t("update.manual")}</a>
           {/if}
-          <button class="btn" onclick={checkNow} disabled={updater.installing}><RefreshCw size={14} />{t("settings.checkNow")}</button>
+          <button class="btn whitespace-nowrap" onclick={checkNow} disabled={updater.installing}><RefreshCw size={14} />{t("settings.checkNow")}</button>
         </SettingRow>
         <SettingRow label={t("settings.checkUpdates")} hint={t("settings.checkUpdatesHint")}>
           <Switch bind:checked={cfg.checkUpdates} label={t("settings.checkUpdates")} onchange={() => save()} />

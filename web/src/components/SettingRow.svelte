@@ -17,5 +17,5 @@
       {#if hint}<div class="mt-0.5 max-w-[700px] text-[13px] leading-relaxed text-ink-2">{hint}</div>{/if}
     </div>
   </div>
-  <div class="flex min-w-0 shrink-0 items-center justify-end gap-3 {wide ? 'sm:w-[min(36rem,55%)]' : 'sm:w-72'}">{@render children()}</div>
+  <div class="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-3 {wide ? 'sm:w-[min(36rem,55%)]' : 'sm:w-72'}">{@render children()}</div>
 </div>
