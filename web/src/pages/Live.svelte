@@ -328,8 +328,10 @@
       </div>
     {/if}
 
-    <div class="grid gap-5 xl:grid-cols-5">
-      <Card title={t("live.rate")} subtitle={t(kind === "total" ? "live.totalHint" : "live.rateHint", { window: windowLabel })} class="xl:col-span-3">
+    <!-- Plan limits sit beside the chart only on wide screens (2xl). Below that they take the full width under it, where
+         the chart and the gauges both get room. -->
+    <div class="grid gap-5 2xl:grid-cols-5">
+      <Card title={t("live.rate")} subtitle={t(kind === "total" ? "live.totalHint" : "live.rateHint", { window: windowLabel })} class="2xl:col-span-3">
         {#snippet actions()}
           <div class="seg" role="radiogroup" aria-label={t("live.metric")}>
             <button role="radio" aria-checked={metric === "tokens"} onclick={() => pickMetric("tokens")}>{t("metric.tokens")}</button>
@@ -347,12 +349,12 @@
           <Chart {option} height={280} fill />
         {/if}
       </Card>
-      <Card title={t("live.limits")} subtitle={t(limits.data?.bars === "left" ? "live.limitsHintLeft" : "live.limitsHintUsed")} info={t("live.limitsInfo")} class="xl:col-span-2" pad={false}>
+      <Card title={t("live.limits")} subtitle={t(limits.data?.bars === "left" ? "live.limitsHintLeft" : "live.limitsHintUsed")} info={t("live.limitsInfo")} class="2xl:col-span-2" pad={false}>
         {#snippet actions()}
           <Dropdown
             label={t("live.gauge")}
             value={store.limitGauge}
-            options={LIMIT_GAUGES.map((g) => ({ value: g, label: t(`live.gauge.${g}`) }))}
+            options={LIMIT_GAUGES.map((g) => ({ value: g, label: t(`live.gauge.${g}`) })).sort((a, b) => a.label.localeCompare(b.label, i18n.locale))}
             onchange={(g) => store.setLimitGauge(g)}
           />
           <!-- An icon, so the gauge picker keeps its full name beside the title in every language. -->

@@ -5,7 +5,7 @@
     solid: number;
     ahead: { from: number; to: number } | null;
   }
-  export type GaugeKind = "tach" | "segments" | "vu" | "thermo";
+  export type GaugeKind = "tach" | "segments" | "vu" | "thermo" | "waffle" | "battery";
 
   const rad = (deg: number) => (deg * Math.PI) / 180;
   const num = (n: number) => n.toFixed(2);
@@ -25,6 +25,8 @@
     segments: { box: [120, 84], width: [120, 96] },
     vu: { box: [120, 70], width: [120, 96] },
     thermo: { box: [120, 100], width: [120, 96] },
+    waffle: { box: [100, 100], width: [76, 62] },
+    battery: { box: [109, 46], width: [112, 92] },
   };
 </script>
 
@@ -132,6 +134,10 @@
     return { x1: VU.cx + inner * Math.cos(a), y1: VU.cy + inner * Math.sin(a), x2: VU.cx + outer * Math.cos(a), y2: VU.cy + outer * Math.sin(a), major: major(f) };
   });
   const vuNeedle = $derived({ x: VU.cx + (VU.r + 9) * Math.cos(rad(vuAt(dial.value))), y: VU.cy + (VU.r + 9) * Math.sin(rad(vuAt(dial.value))) });
+  // The needle starts inside the grey strip at the bottom of the face, not at the pivot far below it: a needle drawn from the
+  // pivot left a sliver under the face where the clip's soft edge let it through.
+  const VU_STRIP = 54;
+  const vuFoot = $derived({ x: VU.cx + ((vuNeedle.x - VU.cx) * (VU.cy - VU_STRIP - 4)) / (VU.cy - vuNeedle.y), y: VU_STRIP + 4 });
 
   // Thermometer: a tube on a bulb. Every layer is clipped to the glass's inside, a capsule that runs on into the bulb, so
   // the top of the tube is round and the fill flows into the bulb without a seam. The bulb is well wider than the tube,
@@ -151,7 +157,66 @@
     const bottom = intoBulb ? THERMO.bulb + 10 : thermoY(a);
     return { y: top, height: Math.max(0, bottom - top) };
   }
+
+  // Waffle: a hundred cells, one to a percent, filled from the bottom left row by row. A cell is lit when its middle is
+  // within the solid part, pale when within the forecast stretch. The red tenth is the top row when counting up, the bottom
+  // row when counting down.
+  const WAFFLE = { side: 10, pitch: 10, cell: 8.4, margin: 0.8 };
+  const cells = $derived(
+    Array.from({ length: WAFFLE.side * WAFFLE.side }, (_, i) => {
+      const col = i % WAFFLE.side;
+      const row = Math.floor(i / WAFFLE.side);
+      const x = WAFFLE.margin + col * WAFFLE.pitch;
+      const y = WAFFLE.margin + (WAFFLE.side - 1 - row) * WAFFLE.pitch;
+      const mid = (i + 0.5) / 100;
+      const hot = mode === "used" ? i >= 90 : i < 10;
+      const lit = mid <= dial.solid + 1e-6 || (dial.solid >= 0.01 && i === 0);
+      const pale = !lit && dial.ahead != null && mid >= dial.ahead.from && mid <= dial.ahead.to + 0.005;
+
+      if (lit) return { x, y, fill: color, opacity: 1 };
+      if (pale) return { x, y, fill: color, opacity: 0.35 };
+      if (hot) return { x, y, fill: RED, opacity: 0.45 };
+      return { x, y, fill: "var(--surface-3)", opacity: 1 };
+    }),
+  );
+
+  // Battery: ten cells in an outlined body with a terminal on the right. It always draws the charge, what is left, whatever
+  // the mode: full up to what is left at the reset, pale up to what is left now. The outline is the inside of the stroke
+  // (cells keep clear of it) and the terminal starts where the stroke ends, so nothing translucent overlaps.
+  const BATTERY = { body: 102, height: 46, stroke: 2, inset: 3, cap: 5, capHeight: 14, count: 10, gap: 2.5 };
+  // The stroke is centred on the body rect (at x = 1), so its inside starts at 1 + stroke / 2 and its outside ends at
+  // body + 1 + stroke / 2, where the terminal begins.
+  const batteryIn = 1 + BATTERY.stroke / 2 + BATTERY.inset;
+  const batteryOut = BATTERY.body + 1 + BATTERY.stroke / 2;
+  const batteryCell = (BATTERY.body - BATTERY.inset - batteryIn - (BATTERY.count - 1) * BATTERY.gap) / BATTERY.count;
+  // Left now, and left once the forecast has run its course.
+  const charge = $derived(
+    mode === "used"
+      ? { now: 1 - dial.value, reset: 1 - (dial.ahead?.to ?? dial.value) }
+      : { now: dial.value, reset: dial.ahead ? dial.solid : dial.value },
+  );
+  const batteryCells = $derived(
+    Array.from({ length: BATTERY.count }, (_, i) => {
+      const mid = (i + 0.5) / BATTERY.count;
+      const x = batteryIn + i * (batteryCell + BATTERY.gap);
+      const full = mid <= charge.reset + 1e-6 || (i === 0 && charge.reset >= 0.02);
+      const pale = !full && (mid <= charge.now + 1e-6 || (i === 0 && charge.now >= 0.02));
+
+      if (full) return { x, fill: color, opacity: 1 };
+      if (pale) return { x, fill: color, opacity: 0.35 };
+      if (i === 0) return { x, fill: RED, opacity: 0.45 };
+      return { x, fill: "var(--surface-3)", opacity: 1 };
+    }),
+  );
 </script>
+
+<!-- The number and its word on a line of their own, under a drawing too short or too tall to hold them. -->
+{#snippet reading()}
+  <span class="flex flex-wrap items-baseline justify-center gap-x-1 gap-y-0.5 leading-none">
+    <b class="font-bold tracking-[-0.02em] tabular-nums {small ? 'text-[18px]' : 'text-[22px]'}">{pct}</b>
+    <span class="text-[11px] font-medium text-ink-2">{word}</span>
+  </span>
+{/snippet}
 
 {#if kind === "tach"}
   <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>
@@ -194,14 +259,32 @@
         {/each}
         <text x="7" y="13" text-anchor="start" font-size="8.5" font-weight="700" class={mode === "used" ? "fill-ink-2" : "fill-bad"}>0%</text>
         <text x="113" y="13" text-anchor="end" font-size="8.5" font-weight="700" class={mode === "used" ? "fill-bad" : "fill-ink-2"}>100%</text>
-        <line x1={VU.cx} y1={VU.cy} x2={vuNeedle.x} y2={vuNeedle.y} class="stroke-ink" stroke-width="1.8" stroke-linecap="round" />
-        <rect x="2" y="54" width="116" height="14" class="fill-surface-3" />
+        <line x1={vuFoot.x} y1={vuFoot.y} x2={vuNeedle.x} y2={vuNeedle.y} class="stroke-ink" stroke-width="1.8" stroke-linecap="round" />
+        <rect x="2" y={VU_STRIP} width="116" height="14" class="fill-surface-3" />
       </g>
     </svg>
-    <span class="flex items-baseline justify-center gap-1 leading-none">
-      <b class="font-bold tracking-[-0.02em] tabular-nums {small ? 'text-[18px]' : 'text-[22px]'}">{pct}</b>
-      <span class="text-[11px] font-medium text-ink-2">{word}</span>
-    </span>
+    {@render reading()}
+  </div>
+{:else if kind === "waffle"}
+  <!-- A tall grid, so the number gets a line of its own under it. -->
+  <div class="flex shrink-0 flex-col items-center gap-1.5">
+    <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>
+      {#each cells as cell, i (i)}
+        <rect x={cell.x} y={cell.y} width={WAFFLE.cell} height={WAFFLE.cell} rx="1.6" fill={cell.fill} fill-opacity={cell.opacity} />
+      {/each}
+    </svg>
+    {@render reading()}
+  </div>
+{:else if kind === "battery"}
+  <div class="flex shrink-0 flex-col items-center gap-1.5">
+    <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>
+      <rect x="1" y="1" width={BATTERY.body} height={BATTERY.height - 2} rx="6" fill="none" class="stroke-line-strong" stroke-width={BATTERY.stroke} />
+      <path d="M{batteryOut} {BATTERY.height / 2 - BATTERY.capHeight / 2} h{BATTERY.cap - 2} a2 2 0 0 1 2 2 v{BATTERY.capHeight - 4} a2 2 0 0 1 -2 2 h{2 - BATTERY.cap} z" class="fill-line-strong" />
+      {#each batteryCells as cell, i (i)}
+        <rect x={cell.x} y={batteryIn} width={batteryCell} height={BATTERY.height - 2 * batteryIn} rx="2" fill={cell.fill} fill-opacity={cell.opacity} />
+      {/each}
+    </svg>
+    {@render reading()}
   </div>
 {:else}
   <svg viewBox="0 0 {size.box[0]} {size.box[1]}" {width} {height} class="h-auto max-w-full shrink-0" role="img" aria-label={label}>

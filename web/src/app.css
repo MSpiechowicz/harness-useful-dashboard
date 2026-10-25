@@ -862,6 +862,28 @@ table.data th.num {
 .limit-pager .table-footer {
   padding-block: 0.5rem;
 }
+/* The bars: in columns under the chart, wider ones when four or more share a one-line header. Beside the chart (2xl) the
+   card has a fixed height: one row each, spread over it, with a little room left above the pager. */
+.limit-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px 32px;
+  padding-bottom: 12px;
+}
+.limit-bars.limit-dense {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+@media (min-width: 96rem) {
+  .limit-bars {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: space-evenly;
+    min-height: 0;
+    gap: 4px;
+    padding-bottom: 6px;
+  }
+}
 /* The legend swatch: a short bar in the dial's color, solid or pale. */
 .limit-swatch {
   display: inline-block;

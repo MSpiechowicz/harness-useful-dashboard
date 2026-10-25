@@ -79,12 +79,12 @@
   import { colorFor } from "../lib/colors.svelte.ts";
   import { compact, relative, until } from "../lib/format.ts";
   import type { LimitGauge as GaugeStyle } from "../lib/state.svelte.ts";
+  import LimitBar from "./LimitBar.svelte";
   import LimitGauge, { type Dial, type GaugeKind } from "./LimitGauge.svelte";
-  import LimitRings, { ringOpacity } from "./LimitRings.svelte";
   import Pager from "./Pager.svelte";
 
   /** `gauge` is how the limits are drawn: the viewer's pick on Live. */
-  let { data, now, gauge = "tach" }: { data: LimitsResult; now: number; gauge?: GaugeStyle } = $props();
+  let { data, now, gauge = "bars" }: { data: LimitsResult; now: number; gauge?: GaugeStyle } = $props();
 
   // One provider per page. The page is kept by the provider's key, so a refresh stays on it, and one that has gone falls
   // back to the first.
@@ -94,8 +94,8 @@
 
   // The gauge shows the share used or the share left, always in the provider's color. Only the red end of the scale says
   // where the limit runs out: the 100% end when counting up, the 0% end when counting down.
-  // The rings are laid out apart from the others, which are one gauge to a limit.
-  const kind = $derived<GaugeKind>(gauge === "rings" ? "tach" : gauge);
+  // The bars are laid out apart from the others, which are one gauge to a limit.
+  const kind = $derived<GaugeKind>(gauge === "bars" ? "tach" : gauge);
   const mode = $derived(data.bars ?? "used");
   const showForecast = $derived(data.forecast ?? true);
   // With one provider there is no pager under the gauges, and they take the room it would have used.
@@ -161,6 +161,8 @@
   {#if w.reset}{t("live.resetSince")}{:else if w.resetsAt}<span title={new Date(w.resetsAt).toLocaleString()}>{t("live.resetsIn", { time: until(w.resetsAt, now) })}</span>{:else}{t("live.noReset")}{/if}
 {/snippet}
 
+{#snippet counted(w: LimitWindow)}{#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })} · {/if}{@render reset(w)}{/snippet}
+
 {#snippet chip(c: Chip | null)}
   {#if c}<span class="limit-chip {c.kind}" title={c.text}><span class="min-w-0 truncate">{c.text}</span></span>{/if}
 {/snippet}
@@ -172,14 +174,13 @@
   {@const c = chipOf(w, p)}
   {@const d = dialOf(w, p)}
   {@const label = labelOf(w, d, c)}
-  {#snippet counted()}{#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })} · {/if}{@render reset(w)}{/snippet}
   {#if solo}
     <div class="flex items-center gap-[22px] px-1 py-0.5">
       <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={false} {roomy} />
       <div class="mb-1.5 flex min-w-0 flex-col items-start gap-1.5">
         <span class="text-[13px] font-medium text-ink">{windowName(w)}</span>
         <span class="flex h-5 items-center">{@render chip(c)}</span>
-        <span class="text-[11px] text-muted">{@render counted()}</span>
+        <span class="text-[11px] text-muted">{@render counted(w)}</span>
       </div>
     </div>
   {:else}
@@ -187,68 +188,79 @@
       <LimitGauge {kind} color={colorFor("provider", r.provider)} dial={d} {mode} {label} small={dense} {roomy} />
       <span class="mt-1.5 h-[18px] max-w-full truncate text-[13px] leading-[18px] font-medium text-ink" title={windowName(w)}>{dense ? shortName(w) : windowName(w)}</span>
       <span class="flex h-5 max-w-full items-center justify-center">{@render chip(c)}</span>
-      <span class="min-h-3.5 text-[10.5px] leading-[14px] text-balance text-muted">{@render counted()}</span>
+      <span class="min-h-3.5 text-[10.5px] leading-[14px] text-balance text-muted">{@render counted(w)}</span>
     </div>
   {/if}
 {/snippet}
 
-<!-- A provider's limits as rings: one ring each, outer first, with a list beside them in the same order. Each row carries the
-     text, the rings themselves are only a picture. -->
-{#snippet rings(r: LimitReport)}
+<!-- A provider's limits as bars, any number: side by side under the chart, one row each spread over the card's height beside
+     it (see .limit-bars). Up to three get a header with the number, the bar and a line for the chip and the reset. Four or more get a one-line header and a thinner bar. Each row
+     carries its text as one label, the bar itself is only a picture. -->
+{#snippet bars(r: LimitReport)}
   {@const color = colorFor("provider", r.provider)}
-  {@const rows = r.windows.map((w) => {
-    const p = pace(w);
-    return { w, c: chipOf(w, p), d: dialOf(w, p) };
-  })}
-  <div class="flex items-center gap-4 px-1">
-    <LimitRings dials={rows.map((row) => row.d)} {color} {roomy} />
-    <div class="flex min-w-0 flex-1 flex-col gap-2.5">
-      {#each rows as { w, c, d }, i (w.id)}
-        <div class="grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
-          <i class="h-2.5 w-2.5 rounded-full" style:background={color} style:opacity={ringOpacity(i)}></i>
-          <span class="truncate text-[13px] leading-[18px] font-medium text-ink" title={windowName(w)}>{windowName(w)}</span>
-          <span class="row-span-2 text-right text-[21px] leading-none font-semibold text-ink tabular-nums">{Math.round(d.value * 100)}%<span class="sr-only"> {t(mode === "used" ? "live.dial.used" : "live.dial.left")}</span></span>
-          <!-- When the chip and the reset time don't fit side by side, the time goes under the chip rather than being cut. -->
-          <span class="col-start-2 flex min-h-5 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] leading-[14px] text-muted">
-            <span class="shrink-0">{@render chip(c)}</span>
-            <span class="whitespace-nowrap">
-              {#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })} · {/if}{@render reset(w)}
-            </span>
-          </span>
-        </div>
-      {/each}
-    </div>
+  {@const dense = r.windows.length >= 4}
+  <div class="limit-bars px-1 {dense ? 'limit-dense' : ''}">
+    {#each r.windows as w (w.id)}
+      {@const p = pace(w)}
+      {@const c = chipOf(w, p)}
+      {@const d = dialOf(w, p)}
+      {@const pct = `${Math.round(d.value * 100)}%`}
+      <div class="min-w-0" role="img" aria-label={labelOf(w, d, c)}>
+        {#if dense}
+          <div class="mb-1 flex h-5 min-w-0 items-center gap-2">
+            <span class="max-w-[35%] shrink-0 truncate text-[13px] leading-5 font-medium text-ink" title={windowName(w)}>{shortName(w)}</span>
+            <span class="min-w-0 truncate text-[11px] text-muted">{@render reset(w)}</span>
+            {#if c}<span class="ml-auto shrink-0">{@render chip(c)}</span>{/if}
+            <span class="w-[38px] shrink-0 text-right text-[15px] leading-5 font-bold tracking-[-0.02em] text-ink tabular-nums {c ? '' : 'ml-auto'}">{pct}</span>
+          </div>
+          <LimitBar {color} dial={d} {mode} small />
+        {:else}
+          <div class="mb-1 flex min-w-0 items-baseline gap-2">
+            <span class="min-w-0 truncate text-[13px] leading-5 font-medium text-ink" title={windowName(w)}>{windowName(w)}</span>
+            <span class="ml-auto shrink-0 text-[18px] leading-5 font-bold tracking-[-0.02em] text-ink tabular-nums">{pct}</span>
+            <span class="shrink-0 text-[11px] font-medium text-ink-2">{t(mode === "used" ? "live.dial.used" : "live.dial.left")}</span>
+          </div>
+          <LimitBar {color} dial={d} {mode} small={false} />
+          <div class="mt-2 flex h-5 min-w-0 items-center gap-2.5">
+            {#if c}<span class="shrink-0">{@render chip(c)}</span>{/if}
+            <span class="min-w-0 truncate text-[11px] text-muted">{@render counted(w)}</span>
+          </div>
+        {/if}
+      </div>
+    {/each}
   </div>
 {/snippet}
 
-<div class="flex flex-col xl:h-[296px]">
-  <!-- Beside the chart (xl), the card is as tall as the chart: more limits than fit scroll here, the pager stays below.
+<div class="flex flex-col 2xl:h-[296px]">
+  <!-- Beside the chart (2xl), the card is as tall as the chart: more limits than fit scroll here, the pager stays below.
        Under the chart, on narrower screens, it is as tall as its gauges. -->
   <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 {data.reports.length > 1 ? '' : 'pb-4'}">
     {#if data.reports.length}
       <!-- Every provider sits in the same grid cell, so the card stays as tall as the tallest one and the pager doesn't
-           jump while paging. The others are hidden. The cell takes the body's spare height, and the gauges sit in its middle. -->
+           jump while paging. The others are hidden. The cell takes the body's spare height, and the gauges sit in its middle. The section
+           may be narrower than its text (min-w-0), which then truncates, rather than widening the cell. -->
       <div class="grid flex-1">
         {#each data.reports as r (r.key)}
           {@const n = r.windows.length}
-          <section class="flex flex-col gap-2 [grid-area:1/1] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
+          <section class="flex min-w-0 flex-col gap-2 [grid-area:1/1] {r.key === shownKey ? '' : 'invisible'}" inert={r.key !== shownKey}>
             <header class="flex items-center gap-2.5">
               <span class="h-2.5 w-2.5 shrink-0 rounded-full" style:background={colorFor("provider", r.provider)}></span>
               <span class="text-[13px] font-semibold text-ink">{NAMES[r.provider] ?? r.provider}</span>
               {#if r.plan}<span class="rounded-full border border-line px-2 py-px text-[11px] text-ink-2">{planName(r.plan)}</span>{/if}
               {#if r.account}<span class="truncate font-mono text-[11px] text-muted">{r.account}</span>{/if}
               {#if now - r.observedAt > STALE_MS}<span class="ml-auto shrink-0 text-[11px] text-muted">{t("live.asOf", { ago: relative(r.observedAt) })}</span>{/if}
-              <!-- The key to the gauges, beside the provider rather than under the gauges, where it read as part of them. -->
+              <!-- The key to the gauges, beside the provider rather than under the gauges, where it read as part of them. The
+                   battery always draws what is left, so its solid cells are what is left at the reset, not the use so far. -->
               {#if showForecast && r.windows.some((w) => pace(w))}
                 <span class="ml-auto flex shrink-0 items-center gap-3 text-[11px] text-muted {now - r.observedAt > STALE_MS ? '!ml-3' : ''}">
-                  <span><i class="limit-swatch" style:background={colorFor("provider", r.provider)}></i>{t(mode === "used" ? "live.legend.usedNow" : "live.legend.leftNow")}</span>
+                  <span><i class="limit-swatch" style:background={colorFor("provider", r.provider)}></i>{t(gauge === "battery" ? "live.legend.chargeReset" : mode === "used" ? "live.legend.usedNow" : "live.legend.leftNow")}</span>
                   <span><i class="limit-swatch" style:background={colorFor("provider", r.provider)} style:opacity="0.35"></i>{t(mode === "used" ? "live.legend.pacedUsed" : "live.legend.pacedLeft")}</span>
                 </span>
               {/if}
             </header>
             <div class="flex flex-1 flex-col justify-center">
-              {#if gauge === "rings" && n > 0}
-                {@render rings(r)}
+              {#if gauge === "bars" && n > 0}
+                {@render bars(r)}
               {:else if n === 1}
                 {@render limit(r, r.windows[0]!, true, false)}
               {:else if n > 1}
