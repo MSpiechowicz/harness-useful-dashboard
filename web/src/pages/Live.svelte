@@ -14,7 +14,7 @@
   import Dropdown from "../components/Dropdown.svelte";
   import { rateChart, type RateKind } from "../lib/charts.ts";
   import { colorFor } from "../lib/colors.svelte.ts";
-  import { compact, entityLabel, relative, usd } from "../lib/format.ts";
+  import { compact, entityLabel, relative, until, usd } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
   import { everyWhileVisible } from "../lib/visibility.ts";
@@ -156,6 +156,23 @@
       forced++;
     }
   }
+  // Refresh is on only once it would ask a provider: before, it would answer from the kept reading and show nothing.
+  let clock = $state(Date.now());
+  $effect(() => {
+    const at = limits.data?.refreshAt;
+    if (!at || at <= Date.now()) return;
+    clock = Date.now();
+    const timer = setTimeout(() => (clock = Date.now()), at - Date.now() + 50);
+    const tickTimer = setInterval(() => (clock = Date.now()), 1000);
+    return () => (clearTimeout(timer), clearInterval(tickTimer));
+  });
+  const refreshWait = $derived.by(() => {
+    const at = limits.data?.refreshAt;
+    return at && at > clock ? at - clock : 0;
+  });
+  const refreshTitle = $derived(
+    refreshWait ? t("live.refreshWait", { time: refreshWait < 60_000 ? `${Math.ceil(refreshWait / 1000)}s` : until(clock + refreshWait, clock) }) : t("live.refresh"),
+  );
 
   // Tokens or cost a minute, kept between visits: the rate chart and its two figures follow it.
   let metric = $state<"tokens" | "cost">("tokens");
@@ -358,7 +375,7 @@
             onchange={(g) => store.setLimitGauge(g)}
           />
           <!-- An icon, so the gauge picker keeps its full name beside the title in every language. -->
-          <button class="btn btn-icon" onclick={refreshLimits} disabled={refreshing} title={t("live.refresh")} aria-label={t("live.refresh")}>
+          <button class="btn btn-icon" onclick={refreshLimits} disabled={refreshing || refreshWait > 0} title={refreshTitle} aria-label={t("live.refresh")}>
             <RefreshCw size={14} class={refreshing ? "animate-spin" : ""} />
           </button>
         {/snippet}

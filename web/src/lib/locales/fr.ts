@@ -471,6 +471,7 @@ export const fr: Record<MessageKey, string> = {
   "live.limitsHintLeft": "Ce qu'il reste de chaque limite, et si cela tient jusqu'à la réinitialisation.",
   "live.limitsInfo": "Ce tableau de bord et omp conservent chacun un relevé environ 5 minutes.\nLes fournisseurs comptent le nouvel usage avec quelques minutes de retard. GitHub Copilot met environ 7 minutes.\nActualiser contourne les deux et interroge à nouveau les fournisseurs.",
   "live.refresh": "Actualiser",
+  "live.refreshWait": "Actualisation possible à nouveau dans {time}",
   "live.gauge": "Style de jauge",
   "live.gauge.tach": "Compte-tours",
   "live.gauge.segments": "Arc segmenté",

@@ -26,6 +26,8 @@
     reports: LimitReport[];
     problems: { source: Source; code: string; retryAt?: number }[];
     fetchedAt: number;
+    /** When Refresh next asks a provider; before it the button is off. Older servers send none. */
+    refreshAt?: number;
     /** The plans the sessions in the window ran on, when the limits were asked for a window. */
     active: { provider: string; source: Source }[] | null;
     /** What the gauges show: the share used or the share left. Older servers send none, which is used. */
@@ -161,7 +163,7 @@
   {#if w.reset}{t("live.resetSince")}{:else if w.resetsAt}<span title={new Date(w.resetsAt).toLocaleString()}>{t("live.resetsIn", { time: until(w.resetsAt, now) })}</span>{:else}{t("live.noReset")}{/if}
 {/snippet}
 
-{#snippet counted(w: LimitWindow)}{#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })} · {/if}{@render reset(w)}{/snippet}
+{#snippet counted(w: LimitWindow)}{#if w.used != null && w.limit != null}{t("live.counted", { used: compact(w.used), limit: compact(w.limit) })}{" · "}{/if}{@render reset(w)}{/snippet}
 
 {#snippet chip(c: Chip | null)}
   {#if c}<span class="limit-chip {c.kind}" title={c.text}><span class="min-w-0 truncate">{c.text}</span></span>{/if}

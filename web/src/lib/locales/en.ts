@@ -469,6 +469,7 @@ export const en = {
   "live.limitsHintLeft": "How much of each limit is left, and whether it lasts until the reset.",
   "live.limitsInfo": "This dashboard and omp each keep a reading for about 5 minutes.\nProviders count new use a few minutes late. GitHub Copilot takes about 7.\nRefresh skips both and asks the providers again.",
   "live.refresh": "Refresh",
+  "live.refreshWait": "Refresh is available again in {time}",
   "live.gauge": "Gauge style",
   "live.gauge.tach": "Tachometer",
   "live.gauge.segments": "Segmented arc",

@@ -61,6 +61,8 @@ export interface LimitsResult {
   reports: LimitReport[];
   problems: LimitProblem[];
   fetchedAt: number;
+  /** Epoch ms: when "Refresh" next asks a provider. Before that it would answer from the kept reading. */
+  refreshAt: number;
 }
 
 export interface LimitDeps {
@@ -736,9 +738,11 @@ export class LimitsCache {
     );
     const reports: LimitReport[] = [];
     const problems: LimitProblem[] = [];
+    let refreshAt = Infinity;
     for (const [source] of remote) {
       const c = this.cached.get(source);
       if (!on(source) || !c) continue;
+      refreshAt = Math.min(refreshAt, c.problem ? c.nextAt : c.at + FORCE_AFTER_MS);
       reports.push(...(c.reports.length || !c.problem ? c.reports : storedReports(db, host, source, now)));
       // omp missing is not a problem worth showing: most people don't use it.
       if (c.problem && c.problem.code !== "not-installed") problems.push(c.problem);
@@ -765,6 +769,6 @@ export class LimitsCache {
       const same = `${r.plan}|${w?.used}|${w?.limit}|${w?.resetsAt}`;
       return !seen.has(same) && !!seen.add(same);
     });
-    return { reports: shown, problems, fetchedAt: now };
+    return { reports: shown, problems, fetchedAt: now, refreshAt: Number.isFinite(refreshAt) ? refreshAt : now };
   }
 }
