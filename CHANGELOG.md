@@ -1,3 +1,10 @@
+## [2.10.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.0...v2.10.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* a single plan limit bar stays at the top of the card instead of the middle ([1c4c41b](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/1c4c41bfeb26f9b547423df7a7b3927140c9f1a8))
+
 # [2.10.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.9.2...v2.10.0) (2026-10-25)
 
 
