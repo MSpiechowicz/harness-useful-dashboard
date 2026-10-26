@@ -1,3 +1,10 @@
+## [2.10.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.1...v2.10.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* plan limits Refresh is off until it would ask a provider, and the dot separator keeps its space ([a9d3bff](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a9d3bff735b636ee535bfc1d23a9ae21b6f9c5db))
+
 ## [2.10.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.0...v2.10.1) (2026-10-26)
 
 
