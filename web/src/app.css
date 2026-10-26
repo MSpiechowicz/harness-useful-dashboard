@@ -873,6 +873,10 @@ table.data th.num {
 .limit-bars.limit-dense {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
+/* One or two rows would float in the middle of the tall card: keep them at the top, like the first rows of three. */
+.limit-bars.limit-few {
+  align-content: start;
+}
 @media (min-width: 96rem) {
   .limit-bars {
     display: flex;
@@ -882,6 +886,10 @@ table.data th.num {
     min-height: 0;
     gap: 4px;
     padding-bottom: 6px;
+  }
+  .limit-bars.limit-few {
+    justify-content: flex-start;
+    gap: 20px;
   }
 }
 /* The legend swatch: a short bar in the dial's color, solid or pale. */

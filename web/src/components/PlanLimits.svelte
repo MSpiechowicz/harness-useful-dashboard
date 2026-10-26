@@ -199,7 +199,7 @@
 {#snippet bars(r: LimitReport)}
   {@const color = colorFor("provider", r.provider)}
   {@const dense = r.windows.length >= 4}
-  <div class="limit-bars px-1 {dense ? 'limit-dense' : ''}">
+  <div class="limit-bars px-1 {dense ? 'limit-dense' : ''} {r.windows.length < 3 ? 'limit-few' : ''}">
     {#each r.windows as w (w.id)}
       {@const p = pace(w)}
       {@const c = chipOf(w, p)}
@@ -258,7 +258,7 @@
                 </span>
               {/if}
             </header>
-            <div class="flex flex-1 flex-col justify-center">
+            <div class="flex flex-1 flex-col {gauge === 'bars' && n > 0 ? 'justify-start' : 'justify-center'}">
               {#if gauge === "bars" && n > 0}
                 {@render bars(r)}
               {:else if n === 1}
