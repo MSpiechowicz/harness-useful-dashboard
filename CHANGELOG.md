@@ -1,3 +1,10 @@
+# [2.11.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.4...v2.11.0) (2026-10-28)
+
+
+### Features
+
+* buttons, inputs and dropdowns are Harness Desktop's 36px size on every page, with even table rows ([40e7ec2](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/40e7ec2834263103c1bdc83aa124ed01c8177f27))
+
 ## [2.10.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.3...v2.10.4) (2026-10-28)
 
 
