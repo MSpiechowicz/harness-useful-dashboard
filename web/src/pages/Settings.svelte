@@ -1009,15 +1009,13 @@
 
       <Card id="settings-sources" title={t("settings.sources")} subtitle={t("settings.sourcesHint")} divided>
         {#each SOURCES as src (src.key)}
-          <SettingRow label={t(`settings.source.${src.key}`)} hint={t(`settings.source.${src.key}Hint`)} wide>
-            {#snippet lead()}<Switch bind:checked={cfg!.sources.enabled[src.key]} label={t(`settings.source.${src.key}`)} />{/snippet}
+          <SettingRow label={t(`settings.source.${src.key}`)} hint={t(`settings.source.${src.key}Hint`)} stacked>
+            {#snippet trail()}<Switch bind:checked={cfg!.sources.enabled[src.key]} label={t(`settings.source.${src.key}`)} />{/snippet}
             <PathList bind:paths={dirs[src.key]} disabled={!cfg!.sources.enabled[src.key]} />
           </SettingRow>
           {#if src.key === "copilot-chat" && cfg.ingest && vscode}
             <!-- Exact token counts come from VS Code itself: its settings are pointed at the collector on this machine. -->
-            <SettingRow label={t("settings.vscode")} hint={t("settings.vscodeHint")} wide>
-              <!-- As wide as a source's switch, so the name lines up with the sources above. -->
-              {#snippet lead()}<span class="block w-[44px]" aria-hidden="true"></span>{/snippet}
+            <SettingRow label={t("settings.vscode")} hint={t("settings.vscodeHint")} stacked>
               <div class="flex w-full min-w-0 flex-col gap-2">
                 <div class="flex items-center justify-end gap-2">
                   {#if vscodeInstalled.length}
@@ -1033,11 +1031,11 @@
                   {/if}
                 </div>
                 {#if vscodeError}
-                  <span class="text-right text-xs text-bad">{vscodeError}</span>
+                  <span class="text-xs text-bad">{vscodeError}</span>
                 {:else if vscodeReload}
-                  <span class="text-right text-xs text-ink-2">{t("settings.vscodeReload")}</span>
+                  <span class="text-xs text-ink-2">{t("settings.vscodeReload")}</span>
                 {:else if vscodeState}
-                  <span class="text-right text-xs text-ink-2">{[t(`settings.vscodeState.${vscodeState}` as "settings.vscodeState.off"), vscodeLast].filter(Boolean).join(" · ")}</span>
+                  <span class="text-xs text-ink-2">{[t(`settings.vscodeState.${vscodeState}` as "settings.vscodeState.off"), vscodeLast].filter(Boolean).join(" · ")}</span>
                 {/if}
               </div>
             </SettingRow>
@@ -1049,10 +1047,10 @@
           {/if}
         {/each}
         <!-- Cursor keeps its usage on cursor.com: one row with both ways in, syncing (the switch) and a CSV import. -->
-        <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} wide>
-          {#snippet lead()}<Switch bind:checked={cfg!.cursorSync} label={t("settings.cursorSync")} onchange={toggleCursorSync} />{/snippet}
-          <div class="flex w-full flex-col items-end gap-2">
-            <div class="flex flex-wrap justify-end gap-2">
+        <SettingRow label={t("settings.cursor")} hint={t("settings.cursorHint")} stacked>
+          {#snippet trail()}<Switch bind:checked={cfg!.cursorSync} label={t("settings.cursorSync")} onchange={toggleCursorSync} />{/snippet}
+          <div class="flex w-full flex-col items-start gap-2">
+            <div class="flex flex-wrap gap-2">
               <button class="btn" onclick={syncCursor} disabled={!cfg.cursorSync || cursorSyncing || busy}>
                 {#if cursorSyncing}<Loader size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}{t("settings.cursorSyncNow")}
               </button>
@@ -1061,8 +1059,8 @@
                 <input type="file" accept=".csv,text/csv" class="hidden" onchange={importCursor} />
               </label>
             </div>
-            {#if importMsg}<span class="text-right text-xs text-ink-2">{importMsg}</span>
-            {:else if cfg.cursorSync && cursorStatus}<span class="text-right text-xs" class:text-bad={cursorStatus.bad} class:text-ink-2={!cursorStatus.bad}>{cursorStatus.text}</span>{/if}
+            {#if importMsg}<span class="text-xs text-ink-2">{importMsg}</span>
+            {:else if cfg.cursorSync && cursorStatus}<span class="text-xs" class:text-bad={cursorStatus.bad} class:text-ink-2={!cursorStatus.bad}>{cursorStatus.text}</span>{/if}
           </div>
         </SettingRow>
         {#snippet footer()}

@@ -7,6 +7,7 @@
 </script>
 
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { FolderOpen } from "@lucide/svelte";
   import { send } from "../lib/api.svelte.ts";
   import { t } from "../lib/i18n.svelte.ts";
@@ -16,16 +17,18 @@
   /**
    * A folder path you can type, with a Browse button: the system's folder dialog when this machine has one (the server
    * opens it on this desktop and answers with the path), else a folder browser in the app. The input keeps its own
-   * look, so `class` and the rest go to it. `iconOnly` shrinks the button to its icon for tight rows.
+   * look, so `class` and the rest go to it. `inline` puts Browse inside the field as an icon, with `actions` (more
+   * icons, such as Remove) after it, for a list of folders.
    */
   let {
     value = $bindable(""),
     disabled = false,
     label,
     placeholder = "",
-    iconOnly = false,
+    inline = false,
+    actions,
     class: cls = "",
-  }: { value?: string; disabled?: boolean; label: string; placeholder?: string; iconOnly?: boolean; class?: string } = $props();
+  }: { value?: string; disabled?: boolean; label: string; placeholder?: string; inline?: boolean; actions?: Snippet; class?: string } = $props();
 
   let waiting = $state(false);
   let browsing = $state(false);
@@ -48,12 +51,22 @@
   }
 </script>
 
-<div class="flex w-full min-w-0 items-center gap-2">
-  <input class="input min-w-0 flex-1 {cls}" bind:value {placeholder} {disabled} aria-label={label} spellcheck="false" autocomplete="off" />
-  <button class="btn shrink-0 {iconOnly ? 'btn-icon' : ''}" aria-label={iconOnly ? t("folder.browse") : undefined} title={t("folder.browse")} onclick={browse} disabled={disabled || waiting}>
-    {#if waiting}<Spinner size={14} />{:else}<FolderOpen size={14} />{/if}{#if !iconOnly}{t("folder.browse")}{/if}
-  </button>
-</div>
+{#if inline}
+  <div class="input flex w-full items-center gap-0.5 !pr-1" class:opacity-50={disabled}>
+    <input class="min-w-0 flex-1 bg-transparent outline-none {cls}" bind:value {placeholder} {disabled} aria-label={label} spellcheck="false" autocomplete="off" />
+    <button class="field-btn" aria-label={t("folder.browse")} title={t("folder.browse")} onclick={browse} disabled={disabled || waiting}>
+      {#if waiting}<Spinner size={14} />{:else}<FolderOpen size={14} />{/if}
+    </button>
+    {@render actions?.()}
+  </div>
+{:else}
+  <div class="flex w-full min-w-0 items-center gap-2">
+    <input class="input min-w-0 flex-1 {cls}" bind:value {placeholder} {disabled} aria-label={label} spellcheck="false" autocomplete="off" />
+    <button class="btn shrink-0" title={t("folder.browse")} onclick={browse} disabled={disabled || waiting}>
+      {#if waiting}<Spinner size={14} />{:else}<FolderOpen size={14} />{/if}{t("folder.browse")}
+    </button>
+  </div>
+{/if}
 
 {#if browsing}
   <FolderDialog

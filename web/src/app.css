@@ -332,6 +332,30 @@ body {
   height: 2rem;
   padding: 0;
 }
+/* An icon button inside a field (Browse, Remove in a folder list): smaller than the field, no border of its own. */
+.field-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.field-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+.field-btn:disabled {
+  cursor: default;
+}
+.field-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
 .btn-primary {
   background: var(--accent-fill);
   border-color: transparent;
