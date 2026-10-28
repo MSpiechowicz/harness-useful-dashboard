@@ -1,3 +1,10 @@
+## [2.10.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.3...v2.10.4) (2026-10-28)
+
+
+### Bug Fixes
+
+* data sources put each switch on the right and the folders below it, with Browse and Remove inside the field ([a702dff](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/a702dff35ae21f9876dfd6b3851ff749b428547b))
+
 ## [2.10.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.2...v2.10.3) (2026-10-26)
 
 
