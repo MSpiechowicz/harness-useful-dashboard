@@ -246,7 +246,8 @@
       </colgroup>
       <thead>
         <tr>
-          <th>{t("notes.day")}</th>
+          <!-- As wide as a date being edited (176px, the column's own width) at least, so a drag never cuts it off. -->
+          <th data-min="176">{t("notes.day")}</th>
           <th>{t("notes.text")}</th>
           <th data-fixed data-fit>{t("palette.actions")}</th>
         </tr>

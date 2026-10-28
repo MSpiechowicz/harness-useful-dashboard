@@ -188,7 +188,7 @@
           <input
             bind:this={search}
             bind:value={query}
-            class="input h-8 w-full !border-transparent !bg-transparent pl-7 !outline-none"
+            class="input w-full !border-transparent !bg-transparent pl-7 !outline-none"
             placeholder={t("filter.search")}
             aria-label={t("filter.search")}
             onkeydown={onSearchKey}

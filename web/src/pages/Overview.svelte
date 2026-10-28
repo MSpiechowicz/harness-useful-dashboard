@@ -168,12 +168,12 @@
       {/if}
 
       <div class="grid gap-5 xl:grid-cols-2">
-        <Card title={t("chart.topProjects")} exportName="projects" exportRows={() => projects.data?.rows ?? []}>
+        <Card title={t("chart.topProjects")} subtitle={t("chart.rankedHint", { metric: t(`metric.${store.metric}`) })} exportName="projects" exportRows={() => projects.data?.rows ?? []}>
           {#snippet actions()}{@render more("#/projects", t("nav.projects"))}{/snippet}
           {#snippet table()}{#if projects.data}<BreakdownTable rows={projects.data.rows} dim="project" filterKey="project" compactCols />{/if}{/snippet}
           {#if projects.data}<RankedList rows={projects.data.rows.filter((r) => store.showNoProject || r.key !== "(none)")} dim="project" filterKey="project" loading={projects.loading} />{/if}
         </Card>
-        <Card title={t("chart.topModels")} exportName="models" exportRows={() => models.data?.rows ?? []}>
+        <Card title={t("chart.topModels")} subtitle={t("chart.rankedHint", { metric: t(`metric.${store.metric}`) })} exportName="models" exportRows={() => models.data?.rows ?? []}>
           {#snippet actions()}{@render more("#/models", t("nav.models"))}{/snippet}
           {#snippet table()}{#if models.data}<BreakdownTable rows={models.data.rows} dim="model" filterKey="model" compactCols />{/if}{/snippet}
           {#if models.data}<RankedList rows={models.data.rows} dim="model" filterKey="model" loading={models.loading} />{/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronLeft, ChevronRight } from "@lucide/svelte";
+  import { ChevronLeft, ChevronRight, Ellipsis } from "@lucide/svelte";
   import { i18n, t } from "../lib/i18n.svelte.ts";
 
   interface Props {
@@ -41,10 +41,11 @@
       <button class="btn btn-icon" disabled={page <= 1} aria-label={t("pager.prev")} onclick={() => onpage(page - 1)}><ChevronLeft size={14} /></button>
       {#each items as it, i (it === "gap" ? `gap${i}` : it)}
         {#if it === "gap"}
-          <span class="px-1 text-muted">…</span>
+          <!-- An icon, centred like the numbers beside it: a text "…" sits on the baseline, below their middle. -->
+          <span class="inline-flex h-9 w-5 items-center justify-center text-muted" aria-hidden="true"><Ellipsis size={14} /></span>
         {:else}
           <button
-            class="btn min-w-8 justify-center !px-2 tabular {it === page ? '!border-accent/60 !bg-accent-wash text-accent-ink' : ''}"
+            class="btn min-w-9 justify-center !px-2 tabular {it === page ? '!border-accent/60 !bg-accent-wash text-accent-ink' : ''}"
             aria-current={it === page ? "page" : undefined}
             onclick={() => onpage(it)}>{num.format(it)}</button
           >

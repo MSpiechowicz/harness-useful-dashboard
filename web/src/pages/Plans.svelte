@@ -194,7 +194,7 @@
                   <td class="num text-ink-2">{compact(p.tokens)}</td>
                   <td class="num font-medium">{usd(p.cost)}</td>
                   <td class="num">
-                    <label class="input ml-auto flex h-8 w-32 items-center gap-1.5">
+                    <label class="input ml-auto flex w-32 items-center gap-1.5">
                       <span class="text-xs text-muted">$</span>
                       <input
                         class="h-full min-w-0 flex-1 bg-transparent text-right tabular outline-none"

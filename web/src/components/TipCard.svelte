@@ -30,12 +30,12 @@
 
 {#snippet actions()}
   {#if status !== "hidden"}
-    <button class="btn !h-7 !px-2 text-xs" onclick={() => tipStore.setRead([tip], status !== "read")}>
-      {#if status === "read"}<Undo2 size={13} />{:else}<Check size={13} />{/if}{readLabel}
+    <button class="btn" onclick={() => tipStore.setRead([tip], status !== "read")}>
+      {#if status === "read"}<Undo2 size={14} />{:else}<Check size={14} />{/if}{readLabel}
     </button>
   {/if}
-  <button class="btn !h-7 !px-2 text-xs" onclick={() => tipStore.setHidden(tip, status !== "hidden")}>
-    {#if status === "hidden"}<Eye size={13} />{:else}<EyeOff size={13} />{/if}{hideLabel}
+  <button class="btn" onclick={() => tipStore.setHidden(tip, status !== "hidden")}>
+    {#if status === "hidden"}<Eye size={14} />{:else}<EyeOff size={14} />{/if}{hideLabel}
   </button>
 {/snippet}
 

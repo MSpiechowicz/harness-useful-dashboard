@@ -11,6 +11,9 @@
  * A table with a key can also hide columns (ColumnsMenu.svelte lists them): any but the first, which names its rows,
  * and those without a name (a row's buttons), nor a column whose header has `data-fixed`. Hidden columns are remembered with the widths.
  *
+ * A column whose header has `data-min` (px) never gets narrower than that, by a drag or a width saved before, for a
+ * column whose cells hold fields that must fit (a date being edited). It is not the one that takes what's left.
+ *
  * A column whose header has `data-fit` (a row's buttons, sized by the page to fit them) has no edge and is never given a
  * width here, so it keeps fitting its buttons after other columns are resized.
  */
@@ -174,6 +177,8 @@ function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet 
 
   const widths = load(table, key);
   const fit = ths.map((th) => th.hasAttribute("data-fit"));
+  const min = ths.map((th) => Math.max(MIN, Number(th.dataset.min) || 0));
+  for (const i of Object.keys(widths).map(Number)) if (min[i] !== undefined) widths[i] = Math.max(min[i]!, widths[i]!);
   // Each column's width as the page lays it out, measured once there is a width to measure, before any is set. The
   // first column's is the least it gets: in a fixed layout what the stylesheet leaves it, else what it has.
   let defaults: number[] | null = null;
@@ -185,7 +190,7 @@ function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet 
       const rest = own.slice(1).reduce((a, b) => a + b, 0);
       own[0] = (parseFloat(getComputedStyle(table).minWidth) || 0) - rest;
     }
-    own[0] = Math.max(MIN, own[0]!);
+    own[0] = Math.max(min[0]!, own[0]!);
     return (defaults = own);
   };
   const reset = () => {
@@ -201,19 +206,21 @@ function setup(table: HTMLTableElement, key: string | undefined, set: ColumnSet 
     // the one that gives way rather than pushing the table past the card. It gets as narrow as MIN, the first column
     // as narrow as it was.
     const shown = (i: number) => !fit[i] && !set?.isHidden(i);
-    const free = Math.max(0, ths.findIndex((_, i) => shown(i) && widths[i] === undefined));
+    // With every column resized, the first one without a `data-min` gives way, so a column that must fit its fields
+    // keeps its width and the table its card's.
+    const free = [ths.findIndex((_, i) => shown(i) && widths[i] === undefined), ths.findIndex((th, i) => shown(i) && !th.dataset.min), 0].find((i) => i >= 0)!;
     cols.forEach((c, i) => {
       if (i === free) c.style.width = "auto";
       else if (fit[i]) c.style.width = "";
       else if (i > 0 || widths[i] !== undefined) c.style.width = `${widths[i] ?? d[i]}px`;
     });
     table.style.setProperty("table-layout", "fixed");
-    const least = (i: number) => (fit[i] ? ths[i]!.getBoundingClientRect().width : i === free ? (i === 0 ? (widths[0] ?? d[0]!) : MIN) : (widths[i] ?? d[i]!));
+    const least = (i: number) => (fit[i] ? ths[i]!.getBoundingClientRect().width : i === free ? (i === 0 ? (widths[0] ?? d[0]!) : min[i]!) : (widths[i] ?? d[i]!));
     const width = d.reduce((sum, _, i) => sum + (set?.isHidden(i) ? 0 : least(i)), 0);
     table.style.setProperty("min-width", `${width}px`, "important");
   };
   const resize = (i: number, width: number) => {
-    widths[i] = Math.max(MIN, Math.round(width));
+    widths[i] = Math.max(min[i]!, Math.round(width));
     apply();
   };
 

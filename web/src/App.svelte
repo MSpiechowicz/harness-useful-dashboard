@@ -447,8 +447,8 @@
         {#if showFilters}
           <div class="min-w-0 flex-1"><FilterBar /></div>
         {:else}
-          <!-- As tall as a row of controls (2rem), so the bar keeps its height, with why there are no filters here. -->
-          <div class="flex h-8 min-w-0 flex-1 items-center gap-1.5 text-xs text-muted">
+          <!-- As tall as a row of controls, so the bar keeps its height, with why there are no filters here. -->
+          <div class="flex h-9 min-w-0 flex-1 items-center gap-1.5 text-xs text-muted">
             <Info size={14} class="shrink-0" /><span class="truncate" title={t(noFiltersNote)}>{t(noFiltersNote)}</span>
           </div>
         {/if}

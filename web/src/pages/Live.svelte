@@ -457,7 +457,7 @@
                   </div>
                 </td>
                 <td>
-                  <span class="inline-flex items-center gap-2 text-ink-2">
+                  <span class="inline-flex items-center gap-2 align-top text-ink-2">
                     {@render statusDot(s.status)}
                     {t(`live.status.${s.status}`)}
                   </span>
@@ -480,7 +480,7 @@
                     <!-- Down when closed, up when open, as in the activity table. The count is every subagent in the window. -->
                     <button
                       type="button"
-                      class="btn -my-1 !gap-1 !px-2 tabular"
+                      class="btn !gap-1 !px-2 tabular"
                       aria-expanded={opened}
                       aria-label={`${t(opened ? "live.runs.hide" : "live.runs.show")} (${s.runCount})`}
                       title={t(opened ? "live.runs.hide" : "live.runs.show")}
@@ -509,7 +509,7 @@
                       </div>
                     </td>
                     <td>
-                      <span class="inline-flex items-center gap-2 text-ink-2">
+                      <span class="inline-flex items-center gap-2 align-top text-ink-2">
                         {@render statusDot(r.status, true)}
                         {runStatus(r)}
                       </span>

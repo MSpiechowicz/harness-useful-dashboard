@@ -880,7 +880,7 @@
 </script>
 
 <!-- The cards stay at a reading width, so a control sits near its label. On wide screens the sections are listed beside them. -->
-<div class="settings-page flex items-start gap-8">
+<div class="flex items-start gap-8">
   {#if sections.length}
     <div class="sticky top-[4.5rem] hidden max-h-[calc(100vh-5.5rem)] w-48 shrink-0 overflow-y-auto xl:block">
       <SectionNav items={sections} label={t("settings.sections")} />

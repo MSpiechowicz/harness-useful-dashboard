@@ -273,6 +273,7 @@ export const de: Record<MessageKey, string> = {
   "chart.projectTiles": "Projekte im Vergleich",
   "chart.projectTilesHint": "Gleiche Skala in jeder Kachel, bis {max}",
   "chart.topModels": "Top-Modelle",
+  "chart.rankedHint": "{metric} und Anteil an der Summe · Zum Filtern anklicken",
   "chart.providerSplit": "Anbieter-Verteilung",
   "chart.providerSplitHint": "{metric} nach dem Tool, in dem jede Sitzung lief",
   "chart.activity": "Wann du arbeitest",

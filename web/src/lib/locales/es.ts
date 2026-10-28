@@ -273,6 +273,7 @@ export const es: Record<MessageKey, string> = {
   "chart.projectTiles": "Proyectos en paralelo",
   "chart.projectTilesHint": "Misma escala en cada panel, hasta {max}",
   "chart.topModels": "Modelos principales",
+  "chart.rankedHint": "{metric} y parte del total · Haz clic en uno para filtrar",
   "chart.providerSplit": "Reparto por proveedor",
   "chart.providerSplitHint": "{metric} según la herramienta usada en cada sesión",
   "chart.activity": "Cuándo trabajas",

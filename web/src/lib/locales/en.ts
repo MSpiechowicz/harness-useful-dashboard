@@ -271,6 +271,7 @@ export const en = {
   "chart.projectTiles": "Projects side by side",
   "chart.projectTilesHint": "Same scale in every tile, up to {max}",
   "chart.topModels": "Top models",
+  "chart.rankedHint": "{metric} and share of the total · Click one to filter",
   "chart.providerSplit": "Provider split",
   "chart.providerSplitHint": "{metric} by the tool each session ran in",
   "chart.activity": "When you work",

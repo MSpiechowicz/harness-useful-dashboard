@@ -273,6 +273,7 @@ export const fr: Record<MessageKey, string> = {
   "chart.projectTiles": "Projets côte à côte",
   "chart.projectTilesHint": "Même échelle dans chaque vignette, jusqu'à {max}",
   "chart.topModels": "Principaux modèles",
+  "chart.rankedHint": "{metric} et part du total · Cliquez sur un élément pour filtrer",
   "chart.providerSplit": "Répartition par fournisseur",
   "chart.providerSplitHint": "{metric} selon l'outil utilisé pour chaque session",
   "chart.activity": "Quand vous travaillez",
