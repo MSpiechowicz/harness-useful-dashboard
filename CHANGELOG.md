@@ -1,3 +1,10 @@
+## [2.11.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.0...v2.11.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* a limit at its reset shows a Resetting chip instead of none ([9ff0d16](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/9ff0d1603f97d8ca225d70a496a18c2d2af1e4b2))
+
 # [2.11.0](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.10.4...v2.11.0) (2026-10-28)
 
 
