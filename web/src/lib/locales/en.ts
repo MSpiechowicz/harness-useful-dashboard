@@ -498,6 +498,7 @@ export const en = {
   "live.chip.idle": "Not used yet",
   "live.chip.early": "Too early",
   "live.chip.reached": "Used up",
+  "live.chip.resetting": "Resetting",
   "live.dial.used": "used",
   "live.dial.left": "left",
   "live.legend.usedNow": "Used now",

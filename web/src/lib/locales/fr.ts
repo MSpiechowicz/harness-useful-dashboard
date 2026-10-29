@@ -500,6 +500,7 @@ export const fr: Record<MessageKey, string> = {
   "live.chip.idle": "Inutilisé",
   "live.chip.early": "Trop tôt",
   "live.chip.reached": "Épuisé",
+  "live.chip.resetting": "Réinitialisation",
   "live.dial.used": "utilisé",
   "live.dial.left": "restant",
   "live.legend.usedNow": "Utilisé",

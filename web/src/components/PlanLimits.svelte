@@ -125,6 +125,8 @@
   // The chip under a gauge. None when there is nothing to say: used, but no window to measure the pace against.
   type Chip = { kind: "ok" | "out" | "idle"; text: string };
   function chipOf(w: LimitWindow, p: ReturnType<typeof pace>): Chip | null {
+    // At the reset, before the next reading: the use shown is about to go, so the pace no longer counts. Under 30s reads as "0m".
+    if (!w.reset && w.resetsAt != null && w.resetsAt - now < 30_000) return { kind: "idle", text: t("live.chip.resetting") };
     if (w.usedFraction < 0.02) return { kind: "idle", text: t("live.chip.idle") };
     if (w.usedFraction >= 1) return { kind: "out", text: t("live.chip.reached") };
     if (p) return p.projected > 1 ? { kind: "out", text: t("live.chip.out", { time: clock(p.outAt) }) } : { kind: "ok", text: t("live.chip.ok") };
