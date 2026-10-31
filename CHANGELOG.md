@@ -1,3 +1,10 @@
+## [2.11.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.1...v2.11.2) (2026-10-31)
+
+
+### Bug Fixes
+
+* the app checks for updates on its own again, and the sidebar notice keeps Install on one line ([d765440](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/d765440956bf25a0578edabf6ff33b0a4a6588c6))
+
 ## [2.11.1](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.0...v2.11.1) (2026-10-29)
 
 
