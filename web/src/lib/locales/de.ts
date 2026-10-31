@@ -1211,6 +1211,8 @@ export const de: Record<MessageKey, string> = {
 
   "update.available": "Version {v} ist verfügbar",
   "update.install": "Installieren & neu starten",
+  "update.installShort": "Installieren",
+  "update.restartHint": "Die App startet nach der Installation neu",
   "update.installing": "Wird installiert…",
   "update.manual": "Herunterladen",
   "update.later": "Später",

@@ -62,7 +62,7 @@ async function checkShell(force: boolean): Promise<void> {
 
 async function automaticChecks(): Promise<boolean> {
   try {
-    return (await getJson<{ checkUpdates: boolean }>("/api/settings")).checkUpdates;
+    return (await getJson<{ config: { checkUpdates: boolean } }>("/api/settings")).config.checkUpdates;
   } catch {
     return false;
   }

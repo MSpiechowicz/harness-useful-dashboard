@@ -1209,6 +1209,8 @@ export const en = {
 
   "update.available": "Version {v} is available",
   "update.install": "Install & restart",
+  "update.installShort": "Install",
+  "update.restartHint": "Installing restarts the app",
   "update.installing": "Installing…",
   "update.manual": "Download",
   "update.later": "Later",

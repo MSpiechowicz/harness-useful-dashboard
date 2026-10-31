@@ -13,7 +13,10 @@
      where the app can't update itself) bobs, until it is installing. Still for whoever asked for less motion. -->
 {#if status?.available && snooze.version !== status.latest}
   <div class="rounded-lg border border-line bg-accent-wash px-3 py-2.5 text-xs">
-    <div class="text-ink">{t("update.available", { v: status.latest })}</div>
+    <div class="font-medium text-ink">{t("update.available", { v: status.latest })}</div>
+    {#if isShell() && !updater.installing && !updater.message}
+      <div class="mt-0.5 text-ink-2">{t("update.restartHint")}</div>
+    {/if}
     {#if updater.message}
       <div class="mt-1 text-ink-2">{updater.message}</div>
     {/if}
@@ -25,11 +28,11 @@
     {:else if !updater.installing}
       <div class="mt-2 flex items-center gap-2">
         {#if isShell()}
-          <button class="btn btn-primary !h-7 flex-1 !text-xs" onclick={installUpdate}><span class="update-arrow"><Download size={13} /></span>{t("update.install")}</button>
+          <button class="btn btn-primary !h-7 flex-1 justify-center !text-xs whitespace-nowrap" onclick={installUpdate}><span class="update-arrow"><Download size={13} /></span>{t("update.installShort")}</button>
         {:else if status.releaseUrl}
-          <a class="btn !h-7 flex-1 !text-xs" href={status.releaseUrl} target="_blank" rel="noreferrer"><span class="update-arrow"><Download size={13} /></span>{t("update.manual")}</a>
+          <a class="btn !h-7 flex-1 justify-center !text-xs whitespace-nowrap" href={status.releaseUrl} target="_blank" rel="noreferrer"><span class="update-arrow"><Download size={13} /></span>{t("update.manual")}</a>
         {/if}
-        <button class="h-7 px-3 text-xs text-ink-2 hover:text-ink" onclick={() => (snooze.version = status.latest)}>{t("update.later")}</button>
+        <button class="h-7 px-3 text-xs whitespace-nowrap text-ink-2 hover:text-ink" onclick={() => (snooze.version = status.latest)}>{t("update.later")}</button>
       </div>
     {/if}
   </div>
