@@ -1,3 +1,10 @@
+## [2.11.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.2...v2.11.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update Rust dependencies to clear rustls advisories ([55a3e77](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/55a3e774c43f434bd3bc5401b3eac7b8d687c252))
+
 ## [2.11.2](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.1...v2.11.2) (2026-10-31)
 
 
