@@ -5,6 +5,10 @@ yanked = "deny"
 ignore = [
   # Unmaintained, pulled in only by Tauri's Linux GTK3 bindings (glib-macros); no fix available.
   { id = "RUSTSEC-2024-0370", reason = "transitive via tauri -> gtk3 stack; unmaintained, no vulnerability" },
+  # Unmaintained, pulled in by Tauri's D-Bus plugins (opener, single-instance) through zbus; no fix available.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant, transitive via tauri plugins -> zbus; unmaintained, no vulnerability" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names, transitive via tauri plugins -> zbus; unmaintained, no vulnerability" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive, transitive via tauri plugins -> zbus; unmaintained, no vulnerability" },
 ]
 
 [licenses]
