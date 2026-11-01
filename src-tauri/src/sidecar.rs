@@ -6,7 +6,9 @@
 //! - `HARNESS_DASHBOARD_LANG <en|de|es|fr|pl>` first: the UI language, for the tray menu and the
 //!   loading page's error text;
 //! - `HARNESS_DASHBOARD_READY <sign-in link>`: this process serves the dashboard and keeps running;
-//! - `HARNESS_DASHBOARD_ERROR <localized text>`: it cannot start, and exits non-zero.
+//! - `HARNESS_DASHBOARD_ERROR <localized text>`: it cannot start, and exits non-zero;
+//! - `HARNESS_DASHBOARD_QUIT`: the dashboard asked it to quit (Settings > Quit), sent just before it
+//!   exits, so the app can tell that from a server stopped from outside.
 //!
 //! Any other line is ignored. The app always owns its server: a dashboard that already runs on the
 //! port is stopped by the server before it starts, or reported as an `ERROR`.
@@ -17,8 +19,9 @@
 //! to shut down cleanly (it is killed after [`STOP_GRACE`]). stdout and stderr are read to the end
 //! on their own threads, so a full pipe never blocks the server.
 //!
-//! Once the server is ready, it belongs to the app: when it ends (Settings > Quit, or a crash), the
-//! app quits too. Without a link within [`STARTUP_TIMEOUT`], or when the server fails before
+//! Once the server is ready, it belongs to the app: when it ends after a `QUIT` line, the app quits
+//! too. When it ends otherwise (stopped by an installer or a `kill`, or a crash), the app relaunches
+//! itself, within the limit in [`crate::relaunch`]. Without a link within [`STARTUP_TIMEOUT`], or when the server fails before
 //! sending one, the loading page shows the error.
 
 use std::io::{self, BufRead, BufReader, Read};
@@ -31,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, Runtime, Url};
 
-use crate::{tray, window};
+use crate::{relaunch, tray, window};
 
 /// The server binary's name next to the app's own executable (`bundle.externalBin` without the
 /// target triple, which the bundler drops).
@@ -70,6 +73,8 @@ pub enum Line {
     Ready(Url),
     /// The server cannot start; the text is already in the UI language.
     Error(Option<String>),
+    /// The server is about to exit because the dashboard asked it to.
+    Quit,
 }
 
 /// The contract line `line` carries, or `None` for any other output (and for a link that is not
@@ -81,6 +86,7 @@ pub fn parse_line(line: &str) -> Option<Line> {
     match kind {
         "HARNESS_DASHBOARD_LANG" => LANGUAGES.contains(&value).then(|| Line::Lang(value.to_owned())),
         "HARNESS_DASHBOARD_READY" => sign_in_link(value).map(Line::Ready),
+        "HARNESS_DASHBOARD_QUIT" => value.is_empty().then_some(Line::Quit),
         "HARNESS_DASHBOARD_ERROR" => {
             let text = value.trim();
 
@@ -134,6 +140,8 @@ struct Inner {
     child: Option<Child>,
     /// Kept open while the server runs; dropping it is the shutdown request.
     stdin: Option<ChildStdin>,
+    /// The server said it is quitting because the dashboard asked it to.
+    quit_asked: bool,
 }
 
 impl Default for Sidecar {
@@ -144,6 +152,7 @@ impl Default for Sidecar {
                 lang: "en".to_owned(),
                 child: None,
                 stdin: None,
+                quit_asked: false,
             }),
         }
     }
@@ -296,6 +305,10 @@ fn follow<R: Runtime>(app: &AppHandle<R>, stdout: impl Read, settled: &Sender<()
                 sidecar.lock().lang = lang.clone();
                 continue;
             }
+            Line::Quit => {
+                sidecar.lock().quit_asked = true;
+                continue;
+            }
             Line::Ready(_) => Phase::Owned,
             Line::Error(_) => Phase::Failed,
         };
@@ -313,7 +326,7 @@ fn follow<R: Runtime>(app: &AppHandle<R>, stdout: impl Read, settled: &Sender<()
                 tracing::error!("the dashboard server reported a startup error");
                 window::show_startup_error(app, &sidecar.lang(), text.as_deref());
             }
-            Line::Lang(_) => {}
+            Line::Lang(_) | Line::Quit => {}
         }
     }
 
@@ -322,7 +335,7 @@ fn follow<R: Runtime>(app: &AppHandle<R>, stdout: impl Read, settled: &Sender<()
 
 /// The server's stdout ended: it exited (or is about to).
 fn exited<R: Runtime>(app: &AppHandle<R>, sidecar: &Sidecar) {
-    let (phase, child, stdin) = {
+    let (phase, asked, child, stdin) = {
         let mut inner = sidecar.lock();
         let phase = inner.phase;
 
@@ -330,7 +343,7 @@ fn exited<R: Runtime>(app: &AppHandle<R>, sidecar: &Sidecar) {
             inner.phase = Phase::Failed;
         }
 
-        (phase, inner.child.take(), inner.stdin.take())
+        (phase, inner.quit_asked, inner.child.take(), inner.stdin.take())
     };
 
     let status = child.map(|child| reap(child, stdin));
@@ -341,8 +354,8 @@ fn exited<R: Runtime>(app: &AppHandle<R>, sidecar: &Sidecar) {
             window::show_startup_error(app, &sidecar.lang(), None);
         }
         Phase::Owned => {
-            tracing::info!(?status, "the dashboard server stopped; quitting");
-            app.exit(0);
+            tracing::info!(?status, asked, "the dashboard server stopped");
+            relaunch::on_server_exit(app, phase, asked);
         }
         Phase::Failed | Phase::Stopping => {}
     }
@@ -504,6 +517,18 @@ mod tests {
             Some(Line::Error(Some("Port 4317 jest zajęty".to_owned())))
         );
         assert_eq!(parse_line("HARNESS_DASHBOARD_ERROR"), Some(Line::Error(None)));
+        assert_eq!(parse_line("HARNESS_DASHBOARD_QUIT\n"), Some(Line::Quit));
+    }
+
+    #[test]
+    fn a_quit_line_carries_nothing_else() {
+        for line in [
+            "HARNESS_DASHBOARD_QUIT now",
+            "HARNESS_DASHBOARD_QUITE",
+            "harness_dashboard_quit",
+        ] {
+            assert_eq!(parse_line(line), None, "{line:?}");
+        }
     }
 
     #[test]

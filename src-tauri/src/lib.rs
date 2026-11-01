@@ -8,6 +8,7 @@ mod commands;
 mod error;
 mod lifecycle;
 mod logging;
+mod relaunch;
 mod sidecar;
 #[cfg(test)]
 mod test_support;

@@ -52,8 +52,8 @@ require_release_url() {
 # Stops this user's own dashboard server, so the new app can take its port. The pattern is anchored on the program
 # itself (a path without spaces, then the name): the bare command or "serve ...", which is how the launchers of releases
 # before the desktop app start it. Never "harness-dashboard mcp" or other subcommands: agents keep those running and
-# read usage through them. It also stops the server of a running app (the app then quits), which is intended before an
-# upgrade.
+# read usage through them. It also stops the server of a running app (the app then relaunches with the new version),
+# which is intended before an upgrade.
 stop_old_server() {
   command -v pkill >/dev/null 2>&1 || return 0
   if pkill -u "$(id -u)" -f "^([^ ]*/)?$BIN( serve( .*)?)?\$" >/dev/null 2>&1; then
@@ -147,7 +147,10 @@ if [ "$OS" = "linux" ]; then
   APPIMAGE="$APP_DIR/$BIN.AppImage"
   mkdir -p "$APP_DIR"
   chmod +x "$TMP/$ASSET"
-  mv "$TMP/$ASSET" "$APPIMAGE"
+  # Copy next to the target first, then rename: the rename is atomic, so an app relaunching right now never starts a
+  # half-written AppImage ($TMP is often another filesystem, where mv is a copy).
+  cp "$TMP/$ASSET" "$APPIMAGE.new"
+  mv -f "$APPIMAGE.new" "$APPIMAGE"
   info "Installed $APP_NAME ${TAG:-} to $APPIMAGE"
 
   # The command line tool is a plain binary of the same release. Replacing the old one is safe while it runs.

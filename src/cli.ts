@@ -139,9 +139,12 @@ async function portFree(port: number): Promise<boolean> {
  *   HARNESS_DASHBOARD_LANG <en|de|es|fr|pl|pt> first, the language for the shell's own error text
  *   HARNESS_DASHBOARD_READY <sign-in link>     this process serves the dashboard and keeps running
  *   HARNESS_DASHBOARD_ERROR <text>             the dashboard can't start, this process exits non-zero
+ *   HARNESS_DASHBOARD_QUIT                     the dashboard asked this process to quit, sent just before it exits. Without
+ *                                              it the shell takes an exit for a stop from outside and relaunches itself.
  */
-function shellLine(kind: "LANG" | "READY" | "ERROR", value: string): void {
-  writeSync(1, `HARNESS_DASHBOARD_${kind} ${value.replace(/\s+/g, " ").trim()}\n`);
+function shellLine(kind: "LANG" | "READY" | "ERROR" | "QUIT", value = ""): void {
+  const text = value.replace(/\s+/g, " ").trim();
+  writeSync(1, `HARNESS_DASHBOARD_${kind}${text ? ` ${text}` : ""}\n`);
 }
 
 /** The port is taken. `silent` when what holds it did not answer the probe: it may be a dashboard too busy to answer. */
@@ -243,10 +246,15 @@ async function startServer(args: Args, port: number, shell: boolean): Promise<vo
     app.close();
     process.exit(0);
   };
+  // The dashboard's Quit, and a newer server replacing this one: the shell is told this exit is meant, so it quits too.
+  const quit = () => {
+    if (shell) shellLine("QUIT");
+    shutdown();
+  };
 
   try {
     const assets = await loadAssets();
-    const handler = createHandler(app, assets, { shutdown, ingest }, { token, port, shell });
+    const handler = createHandler(app, assets, { shutdown: quit, ingest }, { token, port, shell });
     server = Bun.serve({ port, hostname: "127.0.0.1", idleTimeout: 60, fetch: handler });
   } catch (err) {
     app.close();

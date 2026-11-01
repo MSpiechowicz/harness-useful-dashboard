@@ -159,6 +159,36 @@ describe("the server run by the app shell", () => {
     expect(await fetch(`http://127.0.0.1:${port}/api/status`).then(() => "answers", () => "gone")).toBe("gone");
   }, 30_000);
 
+  test("tells the shell before it exits when the dashboard asked it to quit", async () => {
+    const { home, token } = homeWithToken();
+    const port = freePort();
+    const app = shell(home, port);
+    expect(await app.next()).toBe("HARNESS_DASHBOARD_LANG en");
+    expect(await app.next()).toMatch(/^HARNESS_DASHBOARD_READY /);
+
+    const quit = await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "X-Harness-Dashboard": "1" } });
+    expect(quit.status).toBe(200);
+
+    expect(await rest(app.next)).toEqual(["HARNESS_DASHBOARD_QUIT"]);
+    expect(await app.proc.exited).toBe(0);
+  }, 30_000);
+
+  // The app relaunches itself after an exit it was not told about: an installer or a kill stopping the server.
+  test.skipIf(process.platform === "win32")("exits without a quit line when it is stopped from outside", async () => {
+    const home = scratchHome("en");
+    const port = freePort();
+    const app = shell(home, port);
+    expect(await app.next()).toBe("HARNESS_DASHBOARD_LANG en");
+    expect(await app.next()).toMatch(/^HARNESS_DASHBOARD_READY /);
+
+    // The signal handlers are installed right after the link is printed.
+    await Bun.sleep(300);
+    app.proc.kill("SIGTERM");
+
+    expect(await app.proc.exited).toBe(0);
+    expect(await rest(app.next)).toEqual([]);
+  }, 30_000);
+
   test("a second launch replaces the dashboard running on the port", async () => {
     const home = scratchHome("en");
     const port = freePort();
