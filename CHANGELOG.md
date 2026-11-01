@@ -1,3 +1,10 @@
+## [2.11.4](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.3...v2.11.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **app:** relaunch with the new version when the server is stopped from outside ([0676211](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/06762112c715f2e6556343be8f9d9cac840bca28))
+
 ## [2.11.3](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.2...v2.11.3) (2026-10-31)
 
 
