@@ -1078,6 +1078,12 @@ and each works on its own.
   take a request from a plain-language ask to reviewed, verified work, with focused audits, delivery and project memory
 - [**Harness Desktop**](https://github.com/MSpiechowicz/harness-useful-desktop): your coding-agent CLI in a native
   desktop window, with chat, sessions, changes to review and its configuration
+- [**Harness Memory**](https://github.com/MSpiechowicz/harness-useful-memory): project memory for your coding agents,
+  as one local MCP server
+- [**Harness Knowledge**](https://github.com/MSpiechowicz/harness-useful-knowledge): project documentation for your
+  coding agents (guides, ADRs, API specs, PDFs), searched with hybrid ranking, as one local MCP server
+- [**Harness Code**](https://github.com/MSpiechowicz/harness-useful-code): a code graph for your coding agents that
+  answers where code is defined, who uses it and what a change breaks, as one local MCP server
 - [**Harness Dashboard**](https://github.com/MSpiechowicz/harness-useful-dashboard) (this repository): token usage
   and cost across your AI coding tools, in one local app
 
