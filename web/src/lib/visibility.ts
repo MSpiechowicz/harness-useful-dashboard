@@ -19,3 +19,35 @@ export function everyWhileVisible(ms: number, fn: () => void): () => void {
     document.removeEventListener("visibilitychange", onVisible);
   };
 }
+
+/**
+ * Like `everyWhileVisible`, but each turn comes `lagMs` after a clock minute starts, so a per-minute count asked for
+ * then has the minute before it complete. Returns the function that stops it.
+ */
+export function everyMinuteWhileVisible(fn: () => void, lagMs = 3_000): () => void {
+  let missed = false;
+  let timer: ReturnType<typeof setTimeout>;
+  const schedule = () => {
+    const now = Date.now();
+    timer = setTimeout(turn, 60_000 - ((now - lagMs) % 60_000));
+  };
+  const turn = () => {
+    try {
+      if (document.hidden) missed = true;
+      else fn();
+    } finally {
+      schedule();
+    }
+  };
+  const onVisible = () => {
+    if (document.hidden || !missed) return;
+    missed = false;
+    fn();
+  };
+  schedule();
+  document.addEventListener("visibilitychange", onVisible);
+  return () => {
+    clearTimeout(timer);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+}

@@ -17,7 +17,7 @@
   import { compact, entityLabel, relative, until, usd } from "../lib/format.ts";
   import { i18n, t } from "../lib/i18n.svelte.ts";
   import { live } from "../lib/live.svelte.ts";
-  import { everyWhileVisible } from "../lib/visibility.ts";
+  import { everyMinuteWhileVisible } from "../lib/visibility.ts";
   import { LIMIT_GAUGES, navigate, store } from "../lib/state.svelte.ts";
   import { resizableColumns } from "../lib/columns.svelte.ts";
 
@@ -123,12 +123,12 @@
     }
   }
 
-  // The page refreshes itself once a minute, usage and limits together. The server rescans the logs first.
-  // A hidden tab skips it and refreshes once shown again.
+  // The page refreshes itself just after each minute starts, usage and limits together, so the minute before is
+  // complete. The server rescans the logs first. A hidden tab skips it and refreshes once shown again.
   let tick = $state(0);
   let now = $state(Date.now());
   $effect(() =>
-    everyWhileVisible(60_000, () => {
+    everyMinuteWhileVisible(() => {
       tick++;
       now = Date.now();
     }),
@@ -190,13 +190,20 @@
     }
   }
   const shown = $derived(data.data ? (metric === "cost" ? data.data.costSeries : data.data.series) : []);
+  // The last minute is the one still running: drawn or averaged, its few seconds would read as usage falling off.
+  // The chart, the rate and the peak go up to the last complete minute. The window's sum still counts it. When the
+  // running minute holds the window's only usage, it stays, so the chart isn't empty beside a sum above zero.
+  const complete = $derived.by(() => {
+    const trimmed = shown.map((s) => ({ key: s.key, data: s.data.slice(0, -1) }));
+    return trimmed.some((s) => s.data.some((v) => v > 0)) ? trimmed : shown;
+  });
   const value = (v: number) => (metric === "cost" ? usd(v) : compact(v));
 
   const total = $derived.by(() => {
     const d = data.data;
     if (!d) return null;
-    const perMinute = shown[0]?.data.map((_, i) => shown.reduce((a, s) => a + (s.data[i] ?? 0), 0)) ?? [];
-    const sum = perMinute.reduce((a, v) => a + v, 0);
+    const perMinute = complete[0]?.data.map((_, i) => complete.reduce((a, s) => a + (s.data[i] ?? 0), 0)) ?? [];
+    const sum = shown.reduce((a, s) => a + s.data.reduce((b, v) => b + v, 0), 0);
     // "Right now" is the last five minutes, so one quiet minute between two prompts doesn't read as zero.
     const recent = perMinute.slice(-5);
     const peak = perMinute.reduce((best, v, i) => (v > best.v ? { v, i } : best), { v: 0, i: -1 });
@@ -224,7 +231,7 @@
       /* not kept */
     }
   }
-  const option = $derived.by(() => (void store.dark, data.data ? rateChart(shown, data.data.from, kind, metric) : null));
+  const option = $derived.by(() => (void store.dark, data.data ? rateChart(complete, data.data.from, kind, metric) : null));
   const statusCount = $derived(
     (data.data?.sessions ?? []).reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()),
   );

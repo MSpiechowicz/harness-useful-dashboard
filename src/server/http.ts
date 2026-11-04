@@ -399,8 +399,10 @@ export function createHandler(app: App, assets: AssetSource, hooks: ServerHooks,
         case "/api/tips/state":
           return json(app.cfg.tips);
         case "/api/live": {
-          // The page polls this once a minute: scan first, so the answer includes what was written since the last scan.
-          if (Date.now() - (app.lastScanAt ?? 0) > 10_000) await app.scanNow().catch(() => {});
+          // The page polls this just after each minute starts: scan first, so the answer includes what was written since
+          // the last scan. A scan from before this minute began may have missed the end of the minute that just closed.
+          const scanned = app.lastScanAt ?? 0;
+          if (Date.now() - scanned > 10_000 || Math.floor(scanned / 60_000) < Math.floor(Date.now() / 60_000)) await app.scanNow().catch(() => {});
           const minutes = Math.min(360, Math.max(5, Math.round(Number(sp.get("minutes")) || 60)));
           // Claude Code's own registry says which of this machine's Claude sessions are still open.
           // The scan may have opened the database again: its queries, not the ones from before it.
