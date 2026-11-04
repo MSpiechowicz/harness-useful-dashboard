@@ -1,3 +1,10 @@
+## [2.11.6](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.5...v2.11.6) (2026-11-04)
+
+
+### Bug Fixes
+
+* **live:** stop the tokens-per-minute chart at the last complete minute ([0e35b88](https://github.com/MSpiechowicz/harness-useful-dashboard/commit/0e35b88f90655a31a065cdde362d830e2ac29f48))
+
 ## [2.11.5](https://github.com/MSpiechowicz/harness-useful-dashboard/compare/v2.11.4...v2.11.5) (2026-11-02)
 
 
