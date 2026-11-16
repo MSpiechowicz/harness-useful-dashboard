@@ -19,7 +19,7 @@ export interface PriceRule extends Price {
 }
 
 /** Raised whenever BUILTIN_PRICES changes: a database priced with an older table is re-priced once on open. */
-export const BUILTIN_PRICES_VERSION = 9;
+export const BUILTIN_PRICES_VERSION = 10;
 
 /**
  * Built-in list prices (first-party API rates). Claude Code and Codex subscription users don't pay these
@@ -29,7 +29,9 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   // Anthropic — cache write 1.25x (5m) / 2x (1h), cache read 0.1x unless noted.
   { pattern: "claude-fable-5-1*", input: 10, output: 50, cacheRead: 0.25 },
   { pattern: "claude-mythos-5-1*", input: 10, output: 50, cacheRead: 0.25 },
+  { pattern: "claude-fable-5-2", input: 8, output: 40, cacheRead: 0.2 },
   { pattern: "claude-fable-5*", input: 10, output: 50 },
+  { pattern: "claude-mythos-5-2", input: 8, output: 40, cacheRead: 0.2 },
   { pattern: "claude-mythos-5*", input: 10, output: 50 },
   { pattern: "claude-opus-5-5*", input: 4, output: 20, cacheRead: 0.2 },
   { pattern: "claude-opus-5*", input: 5, output: 25 },
@@ -92,6 +94,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "gpt-6-astra-law", input: 10, output: 50, cacheRead: 1, cacheWrite5m: 10, cacheWrite1h: 10 },
   { pattern: "gpt-6-rosalind", input: 15, output: 75, cacheRead: 1.5, cacheWrite5m: 18.75, cacheWrite1h: 18.75 },
   { pattern: "gpt-6.1-terra", input: 1, output: 5, cacheRead: 0.05, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
+  { pattern: "gpt-6-cyber", input: 20, output: 100, cacheRead: 2, cacheWrite5m: 25, cacheWrite1h: 25 },
   // Google — up to 200k tokens of context; cache storage is billed per hour, not per write.
   { pattern: "gemini-2.5-pro*", input: 1.25, output: 10, cacheRead: 0.125, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
   { pattern: "gemini-3.1-pro*", input: 2, output: 12, cacheRead: 0.2, cacheWrite5m: 2, cacheWrite1h: 2 },
@@ -106,6 +109,8 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "gemini-3.7-flash*", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite5m: 0.75, cacheWrite1h: 0.75 },
   { pattern: "gemini-3.8-flash*", input: 0.825, output: 4.125, cacheRead: 0.0825, cacheWrite5m: 0.825, cacheWrite1h: 0.825 },
   { pattern: "gemini-4-argon", input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2, cacheWrite1h: 2 },
+  { pattern: "gemini-4-carbon", input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2, cacheWrite1h: 2 },
+  { pattern: "gemini-4-hydrogen", input: 1.5, output: 7.5, cacheRead: 0.075, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
   // Zhipu, as OpenCode, Zed and Cline users often run it.
   { pattern: "glm-4.6v", input: 0.3, output: 0.9, cacheRead: 0.05, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "glm-4.6v-flashx", input: 0.04, output: 0.4, cacheRead: 0.004, cacheWrite5m: 0.04, cacheWrite1h: 0.04 },
@@ -141,15 +146,16 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   // DeepSeek — cache hits are discounted, no cache-write charge.
   { pattern: "deepseek-flash", input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "deepseek-v3.2", input: 0.28, output: 0.4, cacheRead: 0.13, cacheWrite5m: 0.28, cacheWrite1h: 0.28 },
-  { pattern: "deepseek-v4-flash", input: 0.3, output: 1.2, cacheRead: 0.0182, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
-  { pattern: "deepseek-v4-pro", input: 1.6, output: 3.96, cacheRead: 0.135, cacheWrite5m: 1.6, cacheWrite1h: 1.6 },
+  { pattern: "deepseek-v4-flash", input: 0.3, output: 1.2, cacheRead: 0.018, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
+  { pattern: "deepseek-v4-pro", input: 1.32, output: 3.96, cacheRead: 0.25, cacheWrite5m: 1.32, cacheWrite1h: 1.32 },
   // Moonshot (Kimi) — cache hits are discounted, no cache-write charge.
   { pattern: "kimi-k2.5", input: 0.6, output: 3, cacheRead: 0.15, cacheWrite5m: 0.6, cacheWrite1h: 0.6 },
   { pattern: "kimi-k2.6", input: 0.95, output: 4, cacheRead: 0.16, cacheWrite5m: 0.95, cacheWrite1h: 0.95 },
   { pattern: "kimi-k2.7-code", input: 0.95, output: 4, cacheRead: 0.19, cacheWrite5m: 0.95, cacheWrite1h: 0.95 },
-  { pattern: "kimi-k3", input: 3, output: 15, cacheRead: 0.3, cacheWrite5m: 3, cacheWrite1h: 6 },
+  { pattern: "kimi-k3", input: 3, output: 16, cacheRead: 0.3, cacheWrite5m: 3, cacheWrite1h: 6 },
   { pattern: "kimi-k2.7-code-highspeed", input: 1.9, output: 8, cacheRead: 0.38, cacheWrite5m: 1.9, cacheWrite1h: 1.9 },
   { pattern: "kimi-k3.1-pro", input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2, cacheWrite1h: 4 },
+  { pattern: "kimi-k3.1-pro-highspeed", input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 4, cacheWrite1h: 8 },
   // Alibaba Qwen — base tier prices, cache write as listed.
   { pattern: "qwen-coder", input: 0.3, output: 1.5, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "qwen-max", input: 1.6, output: 6.4, cacheRead: 0.16, cacheWrite5m: 1.6, cacheWrite1h: 1.6 },
@@ -168,7 +174,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "codestral-2508", input: 0.3, output: 0.9, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "mistral-large-3", input: 0.5, output: 1.5, cacheRead: 0.05, cacheWrite5m: 0.5, cacheWrite1h: 0.5 },
   { pattern: "mistral-large-4", input: 0.68, output: 2.09, cacheRead: 0.068, cacheWrite5m: 0.68, cacheWrite1h: 0.68 },
-  { pattern: "mistral-large-4-0", input: 1.36, output: 4.18, cacheRead: 0.14, cacheWrite5m: 1.36, cacheWrite1h: 1.36 },
+  { pattern: "mistral-large-4-0", input: 0.7, output: 2.1, cacheRead: 0.07, cacheWrite5m: 0.7, cacheWrite1h: 0.7 },
   { pattern: "mistral-medium", input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
   { pattern: "mistral-medium-3", input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
   { pattern: "mistral-medium-3-5", input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
@@ -178,7 +184,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "minimax-m2", input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m2.1", input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m2.1-lightning", input: 0.3, output: 2.4, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
-  { pattern: "minimax-m2.5", input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
+  { pattern: "minimax-m2.5", input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m2.5-lightning", input: 0.3, output: 2.4, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m3", input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "minimax-m2.1-highspeed", input: 0.6, output: 2.4, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
