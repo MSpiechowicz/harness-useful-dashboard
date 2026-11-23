@@ -19,7 +19,7 @@ export interface PriceRule extends Price {
 }
 
 /** Raised whenever BUILTIN_PRICES changes: a database priced with an older table is re-priced once on open. */
-export const BUILTIN_PRICES_VERSION = 10;
+export const BUILTIN_PRICES_VERSION = 11;
 
 /**
  * Built-in list prices (first-party API rates). Claude Code and Codex subscription users don't pay these
@@ -51,6 +51,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "claude-3-haiku*", input: 0.25, output: 1.25 },
   { pattern: "claude-3-opus*", input: 15, output: 75 },
   { pattern: "claude-haiku-5-5", input: 0.1, output: 0.5 },
+  { pattern: "claude-mythos-preview", input: 10, output: 50 },
   // OpenAI — cached input is 0.1x, no cache-write charge.
   { pattern: "gpt-5-nano*", input: 0.05, output: 0.4, cacheRead: 0.005, cacheWrite5m: 0.05, cacheWrite1h: 0.05 },
   { pattern: "gpt-5-mini*", input: 0.25, output: 2, cacheRead: 0.025, cacheWrite5m: 0.25, cacheWrite1h: 0.25 },
@@ -95,6 +96,9 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "gpt-6-rosalind", input: 15, output: 75, cacheRead: 1.5, cacheWrite5m: 18.75, cacheWrite1h: 18.75 },
   { pattern: "gpt-6.1-terra", input: 1, output: 5, cacheRead: 0.05, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
   { pattern: "gpt-6-cyber", input: 20, output: 100, cacheRead: 2, cacheWrite5m: 25, cacheWrite1h: 25 },
+  { pattern: "gpt-6.2-astra", input: 8, output: 40, cacheRead: 0.4, cacheWrite5m: 10, cacheWrite1h: 10 },
+  { pattern: "gpt-6.2-astra-law", input: 8, output: 40, cacheRead: 0.4, cacheWrite5m: 10, cacheWrite1h: 10 },
+  { pattern: "gpt-6.2-sol", input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2.5, cacheWrite1h: 2.5 },
   // Google — up to 200k tokens of context; cache storage is billed per hour, not per write.
   { pattern: "gemini-2.5-pro*", input: 1.25, output: 10, cacheRead: 0.125, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
   { pattern: "gemini-3.1-pro*", input: 2, output: 12, cacheRead: 0.2, cacheWrite5m: 2, cacheWrite1h: 2 },
@@ -111,6 +115,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "gemini-4-argon", input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2, cacheWrite1h: 2 },
   { pattern: "gemini-4-carbon", input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2, cacheWrite1h: 2 },
   { pattern: "gemini-4-hydrogen", input: 1.5, output: 7.5, cacheRead: 0.075, cacheWrite5m: 1.5, cacheWrite1h: 1.5 },
+  { pattern: "gemini-4-neon", input: 3, output: 15, cacheRead: 0.15, cacheWrite5m: 3, cacheWrite1h: 3 },
   // Zhipu, as OpenCode, Zed and Cline users often run it.
   { pattern: "glm-4.6v", input: 0.3, output: 0.9, cacheRead: 0.05, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "glm-4.6v-flashx", input: 0.04, output: 0.4, cacheRead: 0.004, cacheWrite5m: 0.04, cacheWrite1h: 0.04 },
@@ -147,7 +152,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "deepseek-flash", input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "deepseek-v3.2", input: 0.28, output: 0.4, cacheRead: 0.13, cacheWrite5m: 0.28, cacheWrite1h: 0.28 },
   { pattern: "deepseek-v4-flash", input: 0.3, output: 1.2, cacheRead: 0.018, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
-  { pattern: "deepseek-v4-pro", input: 1.32, output: 3.96, cacheRead: 0.25, cacheWrite5m: 1.32, cacheWrite1h: 1.32 },
+  { pattern: "deepseek-v4-pro", input: 1.32, output: 3.96, cacheRead: 0.2, cacheWrite5m: 1.32, cacheWrite1h: 1.32 },
   // Moonshot (Kimi) — cache hits are discounted, no cache-write charge.
   { pattern: "kimi-k2.5", input: 0.6, output: 3, cacheRead: 0.15, cacheWrite5m: 0.6, cacheWrite1h: 0.6 },
   { pattern: "kimi-k2.6", input: 0.95, output: 4, cacheRead: 0.16, cacheWrite5m: 0.95, cacheWrite1h: 0.95 },
@@ -170,6 +175,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "qwen3.7-max", input: 2.5, output: 7.5, cacheRead: 0.5, cacheWrite5m: 3.125, cacheWrite1h: 2.5 },
   { pattern: "qwen3.8-flash", input: 0.15, output: 0.47, cacheRead: 0.016, cacheWrite5m: 0.2, cacheWrite1h: 0.2 },
   { pattern: "qwen3.8-max", input: 2, output: 6, cacheRead: 0.25, cacheWrite5m: 2, cacheWrite1h: 2 },
+  { pattern: "qwen4-max", input: 1.5, output: 4.5, cacheRead: 0.075, cacheWrite5m: 1.875, cacheWrite1h: 3 },
   // Mistral — cached input is discounted, no cache-write charge.
   { pattern: "codestral-2508", input: 0.3, output: 0.9, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "mistral-large-3", input: 0.5, output: 1.5, cacheRead: 0.05, cacheWrite5m: 0.5, cacheWrite1h: 0.5 },
@@ -184,7 +190,7 @@ export const BUILTIN_PRICES: Omit<PriceRule, "source">[] = [
   { pattern: "minimax-m2", input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m2.1", input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m2.1-lightning", input: 0.3, output: 2.4, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
-  { pattern: "minimax-m2.5", input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
+  { pattern: "minimax-m2.5", input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m2.5-lightning", input: 0.3, output: 2.4, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
   { pattern: "minimax-m3", input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   { pattern: "minimax-m2.1-highspeed", input: 0.6, output: 2.4, cacheRead: 0.03, cacheWrite5m: 0.375, cacheWrite1h: 0.375 },
