@@ -272,6 +272,9 @@ export function parseTs(v: unknown): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
+/** Context a harness hook injects ahead of the user's words; it is no part of the prompt. */
+const INJECTED_RE = /^\s*(?:<harness-hook-context>[\s\S]*?<\/harness-hook-context>\s*)+/;
+
 /** Characters past the limit a text is redacted over before it is cut. */
 const REDACT_MARGIN = 1024;
 
@@ -282,7 +285,8 @@ const REDACT_MARGIN = 1024;
  */
 export function truncate(text: string | null | undefined, limit: number): string | null {
   if (!text || limit <= 0) return null;
-  const t = redact(text.trim().slice(0, limit + REDACT_MARGIN));
+  const t = redact(text.replace(INJECTED_RE, "").trim().slice(0, limit + REDACT_MARGIN));
+  if (!t) return null;
   return t.length > limit ? t.slice(0, limit) + "…" : t;
 }
 

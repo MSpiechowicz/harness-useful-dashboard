@@ -140,7 +140,10 @@ export function relativeTo(file: string, project: string | null, home = homedir(
 export function sessionTitle(alias: string): string {
   // A pasted image is logged as "[Image #1, 1481x890]" ahead of the words: up to two of them are left out of the title.
   const noImage = (x: string) => `ltrim(CASE WHEN ${x} LIKE '[Image #%]%' THEN substr(${x}, instr(${x}, ']') + 1) ELSE ${x} END)`;
-  const text = noImage(noImage("trim(fp.text)"));
+  const closer = "</harness-hook-context>";
+  // Rows stored before ingest dropped the hook's injected block still start with it; one cut inside it has no words left.
+  const noHook = (x: string) => `CASE WHEN ${x} LIKE '<harness-hook-context>%' THEN CASE WHEN instr(${x}, '${closer}') > 0 THEN ltrim(substr(${x}, instr(${x}, '${closer}') + ${closer.length})) ELSE '' END ELSE ${x} END`;
+  const text = noImage(noImage(`(${noHook("trim(fp.text)")})`));
   return `COALESCE(NULLIF(${alias}.title, ''), (SELECT NULLIF(l.title, '') FROM session_labels l WHERE l.session_id = ${alias}.id),
     (SELECT NULLIF(trim(replace(replace(substr(${text}, 1, 160), char(10), ' '), char(13), ' ')), '')
     FROM prompts fp WHERE fp.session_id = ${alias}.id AND fp.text IS NOT NULL AND trim(fp.text) <> '' ORDER BY fp.ts LIMIT 1),
